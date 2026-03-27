@@ -1,0 +1,28 @@
+{
+  "name": "productier-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:seed": "bun src/db/seed.ts",
+    "db:seed-users": "bun src/db/seed-users.ts",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@elysiajs/cors": "^1.2",
+    "@elysiajs/jwt": "^1.4.1",
+    "@elysiajs/static": "^1.4.7",
+    "bcryptjs": "^3.0.3",
+    "drizzle-orm": "^0.38",
+    "elysia": "^1.2",
+    "postgres": "^3.4"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
+    "drizzle-kit": "^0.30"
+  }
+}

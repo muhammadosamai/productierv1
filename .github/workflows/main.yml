@@ -21,7 +21,7 @@ jobs:
           ssh-keyscan -H 216.250.122.193 >> ~/.ssh/known_hosts
       - name: Deploy to Stage Server
         run: |
-          ssh scripts@7216.250.122.193 << 'EOF'
+          ssh scripts@216.250.122.193 << 'EOF'
           set -e
           cd /var/www/productierv1/server
           

@@ -26,8 +26,7 @@ jobs:
           cd /var/www/productierv1/server
           
           echo "Fetching latest code..."
-          git fetch
-          git checkout stage
+
           git fetch origin stage
           git reset --hard origin/stage
           

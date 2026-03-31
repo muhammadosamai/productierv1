@@ -1,21 +1,140 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Loader2, Camera, CheckCircle2, ArrowLeft, User, Shield } from 'lucide-vue-next'
+import { Textarea } from '@/components/ui/textarea'
+import { Loader2, Camera, CheckCircle2, ArrowLeft, User, Shield, Box, AlertTriangle, ImagePlus, X } from 'lucide-vue-next'
 import { useRouter, useRoute } from 'vue-router'
 import RolesSettings from '@/components/settings/RolesSettings.vue'
+import DeleteProductDialog from '@/components/product/DeleteProductDialog.vue'
+import { useProductStore } from '@/stores/products'
 
 const authStore = useAuthStore()
+const productStore = useProductStore()
 const router = useRouter()
 const route = useRoute()
 
 // Tabs — default to query param if provided
-const activeTab = ref<'profile' | 'roles'>(
-  route.query.tab === 'roles' && authStore.user?.role === 'super_admin' ? 'roles' : 'profile'
-)
+type TabType = 'profile' | 'roles' | 'product'
+const initialTab = (): TabType => {
+  const tab = route.query.tab as string
+  if (tab === 'roles' && authStore.user?.role === 'super_admin') return 'roles'
+  if (tab === 'product') return 'product'
+  return 'profile'
+}
+const activeTab = ref<TabType>(initialTab())
 const isSuperAdmin = computed(() => authStore.user?.role === 'super_admin')
+
+// Product settings
+const showDeleteProductDialog = ref(false)
+const canDeleteProduct = computed(() => {
+  const product = productStore.activeProduct
+  if (!product) return false
+  return product.createdByUserId === authStore.user?.id || authStore.user?.role === 'super_admin'
+})
+
+// Product edit form
+const productName = ref('')
+const productDescription = ref('')
+const productLogoPreview = ref<string | null>(null)
+const productLogoFile = ref<File | null>(null)
+const productLogoInputRef = ref<HTMLInputElement | null>(null)
+const productSaving = ref(false)
+const productSaved = ref(false)
+const productError = ref('')
+
+function loadProductForm() {
+  const p = productStore.activeProduct
+  if (p) {
+    productName.value = p.name
+    productDescription.value = p.description || ''
+    productLogoPreview.value = p.logo || null
+    productLogoFile.value = null
+  }
+}
+
+watch(() => productStore.activeProduct?.name, () => loadProductForm())
+watch(activeTab, (tab) => { if (tab === 'product') loadProductForm() })
+
+function triggerProductLogoUpload() {
+  productLogoInputRef.value?.click()
+}
+
+function handleProductLogoChange(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+  productLogoFile.value = file
+  const reader = new FileReader()
+  reader.onload = (e) => { productLogoPreview.value = e.target?.result as string }
+  reader.readAsDataURL(file)
+}
+
+function removeProductLogo() {
+  productLogoPreview.value = null
+  productLogoFile.value = null
+  if (productLogoInputRef.value) productLogoInputRef.value.value = ''
+}
+
+async function uploadProductLogo(): Promise<string | null> {
+  if (!productLogoFile.value) return null
+  const formData = new FormData()
+  formData.append('file', productLogoFile.value)
+  try {
+    const res = await fetch('/api/products/upload-logo', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${authStore.token}` },
+      body: formData,
+    })
+    if (res.ok) {
+      const data = await res.json()
+      return data.logo
+    }
+  } catch { /* ignore */ }
+  return null
+}
+
+async function handleProductSave() {
+  if (!productStore.activeProduct) return
+  productError.value = ''
+  productSaved.value = false
+  productSaving.value = true
+
+  try {
+    let logoUrl: string | null | undefined = undefined
+    if (productLogoFile.value) {
+      logoUrl = await uploadProductLogo()
+      productLogoFile.value = null
+    } else if (!productLogoPreview.value && productStore.activeProduct.logo) {
+      logoUrl = null // Logo was removed
+    }
+
+    const currentName = productStore.activeProduct.name
+    const updates: Record<string, any> = {}
+    if (productName.value.trim() !== currentName) updates.name = productName.value.trim()
+    if (productDescription.value !== (productStore.activeProduct.description || '')) updates.description = productDescription.value || null
+    if (logoUrl !== undefined) updates.logo = logoUrl
+
+    if (Object.keys(updates).length === 0) {
+      productSaved.value = true
+      setTimeout(() => productSaved.value = false, 3000)
+      return
+    }
+
+    const success = await productStore.updateProduct(currentName, updates)
+    if (success) {
+      productSaved.value = true
+      setTimeout(() => productSaved.value = false, 3000)
+    } else {
+      productError.value = 'Failed to update product. The name may already be taken.'
+    }
+  } catch {
+    productError.value = 'Network error. Please try again.'
+  } finally {
+    productSaving.value = false
+  }
+}
 
 // Profile form state
 const name = ref('')
@@ -166,6 +285,21 @@ const userInitials = () => {
           class="absolute bottom-0 left-0 right-0 h-0.5 bg-[#7C5CFC] rounded-t"
         />
       </button>
+      <button
+        v-if="productStore.activeProduct"
+        class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors relative"
+        :class="activeTab === 'product'
+          ? 'text-[#7C5CFC]'
+          : 'text-gray-500 hover:text-gray-700'"
+        @click="activeTab = 'product'"
+      >
+        <Box :size="16" />
+        Product Settings
+        <span
+          v-if="activeTab === 'product'"
+          class="absolute bottom-0 left-0 right-0 h-0.5 bg-[#7C5CFC] rounded-t"
+        />
+      </button>
     </div>
 
     <!-- Profile Tab -->
@@ -284,6 +418,119 @@ const userInitials = () => {
     <!-- Roles Tab -->
     <div v-if="activeTab === 'roles' && isSuperAdmin">
       <RolesSettings />
+    </div>
+
+    <!-- Product Settings Tab -->
+    <div v-if="activeTab === 'product' && productStore.activeProduct" class="max-w-2xl space-y-6">
+      <!-- Product Edit Form -->
+      <div class="bg-white rounded-2xl border border-gray-100 p-8 shadow-sm">
+        <form @submit.prevent="handleProductSave" class="space-y-6">
+          <!-- Success -->
+          <div v-if="productSaved" class="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+            <CheckCircle2 :size="16" class="text-green-500" />
+            <p class="text-sm text-green-700 font-medium">Product updated successfully</p>
+          </div>
+
+          <!-- Error -->
+          <div v-if="productError" class="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+            <p class="text-sm text-red-600">{{ productError }}</p>
+          </div>
+
+          <!-- Logo + Name row -->
+          <div class="flex items-start gap-5">
+            <!-- Logo upload -->
+            <div class="relative group shrink-0">
+              <div
+                class="w-20 h-20 rounded-xl bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden cursor-pointer transition-colors hover:border-[#4857FE] hover:bg-[#4857FE]/5"
+                @click="triggerProductLogoUpload"
+              >
+                <img
+                  v-if="productLogoPreview"
+                  :src="productLogoPreview"
+                  class="w-full h-full object-cover rounded-xl"
+                  alt="Product logo"
+                />
+                <ImagePlus v-else :size="24" class="text-gray-400" />
+              </div>
+              <button
+                v-if="productLogoPreview"
+                type="button"
+                class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center shadow-sm hover:bg-red-600 transition-colors"
+                @click.stop="removeProductLogo"
+              >
+                <X :size="10" />
+              </button>
+              <input
+                ref="productLogoInputRef"
+                type="file"
+                accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml"
+                class="hidden"
+                @change="handleProductLogoChange"
+              />
+            </div>
+
+            <div class="flex-1 space-y-1.5">
+              <label class="text-sm font-medium text-gray-700">Product Name</label>
+              <Input v-model="productName" placeholder="Product name" />
+              <p class="text-xs text-gray-400">Click the icon to change the logo</p>
+            </div>
+          </div>
+
+          <!-- Description -->
+          <div class="space-y-1.5">
+            <label class="text-sm font-medium text-gray-700">Description</label>
+            <Textarea
+              v-model="productDescription"
+              placeholder="Briefly describe the product..."
+              :rows="3"
+            />
+          </div>
+
+          <!-- Submit -->
+          <div class="flex items-center gap-3 pt-2">
+            <Button
+              type="submit"
+              class="bg-[#7C5CFC] hover:bg-[#6B4CE0] h-10 px-6 text-sm font-medium"
+              :disabled="productSaving"
+            >
+              <Loader2 v-if="productSaving" :size="16" class="animate-spin mr-2" />
+              {{ productSaving ? 'Saving...' : 'Save Changes' }}
+            </Button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Danger Zone -->
+      <div v-if="canDeleteProduct" class="rounded-2xl border-2 border-red-200 bg-white overflow-hidden">
+        <div class="px-6 py-4 bg-red-50 border-b border-red-200">
+          <h2 class="text-lg font-semibold text-red-800 flex items-center gap-2">
+            <AlertTriangle :size="18" />
+            Danger Zone
+          </h2>
+        </div>
+        <div class="px-6 py-5">
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <p class="text-sm font-medium text-gray-900">Delete this product</p>
+              <p class="text-sm text-gray-500 mt-0.5">
+                Once you delete a product, there is no going back. All stories, tasks, initiatives, deliveries, and other data will be permanently removed.
+              </p>
+            </div>
+            <button
+              class="shrink-0 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors"
+              @click="showDeleteProductDialog = true"
+            >
+              Delete Product
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Delete Product Dialog -->
+      <DeleteProductDialog
+        v-model:open="showDeleteProductDialog"
+        :product-name="productStore.activeProduct.name"
+      />
     </div>
   </div>
 </template>

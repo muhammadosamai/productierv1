@@ -4,15 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Loader2, Eye, EyeOff } from 'lucide-vue-next'
-import type { UserRole } from '@/types/user'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -21,19 +13,8 @@ const name = ref('')
 const email = ref('')
 const password = ref('')
 const confirmPassword = ref('')
-const role = ref<UserRole>('viewer')
 const showPassword = ref(false)
 const localError = ref('')
-
-const roles: { value: UserRole; label: string }[] = [
-  { value: 'super_admin', label: 'Super Admin' },
-  { value: 'admin', label: 'Admin' },
-  { value: 'product_admin', label: 'Product Admin' },
-  { value: 'product_manager', label: 'Product Manager' },
-  { value: 'business_analyst', label: 'Business Analyst' },
-  { value: 'developer', label: 'Developer' },
-  { value: 'viewer', label: 'Viewer' },
-]
 
 async function handleSubmit() {
   localError.value = ''
@@ -47,7 +28,7 @@ async function handleSubmit() {
     return
   }
 
-  const success = await authStore.register(name.value, email.value, password.value, role.value)
+  const success = await authStore.register(name.value, email.value, password.value)
   if (success) {
     router.push('/')
   }
@@ -99,21 +80,6 @@ function getError() {
               placeholder="you@example.com"
               required
             />
-          </div>
-
-          <!-- Role -->
-          <div class="space-y-1.5">
-            <label class="text-sm font-medium text-gray-700">Role</label>
-            <Select v-model="role">
-              <SelectTrigger>
-                <SelectValue placeholder="Select a role" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="r in roles" :key="r.value" :value="r.value">
-                  {{ r.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
           </div>
 
           <!-- Password -->

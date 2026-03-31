@@ -2,8 +2,8 @@ import { Elysia, t } from 'elysia'
 import { jwt } from '@elysiajs/jwt'
 import bcrypt from 'bcryptjs'
 import { db } from '../db'
-import { users, tasks, stories, initiatives, deliveries, activities } from '../db/schema'
-import { eq, ilike, or, sql, arrayContains } from 'drizzle-orm'
+import { users, tasks, stories, initiatives, deliveries, activities, productInvites, productMembers } from '../db/schema'
+import { eq, ilike, or, sql, arrayContains, and } from 'drizzle-orm'
 import { writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -45,13 +45,32 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
     // Hash password
     const hashedPassword = await bcrypt.hash(body.password, 10)
 
-    // Create user
+    // Create user (always default to viewer — roles assigned by admins)
     const [user] = await db.insert(users).values({
       name: body.name,
       email: body.email.toLowerCase(),
       password: hashedPassword,
-      role: body.role || 'viewer',
+      role: 'viewer',
     }).returning()
+
+    // Auto-accept any pending invites for this email
+    const pendingInvites = await db.select().from(productInvites)
+      .where(and(
+        eq(productInvites.email, body.email.toLowerCase()),
+        eq(productInvites.status, 'pending'),
+      ))
+
+    for (const invite of pendingInvites) {
+      await db.insert(productMembers).values({
+        product: invite.product,
+        userId: user!.id,
+        role: invite.role,
+      }).onConflictDoNothing()
+
+      await db.update(productInvites)
+        .set({ status: 'accepted' })
+        .where(eq(productInvites.id, invite.id))
+    }
 
     // Generate token
     const token = await jwt.sign({ userId: user!.id, role: user!.role })
@@ -72,11 +91,6 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
       name: t.String({ minLength: 1 }),
       email: t.String({ minLength: 1 }),
       password: t.String({ minLength: 6 }),
-      role: t.Optional(t.Union([
-        t.Literal('super_admin'), t.Literal('admin'), t.Literal('product_admin'),
-        t.Literal('product_manager'), t.Literal('business_analyst'),
-        t.Literal('developer'), t.Literal('viewer'),
-      ])),
     }),
   })
 

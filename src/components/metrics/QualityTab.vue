@@ -135,19 +135,27 @@ watch(
         <div class="bg-white rounded-xl p-4 sm:p-5 border border-gray-100">
           <div class="flex items-center gap-2 mb-2">
             <RefreshCw :size="14" class="text-amber-500" />
-            <span class="text-xs font-medium text-gray-400 uppercase">Rework Rate</span>
+            <span class="text-xs font-medium text-gray-400 uppercase">Rework / 100</span>
           </div>
-          <div class="text-2xl font-bold text-gray-900">{{ data.reworkRate }}%</div>
-          <div class="text-xs text-gray-400 mt-1">{{ data.reworkCount }} tasks / {{ data.totalCompleted }} completed</div>
+          <div class="text-2xl font-bold text-gray-900">{{ data.reworkPer100Completed.toFixed(1) }}</div>
+          <span class="inline-flex mt-1 px-2 py-0.5 rounded-full text-[10px] font-medium capitalize"
+            :class="data.trend.reworkStatus === 'healthy' ? 'bg-emerald-50 text-emerald-700' : data.trend.reworkStatus === 'watch' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'">
+            {{ data.trend.reworkStatus }} (limit {{ data.trend.reworkThreshold }})
+          </span>
+          <div class="text-xs text-gray-400 mt-1">{{ data.reworkEventCount }} events · slope {{ data.trend.reworkSlope > 0 ? '+' : '' }}{{ data.trend.reworkSlope }}</div>
         </div>
         <div class="bg-white rounded-xl p-4 sm:p-5 border border-gray-100">
           <div class="flex items-center gap-2 mb-2">
             <Bug :size="14" class="text-red-500" />
-            <span class="text-xs font-medium text-gray-400 uppercase">Reopen Rate</span>
+            <span class="text-xs font-medium text-gray-400 uppercase">Reopen / 100</span>
             <MetricHelpPopover metric-key="reopen_rate" />
           </div>
-          <div class="text-2xl font-bold text-gray-900">{{ data.reopenRate }}%</div>
-          <div class="text-xs text-gray-400 mt-1">{{ data.reopenCount }} events / {{ data.totalCompleted }} completed</div>
+          <div class="text-2xl font-bold text-gray-900">{{ data.reopenPer100Completed.toFixed(1) }}</div>
+          <span class="inline-flex mt-1 px-2 py-0.5 rounded-full text-[10px] font-medium capitalize"
+            :class="data.trend.reopenStatus === 'healthy' ? 'bg-emerald-50 text-emerald-700' : data.trend.reopenStatus === 'watch' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'">
+            {{ data.trend.reopenStatus }} (limit {{ data.trend.reopenThreshold }})
+          </span>
+          <div class="text-xs text-gray-400 mt-1">{{ data.reopenCount }} events · slope {{ data.trend.reopenSlope > 0 ? '+' : '' }}{{ data.trend.reopenSlope }}</div>
         </div>
         <div class="bg-white rounded-xl p-4 sm:p-5 border border-gray-100">
           <div class="flex items-center gap-2 mb-2">

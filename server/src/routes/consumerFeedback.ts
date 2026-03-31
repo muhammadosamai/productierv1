@@ -17,6 +17,41 @@ import {
   toListEnvelope,
 } from '../lib/listContract'
 
+const FEEDBACK_ACKNOWLEDGED_STATUSES = new Set([
+  'acknowledged',
+  'investigating',
+  'resolved',
+  'wont_fix',
+  'duplicate',
+])
+
+const FEEDBACK_RESOLVED_STATUSES = new Set([
+  'resolved',
+  'wont_fix',
+  'duplicate',
+])
+
+function applyFeedbackLifecycleTimestamps(
+  existing: {
+    status: string
+    acknowledgedAt: Date | null
+    resolvedAt: Date | null
+  },
+  nextStatus: unknown,
+  updateData: Record<string, unknown>,
+) {
+  if (typeof nextStatus !== 'string') return
+  const normalizedStatus = nextStatus.trim()
+  if (!normalizedStatus || normalizedStatus === existing.status) return
+  const now = new Date()
+  if (FEEDBACK_ACKNOWLEDGED_STATUSES.has(normalizedStatus) && !existing.acknowledgedAt) {
+    updateData.acknowledgedAt = now
+  }
+  if (FEEDBACK_RESOLVED_STATUSES.has(normalizedStatus) && !existing.resolvedAt) {
+    updateData.resolvedAt = now
+  }
+}
+
 export const consumerFeedbackRoutes = new Elysia({ prefix: '/api/consumer-feedbacks' })
   .use(authPlugin)
 
@@ -79,6 +114,8 @@ export const consumerFeedbackRoutes = new Elysia({ prefix: '/api/consumer-feedba
         assignedToUserId: i.assignedToUserId,
         tags: i.tags,
         upvoteCount: i.upvoteCount,
+        acknowledgedAt: i.acknowledgedAt,
+        resolvedAt: i.resolvedAt,
         createdAt: i.createdAt,
         updatedAt: i.updatedAt,
         assignedToUser: i.assignedToUser,
@@ -167,6 +204,8 @@ export const consumerFeedbackRoutes = new Elysia({ prefix: '/api/consumer-feedba
       assignedToUserId: i.assignedToUserId,
       tags: i.tags,
       upvoteCount: i.upvoteCount,
+      acknowledgedAt: i.acknowledgedAt,
+      resolvedAt: i.resolvedAt,
       createdAt: i.createdAt,
       updatedAt: i.updatedAt,
       assignedToUser: i.assignedToUser,
@@ -352,6 +391,7 @@ export const consumerFeedbackRoutes = new Elysia({ prefix: '/api/consumer-feedba
     for (const [k, v] of Object.entries(body)) {
       if (v !== undefined) updateData[k] = v
     }
+    applyFeedbackLifecycleTimestamps(existing, body.status, updateData)
 
     const [updated] = await db.update(consumerFeedbacks)
       .set(updateData)

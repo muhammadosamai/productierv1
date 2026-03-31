@@ -56,6 +56,33 @@ const forecastSpreadDays = computed(() => {
   return Math.max(0, Math.round((p85 - p50) / 86400000))
 })
 
+const confidenceDriverRows = computed(() => {
+  if (!data.value) return []
+  return [
+    {
+      key: 'scope',
+      label: 'Scope churn',
+      value: `${data.value.confidenceDrivers.scopeChurn.value}`,
+      contribution: data.value.confidenceDrivers.scopeChurn.contribution,
+      penalty: data.value.confidenceDrivers.scopeChurn.penalty,
+    },
+    {
+      key: 'variance',
+      label: 'Schedule variance',
+      value: `${data.value.confidenceDrivers.scheduleVariance.value}d`,
+      contribution: data.value.confidenceDrivers.scheduleVariance.contribution,
+      penalty: data.value.confidenceDrivers.scheduleVariance.penalty,
+    },
+    {
+      key: 'stability',
+      label: 'Completion stability',
+      value: `${data.value.confidenceDrivers.completionStability.value} (std) / ${data.value.confidenceDrivers.completionStability.baseline} (avg)`,
+      contribution: data.value.confidenceDrivers.completionStability.contribution,
+      penalty: data.value.confidenceDrivers.completionStability.penalty,
+    },
+  ]
+})
+
 async function fetchData() {
   loading.value = true
   error.value = null
@@ -192,6 +219,23 @@ watch(
           <div class="rounded-lg bg-gray-50 px-3 py-2">
             <p class="text-gray-600">Uncertainty spread</p>
             <p class="font-semibold text-gray-700 mt-0.5">{{ forecastSpreadDays !== null ? `${forecastSpreadDays} days` : '—' }}</p>
+          </div>
+        </div>
+        <div class="mt-3 rounded-lg border border-gray-100">
+          <div class="px-3 py-2 border-b border-gray-100">
+            <p class="text-xs font-semibold text-gray-700">Confidence Drivers</p>
+          </div>
+          <div class="divide-y divide-gray-100">
+            <div v-for="driver in confidenceDriverRows" :key="driver.key" class="px-3 py-2 flex items-center justify-between gap-3 text-xs">
+              <div>
+                <p class="font-medium text-gray-700">{{ driver.label }}</p>
+                <p class="text-gray-500">{{ driver.value }}</p>
+              </div>
+              <div class="text-right">
+                <p class="font-semibold text-emerald-700">+{{ driver.contribution }}</p>
+                <p class="text-gray-400">penalty {{ driver.penalty }}</p>
+              </div>
+            </div>
           </div>
         </div>
         <p class="mt-2 text-[11px] text-gray-500">

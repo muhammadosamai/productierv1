@@ -281,6 +281,16 @@ describe('organization tenant isolation', () => {
     )
     expect(ownMetricsRes.status).toBe(200)
 
+    const ownExecutiveMetricsRes = await apiRequest(
+      app,
+      `/api/organizations/${orgBId}/metrics/executive-kpis?scopeMode=all&period=30`,
+      {
+        method: 'GET',
+        token: actorB.token,
+      },
+    )
+    expect(ownExecutiveMetricsRes.status).toBe(200)
+
     const crossMetricsRes = await apiRequest(
       app,
       `/api/organizations/${orgBId}/metrics/dashboard?scopeMode=all&period=30`,
@@ -290,6 +300,16 @@ describe('organization tenant isolation', () => {
       },
     )
     expect(crossMetricsRes.status).toBe(403)
+
+    const crossExecutiveMetricsRes = await apiRequest(
+      app,
+      `/api/organizations/${orgBId}/metrics/executive-kpis?scopeMode=all&period=30`,
+      {
+        method: 'GET',
+        token: actorA.token,
+      },
+    )
+    expect(crossExecutiveMetricsRes.status).toBe(403)
 
     const mismatchMetricsRes = await apiRequest(
       app,

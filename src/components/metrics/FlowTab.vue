@@ -114,13 +114,14 @@ const percentileDatasets = computed(() => {
     <template v-else>
       <MetricsMetaStrip :meta="data.meta" />
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <div class="bg-white rounded-xl p-4 sm:p-5 border border-gray-100">
           <div class="flex items-center gap-2 mb-2">
             <Clock :size="14" class="text-blue-500" />
             <span class="text-xs font-medium text-gray-400 uppercase">Median Cycle</span>
           </div>
           <div class="text-xl font-bold text-gray-900">{{ formatDays(data.cycleTime.median) }}</div>
+          <div class="text-[11px] text-gray-400 mt-1">n={{ data.cycleTime.sampleSize }}</div>
         </div>
         <div class="bg-white rounded-xl p-4 sm:p-5 border border-gray-100">
           <div class="flex items-center gap-2 mb-2">
@@ -138,10 +139,25 @@ const percentileDatasets = computed(() => {
         </div>
         <div class="bg-white rounded-xl p-4 sm:p-5 border border-gray-100">
           <div class="flex items-center gap-2 mb-2">
+            <Clock :size="14" class="text-sky-500" />
+            <span class="text-xs font-medium text-gray-400 uppercase">Median Lead</span>
+          </div>
+          <div class="text-xl font-bold text-gray-900">{{ formatDays(data.leadTime.median) }}</div>
+          <div class="text-[11px] text-gray-400 mt-1">n={{ data.leadTime.sampleSize }}</div>
+        </div>
+        <div class="bg-white rounded-xl p-4 sm:p-5 border border-gray-100">
+          <div class="flex items-center gap-2 mb-2">
             <Clock :size="14" class="text-violet-500" />
             <span class="text-xs font-medium text-gray-400 uppercase">P85 Lead</span>
           </div>
           <div class="text-xl font-bold text-gray-900">{{ formatDays(data.leadTime.p85) }}</div>
+        </div>
+        <div class="bg-white rounded-xl p-4 sm:p-5 border border-gray-100">
+          <div class="flex items-center gap-2 mb-2">
+            <Clock :size="14" class="text-gray-500" />
+            <span class="text-xs font-medium text-gray-400 uppercase">P95 Lead</span>
+          </div>
+          <div class="text-xl font-bold text-gray-900">{{ formatDays(data.leadTime.p95) }}</div>
         </div>
         <div class="bg-white rounded-xl p-4 sm:p-5 border border-gray-100">
           <div class="flex items-center gap-2 mb-2">

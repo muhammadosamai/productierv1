@@ -58,14 +58,14 @@ Use the safe migration wrapper to avoid partial rollouts and silent schema drift
 
    ```bash
    cd server
-   DATABASE_URL=postgresql://sarimalavi@postgres:5432/productier bun run db:migration:status
+   DATABASE_URL=postgresql://<db-user>@postgres:5432/productier bun run db:migration:status
    ```
 
 3. Apply safe migration flow (includes migrate + strict verify + post-cutover integrity checks):
 
    ```bash
    cd server
-   SAFE_MIGRATION_BACKUP_CONFIRMED=true DATABASE_URL=postgresql://sarimalavi@postgres:5432/productier bun run db:migrate:safe
+   SAFE_MIGRATION_BACKUP_CONFIRMED=true DATABASE_URL=postgresql://<db-user>@postgres:5432/productier bun run db:migrate:safe
    ```
 
 4. If any step fails, stop rollout and follow the rollback procedure before promoting traffic.

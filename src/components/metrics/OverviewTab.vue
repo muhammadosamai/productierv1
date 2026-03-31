@@ -60,6 +60,11 @@ const riskFilterNote = computed(() => {
   return null
 })
 
+const topRiskOwners = computed(() => {
+  if (!data.value) return []
+  return data.value.atRiskWork.byOwner.slice(0, 8)
+})
+
 const atRiskCompositionTrend = computed(() => {
   if (!data.value) {
     return {
@@ -185,6 +190,18 @@ function trendColor(dir: string, positive = true) {
   return dir === 'up' ? 'text-red-500' : 'text-emerald-500'
 }
 
+function ownerTypeBadge(ownerType: 'user' | 'team' | 'unassigned') {
+  if (ownerType === 'user') return 'bg-blue-50 text-blue-700'
+  if (ownerType === 'team') return 'bg-violet-50 text-violet-700'
+  return 'bg-gray-100 text-gray-600'
+}
+
+function ownerTypeLabel(ownerType: 'user' | 'team' | 'unassigned') {
+  if (ownerType === 'user') return 'Member'
+  if (ownerType === 'team') return 'Team'
+  return 'Unassigned'
+}
+
 function riskChipTaskStatus(
   chip: 'all' | 'overdue' | 'blocked' | 'agingWip' | 'missingOwner' | 'missingReviewer',
 ): 'all' | 'overdue' | 'blocked' | 'in_progress' | 'in_review' {
@@ -285,6 +302,11 @@ function openRiskTasks(
         <p class="text-xs text-gray-500 mt-3">
           Selected risk workload: <span class="font-semibold text-gray-700">{{ riskChipCount }}</span>
         </p>
+        <p class="text-xs text-gray-500 mt-1">
+          Time in risk: median {{ formatDays(data.atRiskWork.timeInRisk.medianDays) }}
+          · p85 {{ formatDays(data.atRiskWork.timeInRisk.p85Days) }}
+          · n={{ data.atRiskWork.timeInRisk.sampleSize }}
+        </p>
         <button
           type="button"
           class="mt-2 text-xs font-medium text-[#4857FE] hover:text-[#3E4BDE]"
@@ -306,6 +328,43 @@ function openRiskTasks(
             :height="180"
             y-title="Tasks"
           />
+        </div>
+        <div class="mt-4 rounded-lg border border-gray-100">
+          <div class="px-3 py-2 border-b border-gray-100">
+            <p class="text-xs font-semibold text-gray-700">Ownership Rollup</p>
+          </div>
+          <div v-if="topRiskOwners.length > 0" class="overflow-x-auto">
+            <table class="w-full text-xs min-w-[680px]">
+              <thead>
+                <tr class="border-b border-gray-50 text-left text-gray-400">
+                  <th class="px-3 py-2 font-medium">Owner</th>
+                  <th class="px-3 py-2 font-medium text-center">At Risk</th>
+                  <th class="px-3 py-2 font-medium text-center">Overdue</th>
+                  <th class="px-3 py-2 font-medium text-center">Blocked</th>
+                  <th class="px-3 py-2 font-medium text-center">Aging WIP</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="owner in topRiskOwners" :key="`${owner.ownerType}:${owner.ownerId || 'none'}`" class="border-b border-gray-50">
+                  <td class="px-3 py-2">
+                    <div class="flex items-center gap-2">
+                      <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium" :class="ownerTypeBadge(owner.ownerType)">
+                        {{ ownerTypeLabel(owner.ownerType) }}
+                      </span>
+                      <span class="font-medium text-gray-700 truncate">{{ owner.ownerName }}</span>
+                    </div>
+                  </td>
+                  <td class="px-3 py-2 text-center font-medium text-gray-700">{{ owner.taskCount }}</td>
+                  <td class="px-3 py-2 text-center text-red-600">{{ owner.overdue }}</td>
+                  <td class="px-3 py-2 text-center text-amber-600">{{ owner.blocked }}</td>
+                  <td class="px-3 py-2 text-center text-violet-600">{{ owner.agingWip }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="px-3 py-5 text-center text-xs text-gray-400">
+            No ownership rollup available for current risk sample.
+          </div>
         </div>
       </div>
 
@@ -353,7 +412,15 @@ function openRiskTasks(
             </div>
           </div>
           <div class="text-2xl font-bold text-gray-900">{{ data.kpi.onTimeRate }}%</div>
-          <div class="text-xs text-gray-400 mt-1">{{ data.kpi.overdueCount }} overdue</div>
+          <div class="text-xs text-gray-500 mt-1">
+            Planned {{ data.kpi.onTimeRatePlanned }}% (n={{ data.kpi.onTimeDueCountPlanned }})
+          </div>
+          <div class="text-xs text-gray-500">
+            Unplanned {{ data.kpi.onTimeRateUnplanned }}% (n={{ data.kpi.onTimeDueCountUnplanned }})
+          </div>
+          <div class="text-xs text-gray-400 mt-1">
+            Due-date quality {{ data.kpi.dueDateQualityRate }}% · {{ data.kpi.overdueCount }} overdue
+          </div>
         </div>
 
         <div class="bg-white rounded-xl p-5 border border-gray-100">

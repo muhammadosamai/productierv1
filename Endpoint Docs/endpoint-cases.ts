@@ -1273,6 +1273,7 @@ export function buildEndpointCases(): EndpointCase[] {
   // Metrics
   const metricPaths = [
     { id: 'dashboard', path: '/api/metrics/dashboard', query: { productId: 'product', period: 30 } },
+    { id: 'team-lead-kpis', path: '/api/metrics/team-lead-kpis', query: { productId: 'product', period: 30 } },
     { id: 'throughput', path: '/api/metrics/throughput', query: { productId: 'product', period: 90, granularity: 'week' } },
     { id: 'flow', path: '/api/metrics/flow', query: { productId: 'product', period: 90 } },
     { id: 'quality', path: '/api/metrics/quality', query: { productId: 'product', period: 90 } },
@@ -1348,6 +1349,15 @@ export function buildEndpointCases(): EndpointCase[] {
         if (metric.id === 'throughput') {
           if (typeof data.totalCompleted !== 'number' || !Array.isArray(data.completedOverTime)) {
             throw new Error('metrics.throughput.scope-all.get expected totalCompleted and completedOverTime')
+          }
+          return
+        }
+
+        if (metric.id === 'team-lead-kpis') {
+          const order = Array.isArray(data.order) ? data.order : []
+          const items = data.items as Record<string, unknown> | undefined
+          if (order.length !== 11 || !items || typeof items.review_sla_adherence !== 'object') {
+            throw new Error('metrics.team-lead-kpis.scope-all.get expected 11 KPI entries and review_sla_adherence item')
           }
           return
         }

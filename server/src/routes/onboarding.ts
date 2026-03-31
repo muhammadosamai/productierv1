@@ -22,7 +22,7 @@ import { requireAuth, requireOrganizationAccess } from '../lib/authz'
 import { computeChanges, logActivity } from '../lib/logActivity'
 import { PRODUCT_CREATOR_MEMBER_ROLE } from '../lib/productMembershipPolicy'
 import { consumeRateLimit, resolveClientAddress } from '../lib/inMemoryRateLimiter'
-import { isMissingColumnError } from '../lib/schemaMismatch'
+import { isMissingColumnError, isSchemaMismatchError, schemaMismatchMessage } from '../lib/schemaMismatch'
 import { getStorage } from '../storage'
 
 const ORGANIZATION_MANAGER_ROLES = ['owner', 'admin'] as const
@@ -670,26 +670,34 @@ export const onboardingRoutes = new Elysia({ prefix: '/api/onboarding' })
     )
     if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
 
-    const rows = await db.query.organizationInvites.findMany({
-      where: eq(organizationInvites.organizationId, query.organizationId),
-      orderBy: [desc(organizationInvites.createdAt)],
-    })
+    try {
+      const rows = await db.query.organizationInvites.findMany({
+        where: eq(organizationInvites.organizationId, query.organizationId),
+        orderBy: [desc(organizationInvites.createdAt)],
+      })
 
-    return rows.map((row) => ({
-      id: row.id,
-      organizationId: row.organizationId,
-      email: row.email,
-      inviteeName: row.inviteeName,
-      role: row.role,
-      workspaceProductId: row.workspaceProductId,
-      organizationTeamId: row.organizationTeamId,
-      titleId: row.titleId,
-      status: row.status,
-      expiresAt: row.expiresAt,
-      acceptedAt: row.acceptedAt,
-      cancelledAt: row.cancelledAt,
-      createdAt: row.createdAt,
-    }))
+      return rows.map((row) => ({
+        id: row.id,
+        organizationId: row.organizationId,
+        email: row.email,
+        inviteeName: row.inviteeName,
+        role: row.role,
+        workspaceProductId: row.workspaceProductId,
+        organizationTeamId: row.organizationTeamId,
+        titleId: row.titleId,
+        status: row.status,
+        expiresAt: row.expiresAt,
+        acceptedAt: row.acceptedAt,
+        cancelledAt: row.cancelledAt,
+        createdAt: row.createdAt,
+      }))
+    } catch (error) {
+      if (isSchemaMismatchError(error)) {
+        set.status = 503
+        return { error: schemaMismatchMessage('Onboarding invite schema') }
+      }
+      throw error
+    }
   }, {
     query: t.Object({
       organizationId: t.String({ minLength: 1 }),
@@ -722,179 +730,187 @@ export const onboardingRoutes = new Elysia({ prefix: '/api/onboarding' })
       return { error: `Provide between 1 and ${MAX_INVITES_PER_REQUEST} invites` }
     }
 
-    const [pendingCountRow] = await db
-      .select({ value: sql<number>`count(*)::int` })
-      .from(organizationInvites)
-      .where(and(
-        eq(organizationInvites.organizationId, body.organizationId),
-        eq(organizationInvites.status, 'pending'),
-        gt(organizationInvites.expiresAt, new Date())
-      ))
-    const pendingCount = Number(pendingCountRow?.value || 0)
-    if ((pendingCount + body.invites.length) > MAX_PENDING_INVITES_PER_ORGANIZATION) {
-      set.status = 400
-      return { error: 'Too many pending invites for this organization' }
-    }
-
-    const created: Array<{
-      id: string
-      email: string
-      inviteeName: string | null
-      role: string
-      workspaceProductId: string | null
-      organizationTeamId: string | null
-      titleId: string | null
-      status: string
-      expiresAt: Date
-      inviteLink: string
-    }> = []
-    const skipped: Array<{ email: string; reason: string }> = []
-
-    for (const inviteInput of body.invites) {
-      const email = normalizeEmail(inviteInput.email)
-      if (!isLikelyEmail(email)) {
-        skipped.push({ email: inviteInput.email, reason: 'invalid_email' })
-        continue
-      }
-      if (email === normalizeEmail(access.user.email)) {
-        skipped.push({ email, reason: 'cannot_invite_self' })
-        continue
-      }
-
-      const requestedRole = sanitizeInviteRole(inviteInput.role)
-      if (requestedRole === 'owner' && access.memberRole !== 'owner') {
-        skipped.push({ email, reason: 'owner_role_requires_owner' })
-        continue
-      }
-
-      const inviteeName = normalizeOptionalInviteeName(inviteInput.name)
-      const workspaceProductId = normalizeOptionalId(inviteInput.workspaceProductId)
-      const organizationTeamId = normalizeOptionalId(inviteInput.organizationTeamId)
-      const titleId = normalizeOptionalId(inviteInput.titleId)
-
-      if (workspaceProductId) {
-        const workspace = await db.query.products.findFirst({
-          where: and(
-            eq(products.id, workspaceProductId),
-            eq(products.organizationId, body.organizationId),
-          ),
-          columns: { id: true },
-        })
-        if (!workspace) {
-          skipped.push({ email, reason: 'invalid_workspace' })
-          continue
-        }
-      }
-
-      if (organizationTeamId) {
-        const team = await db.query.organizationTeams.findFirst({
-          where: and(
-            eq(organizationTeams.id, organizationTeamId),
-            eq(organizationTeams.organizationId, body.organizationId),
-          ),
-          columns: { id: true },
-        })
-        if (!team) {
-          skipped.push({ email, reason: 'invalid_team' })
-          continue
-        }
-      }
-
-      if (titleId) {
-        const title = await db.query.titles.findFirst({
-          where: eq(titles.id, titleId),
-          columns: { id: true, isActive: true },
-        })
-        if (!title || !title.isActive) {
-          skipped.push({ email, reason: 'invalid_title' })
-          continue
-        }
-      }
-
-      const existingUser = await db.query.users.findFirst({
-        where: eq(users.email, email),
-        columns: { id: true },
-      })
-      if (existingUser) {
-        const existingMembership = await db.query.organizationMembers.findFirst({
-          where: and(
-            eq(organizationMembers.organizationId, body.organizationId),
-            eq(organizationMembers.userId, existingUser.id)
-          ),
-          columns: { id: true },
-        })
-        if (existingMembership) {
-          skipped.push({ email, reason: 'already_member' })
-          continue
-        }
-      }
-
-      await db.update(organizationInvites)
-        .set({
-          status: 'cancelled',
-          cancelledAt: new Date(),
-          updatedAt: new Date(),
-        })
+    try {
+      const [pendingCountRow] = await db
+        .select({ value: sql<number>`count(*)::int` })
+        .from(organizationInvites)
         .where(and(
           eq(organizationInvites.organizationId, body.organizationId),
-          eq(organizationInvites.email, email),
-          eq(organizationInvites.status, 'pending')
+          eq(organizationInvites.status, 'pending'),
+          gt(organizationInvites.expiresAt, new Date())
         ))
+      const pendingCount = Number(pendingCountRow?.value || 0)
+      if ((pendingCount + body.invites.length) > MAX_PENDING_INVITES_PER_ORGANIZATION) {
+        set.status = 400
+        return { error: 'Too many pending invites for this organization' }
+      }
 
-      const token = createInviteToken()
-      const [invite] = await db.insert(organizationInvites).values({
-        organizationId: body.organizationId,
-        email,
-        inviteeName,
-        tokenHash: inviteTokenHash(token),
-        role: requestedRole,
-        status: 'pending',
-        invitedByUserId: access.user.id,
-        workspaceProductId,
-        organizationTeamId,
-        titleId,
-        expiresAt: inviteExpiresAt(),
-      }).returning()
+      const created: Array<{
+        id: string
+        email: string
+        inviteeName: string | null
+        role: string
+        workspaceProductId: string | null
+        organizationTeamId: string | null
+        titleId: string | null
+        status: string
+        expiresAt: Date
+        inviteLink: string
+      }> = []
+      const skipped: Array<{ email: string; reason: string }> = []
 
-      logActivity({
-        userName: access.user.name,
-        userAvatar: access.user.avatar,
+      for (const inviteInput of body.invites) {
+        const email = normalizeEmail(inviteInput.email)
+        if (!isLikelyEmail(email)) {
+          skipped.push({ email: inviteInput.email, reason: 'invalid_email' })
+          continue
+        }
+        if (email === normalizeEmail(access.user.email)) {
+          skipped.push({ email, reason: 'cannot_invite_self' })
+          continue
+        }
+
+        const requestedRole = sanitizeInviteRole(inviteInput.role)
+        if (requestedRole === 'owner' && access.memberRole !== 'owner') {
+          skipped.push({ email, reason: 'owner_role_requires_owner' })
+          continue
+        }
+
+        const inviteeName = normalizeOptionalInviteeName(inviteInput.name)
+        const workspaceProductId = normalizeOptionalId(inviteInput.workspaceProductId)
+        const organizationTeamId = normalizeOptionalId(inviteInput.organizationTeamId)
+        const titleId = normalizeOptionalId(inviteInput.titleId)
+
+        if (workspaceProductId) {
+          const workspace = await db.query.products.findFirst({
+            where: and(
+              eq(products.id, workspaceProductId),
+              eq(products.organizationId, body.organizationId),
+            ),
+            columns: { id: true },
+          })
+          if (!workspace) {
+            skipped.push({ email, reason: 'invalid_workspace' })
+            continue
+          }
+        }
+
+        if (organizationTeamId) {
+          const team = await db.query.organizationTeams.findFirst({
+            where: and(
+              eq(organizationTeams.id, organizationTeamId),
+              eq(organizationTeams.organizationId, body.organizationId),
+            ),
+            columns: { id: true },
+          })
+          if (!team) {
+            skipped.push({ email, reason: 'invalid_team' })
+            continue
+          }
+        }
+
+        if (titleId) {
+          const title = await db.query.titles.findFirst({
+            where: eq(titles.id, titleId),
+            columns: { id: true, isActive: true },
+          })
+          if (!title || !title.isActive) {
+            skipped.push({ email, reason: 'invalid_title' })
+            continue
+          }
+        }
+
+        const existingUser = await db.query.users.findFirst({
+          where: eq(users.email, email),
+          columns: { id: true },
+        })
+        if (existingUser) {
+          const existingMembership = await db.query.organizationMembers.findFirst({
+            where: and(
+              eq(organizationMembers.organizationId, body.organizationId),
+              eq(organizationMembers.userId, existingUser.id)
+            ),
+            columns: { id: true },
+          })
+          if (existingMembership) {
+            skipped.push({ email, reason: 'already_member' })
+            continue
+          }
+        }
+
+        await db.update(organizationInvites)
+          .set({
+            status: 'cancelled',
+            cancelledAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(and(
+            eq(organizationInvites.organizationId, body.organizationId),
+            eq(organizationInvites.email, email),
+            eq(organizationInvites.status, 'pending')
+          ))
+
+        const token = createInviteToken()
+        const [invite] = await db.insert(organizationInvites).values({
+          organizationId: body.organizationId,
+          email,
+          inviteeName,
+          tokenHash: inviteTokenHash(token),
+          role: requestedRole,
+          status: 'pending',
+          invitedByUserId: access.user.id,
+          workspaceProductId,
+          organizationTeamId,
+          titleId,
+          expiresAt: inviteExpiresAt(),
+        }).returning()
+
+        logActivity({
+          userName: access.user.name,
+          userAvatar: access.user.avatar,
+          userId: access.user.id,
+          action: 'created',
+          entityType: 'organization_invite',
+          entityId: invite!.id,
+          entityTitle: email,
+          routePathOverride: '/settings/organization/members',
+        })
+
+        created.push({
+          id: invite!.id,
+          email: invite!.email,
+          inviteeName: invite!.inviteeName,
+          role: invite!.role,
+          workspaceProductId: invite!.workspaceProductId,
+          organizationTeamId: invite!.organizationTeamId,
+          titleId: invite!.titleId,
+          status: invite!.status,
+          expiresAt: invite!.expiresAt,
+          inviteLink: buildInviteLink(token),
+        })
+      }
+
+      await upsertOnboardingState({
         userId: access.user.id,
-        action: 'created',
-        entityType: 'organization_invite',
-        entityId: invite!.id,
-        entityTitle: email,
-        routePathOverride: '/settings/organization/members',
-      })
-
-      created.push({
-        id: invite!.id,
-        email: invite!.email,
-        inviteeName: invite!.inviteeName,
-        role: invite!.role,
-        workspaceProductId: invite!.workspaceProductId,
-        organizationTeamId: invite!.organizationTeamId,
-        titleId: invite!.titleId,
-        status: invite!.status,
-        expiresAt: invite!.expiresAt,
-        inviteLink: buildInviteLink(token),
-      })
-    }
-
-    await upsertOnboardingState({
-      userId: access.user.id,
-      organizationId: body.organizationId,
-      currentStep: 'invites',
-      isCompleted: false,
-    })
-
-    return {
-      created,
-      skipped,
-      onboarding: {
+        organizationId: body.organizationId,
         currentStep: 'invites',
         isCompleted: false,
-      },
+      })
+
+      return {
+        created,
+        skipped,
+        onboarding: {
+          currentStep: 'invites',
+          isCompleted: false,
+        },
+      }
+    } catch (error) {
+      if (isSchemaMismatchError(error)) {
+        set.status = 503
+        return { error: schemaMismatchMessage('Onboarding invite schema') }
+      }
+      throw error
     }
   }, {
     body: t.Object({
@@ -920,46 +936,54 @@ export const onboardingRoutes = new Elysia({ prefix: '/api/onboarding' })
     const user = await requireAuth(jwt.verify, headers, set)
     if (!user) return { error: 'Unauthorized' }
 
-    const invite = await db.query.organizationInvites.findFirst({
-      where: eq(organizationInvites.id, params.inviteId),
-    })
-    if (!invite) {
-      set.status = 404
-      return { error: 'Invite not found' }
+    try {
+      const invite = await db.query.organizationInvites.findFirst({
+        where: eq(organizationInvites.id, params.inviteId),
+      })
+      if (!invite) {
+        set.status = 404
+        return { error: 'Invite not found' }
+      }
+
+      const access = await requireOrganizationAccess(
+        jwt.verify,
+        headers,
+        set,
+        invite.organizationId,
+        [...ORGANIZATION_MANAGER_ROLES]
+      )
+      if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
+
+      if (invite.status === 'pending') {
+        await db.update(organizationInvites)
+          .set({
+            status: 'cancelled',
+            cancelledAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(organizationInvites.id, invite.id))
+      }
+
+      logActivity({
+        userName: access.user.name,
+        userAvatar: access.user.avatar,
+        userId: access.user.id,
+        action: 'updated',
+        entityType: 'organization_invite',
+        entityId: invite.id,
+        entityTitle: invite.email,
+        changes: [{ field: 'status', from: invite.status, to: 'cancelled' }],
+        routePathOverride: '/settings/organization/members',
+      })
+
+      return { success: true }
+    } catch (error) {
+      if (isSchemaMismatchError(error)) {
+        set.status = 503
+        return { error: schemaMismatchMessage('Onboarding invite schema') }
+      }
+      throw error
     }
-
-    const access = await requireOrganizationAccess(
-      jwt.verify,
-      headers,
-      set,
-      invite.organizationId,
-      [...ORGANIZATION_MANAGER_ROLES]
-    )
-    if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
-
-    if (invite.status === 'pending') {
-      await db.update(organizationInvites)
-        .set({
-          status: 'cancelled',
-          cancelledAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(organizationInvites.id, invite.id))
-    }
-
-    logActivity({
-      userName: access.user.name,
-      userAvatar: access.user.avatar,
-      userId: access.user.id,
-      action: 'updated',
-      entityType: 'organization_invite',
-      entityId: invite.id,
-      entityTitle: invite.email,
-      changes: [{ field: 'status', from: invite.status, to: 'cancelled' }],
-      routePathOverride: '/settings/organization/members',
-    })
-
-    return { success: true }
   })
 
   // POST /api/onboarding/invites/activate

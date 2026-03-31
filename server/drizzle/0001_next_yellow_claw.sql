@@ -225,7 +225,9 @@ ALTER TABLE "test_cycle_issues" ADD CONSTRAINT "test_cycle_issues_assigned_to_us
 ALTER TABLE "test_cycles" ADD CONSTRAINT "test_cycles_delivery_id_deliveries_id_fk" FOREIGN KEY ("delivery_id") REFERENCES "public"."deliveries"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "test_cycles" ADD CONSTRAINT "test_cycles_release_id_releases_id_fk" FOREIGN KEY ("release_id") REFERENCES "public"."releases"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "test_cycles" ADD CONSTRAINT "test_cycles_created_by_user_id_users_id_fk" FOREIGN KEY ("created_by_user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "public"."backlog_items" ALTER COLUMN "status" SET DATA TYPE text;--> statement-breakpoint
+ALTER TABLE "public"."backlog_items" ALTER COLUMN "status" DROP DEFAULT;--> statement-breakpoint
+ALTER TABLE "public"."backlog_items" ALTER COLUMN "status" SET DATA TYPE text USING "status"::text;--> statement-breakpoint
 DROP TYPE "public"."item_status";--> statement-breakpoint
 CREATE TYPE "public"."item_status" AS ENUM('backlog', 'drafted', 'initialized', 'in_progress', 'completed', 'archived');--> statement-breakpoint
 ALTER TABLE "public"."backlog_items" ALTER COLUMN "status" SET DATA TYPE "public"."item_status" USING "status"::"public"."item_status";
+ALTER TABLE "public"."backlog_items" ALTER COLUMN "status" SET DEFAULT 'backlog';

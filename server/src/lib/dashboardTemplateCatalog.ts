@@ -1,3 +1,5 @@
+import { TEAM_LEAD_KPI_DEFINITIONS } from './teamLeadKpis'
+
 export type DashboardTemplateScopeType = 'product' | 'workspace'
 export type DashboardTemplateSource = 'system' | 'user'
 export type DashboardTemplateVisibility = 'personal' | 'team'
@@ -31,6 +33,17 @@ export interface DashboardTemplateDefinition {
   description: string
   pages: DashboardTemplatePageBlueprint[]
 }
+
+const TEAM_LEAD_TEMPLATE_WIDGETS: DashboardTemplateWidgetBlueprint[] = TEAM_LEAD_KPI_DEFINITIONS.map((entry, index) => ({
+  widgetType: entry.widgetType,
+  widgetTitle: entry.label,
+  configJson: {},
+  gridX: index % 2,
+  gridY: Math.floor(index / 2),
+  gridW: 1,
+  gridH: 1,
+  sortOrder: index,
+}))
 
 const PRODUCT_TEMPLATES: DashboardTemplateDefinition[] = [
   {
@@ -72,6 +85,24 @@ const PRODUCT_TEMPLATES: DashboardTemplateDefinition[] = [
         widgets: [
           { widgetType: 'metrics_workload', widgetTitle: 'Workload', configJson: {}, gridX: 0, gridY: 0, gridW: 2, gridH: 2, sortOrder: 0 },
         ],
+      },
+    ],
+  },
+  {
+    id: 'system:product:team-lead-kpis',
+    scopeType: 'product',
+    source: 'system',
+    visibility: 'team',
+    name: 'Team Lead KPIs',
+    slug: 'team-lead-kpis',
+    description: 'Dedicated team-lead operational KPI board with draggable KPI cards.',
+    pages: [
+      {
+        name: 'Team Lead KPIs',
+        slug: 'team-lead-kpis',
+        visibility: 'team',
+        sortOrder: 0,
+        widgets: TEAM_LEAD_TEMPLATE_WIDGETS,
       },
     ],
   },

@@ -127,6 +127,7 @@ function createOnboardingStoreMock() {
     createInvites: vi.fn(async () => true),
     cancelInvite: vi.fn(async () => true),
     acceptInvite: vi.fn(async () => true),
+    cancelSignupDraft: vi.fn(async () => true),
     completeOnboarding: vi.fn(async () => true),
     reset: vi.fn(),
   })
@@ -204,6 +205,17 @@ describe('OnboardingView', () => {
 
     expect(wrapper.text()).toContain('Create invite links')
     expect(wrapper.text()).toContain('Pending invites')
+    wrapper.unmount()
+  })
+
+  it('keeps cancel signup clickable even when workspace exists', async () => {
+    const wrapper = mount(OnboardingView)
+    await flushOnboardingInit()
+
+    const cancelButton = findButtonByText(wrapper, 'Cancel signup')
+    expect(cancelButton).toBeTruthy()
+    expect(cancelButton!.attributes('disabled')).toBeUndefined()
+
     wrapper.unmount()
   })
 })

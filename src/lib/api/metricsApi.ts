@@ -5,9 +5,11 @@ import type {
   BlockersMetricsResponse,
   DashboardMetricsResponse,
   DeliveriesMetricsResponse,
+  ExecutiveKpisResponse,
   FlowMetricsResponse,
   PredictabilityMetricsResponse,
   QualityMetricsResponse,
+  TeamLeadKpisResponse,
   ThroughputMetricsResponse,
   WorkloadMetricsResponse,
 } from '@/types/metrics'
@@ -100,6 +102,20 @@ export const metricsApi = {
 
   workload(query: MetricsQuery, token?: string | null) {
     return apiJson<WorkloadMetricsResponse>(buildMetricsPath('workload', query), {
+      token,
+      query: buildMetricsQuery(query),
+    })
+  },
+
+  teamLeadKpis(query: MetricsQuery, token?: string | null) {
+    return apiJson<TeamLeadKpisResponse>(buildMetricsPath('team-lead-kpis', query), {
+      token,
+      query: buildMetricsQuery(query),
+    })
+  },
+
+  executiveKpis(query: MetricsQuery, token?: string | null) {
+    return apiJson<ExecutiveKpisResponse>(buildMetricsPath('executive-kpis', query), {
       token,
       query: buildMetricsQuery(query),
     })

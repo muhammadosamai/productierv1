@@ -26,6 +26,8 @@ type ScopedMetricsEndpoint =
   | 'predictability'
   | 'workload'
   | 'deliveries'
+  | 'teamLeadKpis'
+  | 'executiveKpis'
 
 interface ScopedMetricsQuery {
   scopeMode?: 'product' | 'all' | 'team'

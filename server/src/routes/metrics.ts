@@ -1,12 +1,23 @@
 import { Elysia } from 'elysia'
 import { db } from '../db'
-import { users, tasks, stories, initiatives, deliveries, products, taskStatusHistory, issues } from '../db/schema'
+import {
+  users,
+  tasks,
+  stories,
+  initiatives,
+  deliveries,
+  products,
+  taskStatusHistory,
+  issues,
+  consumerFeedbacks,
+} from '../db/schema'
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { authPlugin } from '../plugins/auth'
 import { requireOrganizationAccess } from '../lib/authz'
 import { HomeScopeResolutionError, resolveMetricsProductScope, type HomeScopeMode } from '../lib/homeScope'
 import { withMetricsCache } from '../lib/metricsCache'
 import { isSchemaMismatchError, schemaMismatchMessage } from '../lib/schemaMismatch'
+import { TEAM_LEAD_KPI_BY_KEY, TEAM_LEAD_KPI_ORDER, type TeamLeadKpiKey, type TeamLeadKpiTargetDirection, type TeamLeadKpiUnit } from '../lib/teamLeadKpis'
 
 // Helper: get date N days ago
 function daysAgo(n: number) { return new Date(Date.now() - n * 86400000) }
@@ -83,6 +94,34 @@ function stdDev(arr: number[]): number {
   return Math.sqrt(variance)
 }
 
+function roundTo(value: number, digits = 1): number {
+  const factor = 10 ** digits
+  return Math.round(value * factor) / factor
+}
+
+function clamp(value: number, min = 0, max = 100): number {
+  return Math.max(min, Math.min(max, value))
+}
+
+function safePercent(numerator: number, denominator: number): number {
+  if (denominator <= 0) return 0
+  return (numerator / denominator) * 100
+}
+
+function blockedPriorityWeight(priority: unknown): number {
+  const value = typeof priority === 'string' ? priority.toLowerCase() : ''
+  if (value === 'critical') return 2.2
+  if (value === 'high') return 1.6
+  if (value === 'low') return 0.7
+  return 1
+}
+
+function toConfidenceBand(sampleSize: number): 'low' | 'medium' | 'high' {
+  if (sampleSize >= 15) return 'high'
+  if (sampleSize >= 6) return 'medium'
+  return 'low'
+}
+
 function toIso(value: Date): string {
   return value.toISOString()
 }
@@ -137,10 +176,17 @@ function normalizeDashboardHomeFields(payload: unknown): Record<string, unknown>
   const atRiskWork = toRecord(root.atRiskWork)
   const byCategory = toRecord(atRiskWork.byCategory)
   const trend = Array.isArray(atRiskWork.trend) ? atRiskWork.trend : []
+  const byOwner = Array.isArray(atRiskWork.byOwner) ? atRiskWork.byOwner : []
+  const timeInRisk = toRecord(atRiskWork.timeInRisk)
   return {
     ...root,
     kpi: {
       ...kpi,
+      onTimeRatePlanned: toNumber(kpi.onTimeRatePlanned),
+      onTimeRateUnplanned: toNumber(kpi.onTimeRateUnplanned),
+      onTimeDueCountPlanned: toNumber(kpi.onTimeDueCountPlanned),
+      onTimeDueCountUnplanned: toNumber(kpi.onTimeDueCountUnplanned),
+      dueDateQualityRate: toNumber(kpi.dueDateQualityRate),
       onTimeRate: toNumber(kpi.onTimeRate),
     },
     atRiskWork: {
@@ -168,6 +214,29 @@ function normalizeDashboardHomeFields(payload: unknown): Record<string, unknown>
           missingReviewer: toNumber(row.missingReviewer),
         }
       }),
+      byOwner: byOwner.map((entry) => {
+        const row = toRecord(entry)
+        const ownerTypeRaw = toText(row.ownerType, 'unassigned')
+        const ownerType = ownerTypeRaw === 'user' || ownerTypeRaw === 'team' ? ownerTypeRaw : 'unassigned'
+        return {
+          ...row,
+          ownerType,
+          ownerId: toNullableText(row.ownerId),
+          ownerName: toText(row.ownerName, 'Unassigned'),
+          taskCount: toNumber(row.taskCount),
+          overdue: toNumber(row.overdue),
+          blocked: toNumber(row.blocked),
+          agingWip: toNumber(row.agingWip),
+          missingOwner: toNumber(row.missingOwner),
+          missingReviewer: toNumber(row.missingReviewer),
+        }
+      }),
+      timeInRisk: {
+        ...timeInRisk,
+        medianDays: toNumber(timeInRisk.medianDays),
+        p85Days: toNumber(timeInRisk.p85Days),
+        sampleSize: toNumber(timeInRisk.sampleSize),
+      },
     },
   }
 }
@@ -201,11 +270,17 @@ function normalizeFlowHomeFields(payload: unknown): Record<string, unknown> {
     flowEfficiency: toNumber(root.flowEfficiency),
     cycleTime: {
       ...cycleTime,
+      median: toNumber(cycleTime.median),
       p85: toNumber(cycleTime.p85),
+      p95: toNumber(cycleTime.p95),
+      sampleSize: toNumber(cycleTime.sampleSize),
     },
     leadTime: {
       ...leadTime,
+      median: toNumber(leadTime.median),
       p85: toNumber(leadTime.p85),
+      p95: toNumber(leadTime.p95),
+      sampleSize: toNumber(leadTime.sampleSize),
     },
     trendSlope: {
       ...trendSlope,
@@ -217,8 +292,13 @@ function normalizeFlowHomeFields(payload: unknown): Record<string, unknown> {
       return {
         ...row,
         bucket: toText(row.bucket),
+        p50Cycle: toNumber(row.p50Cycle),
         p85Cycle: toNumber(row.p85Cycle),
+        p95Cycle: toNumber(row.p95Cycle),
+        p50Lead: toNumber(row.p50Lead),
         p85Lead: toNumber(row.p85Lead),
+        p95Lead: toNumber(row.p95Lead),
+        sampleSize: toNumber(row.sampleSize),
       }
     }),
   }
@@ -229,11 +309,18 @@ function normalizeQualityHomeFields(payload: unknown): Record<string, unknown> {
   const reviewLoad = Array.isArray(root.reviewLoad) ? root.reviewLoad : []
   const weeklyOutcomes = Array.isArray(root.weeklyOutcomes) ? root.weeklyOutcomes : []
   const reworkByWeek = Array.isArray(root.reworkByWeek) ? root.reworkByWeek : []
+  const trend = toRecord(root.trend)
+  const reworkStatusRaw = toText(trend.reworkStatus, 'healthy')
+  const reopenStatusRaw = toText(trend.reopenStatus, 'healthy')
+  const reworkStatus = reworkStatusRaw === 'watch' || reworkStatusRaw === 'breach' ? reworkStatusRaw : 'healthy'
+  const reopenStatus = reopenStatusRaw === 'watch' || reopenStatusRaw === 'breach' ? reopenStatusRaw : 'healthy'
   return {
     ...root,
     firstPassRate: toNumber(root.firstPassRate),
     reworkRate: toNumber(root.reworkRate),
+    reworkPer100Completed: toNumber(root.reworkPer100Completed),
     reopenRate: toNumber(root.reopenRate),
+    reopenPer100Completed: toNumber(root.reopenPer100Completed),
     escapedDefects: toNumber(root.escapedDefects),
     reviewLoad: reviewLoad.map((entry) => {
       const row = toRecord(entry)
@@ -263,6 +350,15 @@ function normalizeQualityHomeFields(payload: unknown): Record<string, unknown> {
         count: toNumber(row.count),
       }
     }),
+    trend: {
+      ...trend,
+      reworkSlope: toNumber(trend.reworkSlope),
+      reopenSlope: toNumber(trend.reopenSlope),
+      reworkThreshold: toNumber(trend.reworkThreshold),
+      reopenThreshold: toNumber(trend.reopenThreshold),
+      reworkStatus,
+      reopenStatus,
+    },
   }
 }
 
@@ -270,8 +366,42 @@ function normalizeBlockersHomeFields(payload: unknown): Record<string, unknown> 
   const root = toRecord(payload)
   const currentlyBlocked = Array.isArray(root.currentlyBlocked) ? root.currentlyBlocked : []
   const blockedTrend = Array.isArray(root.blockedTrend) ? root.blockedTrend : []
+  const unblockFunnel = toRecord(root.unblockFunnel)
+  const unblockDistribution = Array.isArray(root.unblockDistribution) ? root.unblockDistribution : []
+  const blockReasons = Array.isArray(root.blockReasons) ? root.blockReasons : []
   return {
     ...root,
+    blockedCount: toNumber(root.blockedCount),
+    weightedBlockedDays: toNumber(root.weightedBlockedDays),
+    blockedSlaBreachRate: toNumber(root.blockedSlaBreachRate),
+    blockedSlaBreaches: toNumber(root.blockedSlaBreaches),
+    avgBlockDuration: toNumber(root.avgBlockDuration),
+    medianUnblockDays: toNumber(root.medianUnblockDays),
+    unblockSlaDays: toNumber(root.unblockSlaDays),
+    unblockSlaHitRate: toNumber(root.unblockSlaHitRate),
+    longOpenBreaches: toNumber(root.longOpenBreaches),
+    unblockFunnel: {
+      ...unblockFunnel,
+      blockedTotal: toNumber(unblockFunnel.blockedTotal),
+      unblockedWithinSla: toNumber(unblockFunnel.unblockedWithinSla),
+      slaBreached: toNumber(unblockFunnel.slaBreached),
+    },
+    unblockDistribution: unblockDistribution.map((entry) => {
+      const row = toRecord(entry)
+      return {
+        ...row,
+        bucket: toText(row.bucket),
+        count: toNumber(row.count),
+      }
+    }),
+    blockReasons: blockReasons.map((entry) => {
+      const row = toRecord(entry)
+      return {
+        ...row,
+        reason: toText(row.reason, 'Unknown'),
+        count: toNumber(row.count),
+      }
+    }),
     currentlyBlocked: currentlyBlocked.map((entry) => {
       const row = toRecord(entry)
       const assignee = row.assignee == null ? null : toRecord(row.assignee)
@@ -279,7 +409,10 @@ function normalizeBlockersHomeFields(payload: unknown): Record<string, unknown> 
         ...row,
         taskId: toText(row.taskId),
         title: toText(row.title, 'Untitled task'),
+        priority: toText(row.priority, 'medium'),
         blockedDays: toNumber(row.blockedDays),
+        priorityWeight: toNumber(row.priorityWeight),
+        weightedBlockedDays: toNumber(row.weightedBlockedDays),
         assignee: assignee
           ? {
             ...assignee,
@@ -303,9 +436,89 @@ function normalizeBlockersHomeFields(payload: unknown): Record<string, unknown> 
 
 function normalizePredictabilityHomeFields(payload: unknown): Record<string, unknown> {
   const root = toRecord(payload)
+  const deliveryMetrics = Array.isArray(root.deliveryMetrics) ? root.deliveryMetrics : []
+  const burnupData = Array.isArray(root.burnupData) ? root.burnupData : []
+  const estimateData = Array.isArray(root.estimateData) ? root.estimateData : []
+  const forecast = toRecord(root.forecast)
+  const confidenceBandRaw = toText(forecast.confidenceBand, 'low')
+  const confidenceBand = confidenceBandRaw === 'high' || confidenceBandRaw === 'medium'
+    ? confidenceBandRaw
+    : 'low'
+  const confidenceDrivers = toRecord(root.confidenceDrivers)
+  const scopeChurn = toRecord(confidenceDrivers.scopeChurn)
+  const scheduleVariance = toRecord(confidenceDrivers.scheduleVariance)
+  const completionStability = toRecord(confidenceDrivers.completionStability)
   const riskMatrix = Array.isArray(root.riskMatrix) ? root.riskMatrix : []
   return {
     ...root,
+    deliveryMetrics: deliveryMetrics.map((entry) => {
+      const row = toRecord(entry)
+      return {
+        ...row,
+        deliveryId: toText(row.deliveryId),
+        title: toText(row.title, 'Unnamed delivery'),
+        planned: toNumber(row.planned),
+        completed: toNumber(row.completed),
+        predictability: toNumber(row.predictability),
+        scheduleVarianceDays: toNumber(row.scheduleVarianceDays),
+        scopeAddedAfterStart: toNumber(row.scopeAddedAfterStart),
+        confidenceScore: toNumber(row.confidenceScore),
+      }
+    }),
+    burnupData: burnupData.map((entry) => {
+      const row = toRecord(entry)
+      return {
+        ...row,
+        date: toText(row.date),
+        cumulative: toNumber(row.cumulative),
+        total: toNumber(row.total),
+      }
+    }),
+    estimateData: estimateData.map((entry) => {
+      const row = toRecord(entry)
+      return {
+        ...row,
+        taskId: toText(row.taskId),
+        title: toText(row.title, 'Untitled task'),
+        estimate: toNumber(row.estimate),
+        actualDays: toNumber(row.actualDays),
+      }
+    }),
+    forecast: {
+      ...forecast,
+      projectedCompletionDate: toNullableText(forecast.projectedCompletionDate),
+      p50Date: toNullableText(forecast.p50Date),
+      p85Date: toNullableText(forecast.p85Date),
+      confidenceScore: toNumber(forecast.confidenceScore),
+      confidenceBand,
+      remainingScope: toNumber(forecast.remainingScope),
+      avgDeparturePerWeek: toNumber(forecast.avgDeparturePerWeek),
+    },
+    confidenceDrivers: {
+      ...confidenceDrivers,
+      scopeChurn: {
+        ...scopeChurn,
+        value: toNumber(scopeChurn.value),
+        penalty: toNumber(scopeChurn.penalty),
+        contribution: toNumber(scopeChurn.contribution),
+      },
+      scheduleVariance: {
+        ...scheduleVariance,
+        value: toNumber(scheduleVariance.value),
+        penalty: toNumber(scheduleVariance.penalty),
+        contribution: toNumber(scheduleVariance.contribution),
+      },
+      completionStability: {
+        ...completionStability,
+        value: toNumber(completionStability.value),
+        baseline: toNumber(completionStability.baseline),
+        penalty: toNumber(completionStability.penalty),
+        contribution: toNumber(completionStability.contribution),
+      },
+    },
+    onTimeRate: toNumber(root.onTimeRate),
+    overdueCount: toNumber(root.overdueCount),
+    scopeChangeCount: toNumber(root.scopeChangeCount),
     avgPredictability: toNumber(root.avgPredictability),
     riskMatrix: riskMatrix.map((entry) => {
       const row = toRecord(entry)
@@ -325,16 +538,31 @@ function normalizeWorkloadMember(entry: unknown): Record<string, unknown> {
   const row = toRecord(entry)
   const byStatusRaw = toRecord(row.byStatus)
   const overdueTasksRaw = Array.isArray(row.overdueTasks) ? row.overdueTasks : []
+  const capacityConfidenceRaw = toText(row.capacityConfidence, 'low')
+  const sampleConfidenceRaw = toText(row.sampleConfidence, 'low')
+  const capacityConfidence = capacityConfidenceRaw === 'high' || capacityConfidenceRaw === 'medium'
+    ? capacityConfidenceRaw
+    : 'low'
+  const sampleConfidence = sampleConfidenceRaw === 'high' || sampleConfidenceRaw === 'medium'
+    ? sampleConfidenceRaw
+    : 'low'
   return {
     ...row,
     id: toText(row.id),
     name: toText(row.name, 'Unknown'),
     wipCount: toNumber(row.wipCount),
+    sampleSize: toNumber(row.sampleSize),
+    baseCapacity: toNumber(row.baseCapacity),
     capacity: toNumber(row.capacity),
+    calibratedCapacity: toNumber(row.calibratedCapacity),
     loadRatio: toNumber(row.loadRatio),
+    loadRatioCalibrated: toNumber(row.loadRatioCalibrated),
+    capacityConfidence,
+    sampleConfidence,
     overdueCount: toNumber(row.overdueCount),
     completionRate: toNumber(row.completionRate),
     completedCount: toNumber(row.completedCount),
+    reviewVsBuildRatio: toNumber(row.reviewVsBuildRatio),
     byStatus: Object.fromEntries(
       Object.entries(byStatusRaw).map(([status, count]) => [status, toNumber(count)]),
     ),
@@ -356,9 +584,17 @@ function normalizeWorkloadHomeFields(payload: unknown): Record<string, unknown> 
   const memberWorkloadRaw = Array.isArray(root.memberWorkload) ? root.memberWorkload : []
   const overloadedRaw = Array.isArray(root.overloaded) ? root.overloaded : []
   const idleRaw = Array.isArray(root.idle) ? root.idle : []
+  const capacityModel = toRecord(root.capacityModel)
   return {
     ...root,
     overloadThreshold: toNumber(root.overloadThreshold),
+    capacityModel: {
+      ...capacityModel,
+      teamAdjustmentFactor: toNumber(capacityModel.teamAdjustmentFactor),
+      roleCapacityFactors: Object.fromEntries(
+        Object.entries(toRecord(capacityModel.roleCapacityFactors)).map(([role, value]) => [role, toNumber(value)]),
+      ),
+    },
     totalMembers: toNumber(root.totalMembers),
     loadBalanceIndex: toNumber(root.loadBalanceIndex),
     memberWorkload: memberWorkloadRaw.map((entry) => normalizeWorkloadMember(entry)),
@@ -376,21 +612,176 @@ function normalizeDeliveryRiskBadge(value: unknown): 'on_track' | 'watch' | 'at_
 function normalizeDeliveriesHomeFields(payload: unknown): Record<string, unknown> {
   const root = toRecord(payload)
   const detailRows = Array.isArray(root.deliveryDetails) ? root.deliveryDetails : []
+  const bubblePoints = Array.isArray(root.bubblePoints) ? root.bubblePoints : []
   return {
     ...root,
     activeDeliveries: toNumber(root.activeDeliveries),
+    avgProgress: toNumber(root.avgProgress),
+    total: toNumber(root.total),
+    bubblePoints: bubblePoints.map((entry) => {
+      const row = toRecord(entry)
+      return {
+        ...row,
+        deliveryId: toText(row.deliveryId),
+        title: toText(row.title, 'Unnamed delivery'),
+        scopeChange: toNumber(row.scopeChange),
+        varianceDays: toNumber(row.varianceDays),
+        totalTasks: toNumber(row.totalTasks),
+      }
+    }),
     deliveryDetails: detailRows.map((entry) => {
       const row = toRecord(entry)
+      const riskBreakdown = toRecord(row.riskBreakdown)
       return {
         ...row,
         id: toText(row.id),
         title: toText(row.title, 'Untitled delivery'),
+        status: toText(row.status),
+        startDate: toNullableText(row.startDate),
+        endDate: toNullableText(row.endDate),
+        projectedEndDate: toNullableText(row.projectedEndDate),
         riskBadge: normalizeDeliveryRiskBadge(row.riskBadge),
+        riskReasons: Array.isArray(row.riskReasons)
+          ? row.riskReasons
+            .map((reason) => toText(reason))
+            .filter((reason) => reason.length > 0)
+          : [],
+        riskBreakdown: {
+          ...riskBreakdown,
+          varianceDays: toNumber(riskBreakdown.varianceDays),
+          varianceThresholdDays: toNumber(riskBreakdown.varianceThresholdDays),
+          varianceBreach: Boolean(riskBreakdown.varianceBreach),
+          scopeAddedAfterStart: toNumber(riskBreakdown.scopeAddedAfterStart),
+          scopeThreshold: toNumber(riskBreakdown.scopeThreshold),
+          scopeBreach: Boolean(riskBreakdown.scopeBreach),
+          blockedPressure: toNumber(riskBreakdown.blockedPressure),
+          blockedPressureThreshold: toNumber(riskBreakdown.blockedPressureThreshold),
+          blockedPressureBreach: Boolean(riskBreakdown.blockedPressureBreach),
+          ruleScore: toNumber(riskBreakdown.ruleScore),
+        },
         scheduleVarianceDays: toNumber(row.scheduleVarianceDays),
         scopeAddedAfterStart: toNumber(row.scopeAddedAfterStart),
+        totalTasks: toNumber(row.totalTasks),
+        completed: toNumber(row.completed),
+        blocked: toNumber(row.blocked),
         progress: toNumber(row.progress),
+        velocity: toNumber(row.velocity),
+        daysRemaining: row.daysRemaining === null ? null : toNumber(row.daysRemaining),
+        onTrack: Boolean(row.onTrack),
       }
     }),
+  }
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null
+  return toNumber(value)
+}
+
+function resolveTeamLeadKpiTrendDirection(current: number, previous: number | null): 'up' | 'down' | 'flat' {
+  if (previous === null) return 'flat'
+  if (Math.abs(current - previous) < 0.001) return 'flat'
+  return current > previous ? 'up' : 'down'
+}
+
+function shouldWarnTeamLeadKpi(
+  value: number,
+  unit: TeamLeadKpiUnit,
+  targetDirection: TeamLeadKpiTargetDirection,
+): boolean {
+  if (targetDirection === 'neutral') return false
+  if (unit === 'percent') {
+    return targetDirection === 'higher' ? value < 70 : value > 35
+  }
+  if (unit === 'ratio') {
+    return targetDirection === 'higher' ? value < 1 : value > 1
+  }
+  if (unit === 'hours') {
+    return targetDirection === 'lower' ? value > 36 : value < 4
+  }
+  if (unit === 'days') {
+    return targetDirection === 'lower' ? value > 5 : value < 1
+  }
+  return targetDirection === 'lower' ? value > 10 : value < 3
+}
+
+function buildTeamLeadKpiValue(
+  key: TeamLeadKpiKey,
+  value: number,
+  previousValue: number | null,
+  options: {
+    numerator?: number | null
+    denominator?: number | null
+    supporting?: Record<string, number>
+  } = {},
+) {
+  const definition = TEAM_LEAD_KPI_BY_KEY[key]
+  const normalizedValue = roundTo(toNumber(value), 2)
+  const normalizedPrevious = previousValue === null ? null : roundTo(toNumber(previousValue), 2)
+  const deltaValue = normalizedPrevious === null ? 0 : roundTo(normalizedValue - normalizedPrevious, 2)
+  const trendDirection = resolveTeamLeadKpiTrendDirection(normalizedValue, normalizedPrevious)
+  return {
+    key,
+    label: definition.label,
+    description: definition.description,
+    unit: definition.unit,
+    targetDirection: definition.targetDirection,
+    value: normalizedValue,
+    previousValue: normalizedPrevious,
+    deltaValue,
+    trendDirection,
+    numerator: options.numerator ?? null,
+    denominator: options.denominator ?? null,
+    warning: shouldWarnTeamLeadKpi(normalizedValue, definition.unit, definition.targetDirection),
+    supporting: options.supporting ?? {},
+  }
+}
+
+function normalizeTeamLeadKpisHomeFields(payload: unknown): Record<string, unknown> {
+  const root = toRecord(payload)
+  const orderRaw = Array.isArray(root.order) ? root.order : []
+  const itemsRaw = toRecord(root.items)
+  const order = orderRaw
+    .map((entry) => toText(entry))
+    .filter((entry): entry is TeamLeadKpiKey => TEAM_LEAD_KPI_ORDER.includes(entry as TeamLeadKpiKey))
+
+  const normalizedItems = Object.fromEntries(
+    TEAM_LEAD_KPI_ORDER.map((kpiKey) => {
+      const row = toRecord(itemsRaw[kpiKey])
+      const supportingRaw = toRecord(row.supporting)
+      const unitRaw = toText(row.unit, TEAM_LEAD_KPI_BY_KEY[kpiKey].unit)
+      const targetDirectionRaw = toText(row.targetDirection, TEAM_LEAD_KPI_BY_KEY[kpiKey].targetDirection)
+      const unit = unitRaw === 'days' || unitRaw === 'hours' || unitRaw === 'ratio' || unitRaw === 'count'
+        ? unitRaw
+        : 'percent'
+      const targetDirection = targetDirectionRaw === 'higher' || targetDirectionRaw === 'neutral'
+        ? targetDirectionRaw
+        : 'lower'
+      return [kpiKey, {
+        ...row,
+        key: kpiKey,
+        label: toText(row.label, TEAM_LEAD_KPI_BY_KEY[kpiKey].label),
+        description: toText(row.description, TEAM_LEAD_KPI_BY_KEY[kpiKey].description),
+        unit,
+        targetDirection,
+        value: toNumber(row.value),
+        previousValue: toNullableNumber(row.previousValue),
+        deltaValue: toNumber(row.deltaValue),
+        trendDirection: resolveTeamLeadKpiTrendDirection(toNumber(row.value), toNullableNumber(row.previousValue)),
+        numerator: toNullableNumber(row.numerator),
+        denominator: toNullableNumber(row.denominator),
+        warning: Boolean(row.warning),
+        supporting: Object.fromEntries(
+          Object.entries(supportingRaw).map(([supportingKey, supportingValue]) => [supportingKey, toNumber(supportingValue)]),
+        ),
+      }]
+    }),
+  )
+
+  return {
+    ...root,
+    order: order.length > 0 ? order : TEAM_LEAD_KPI_ORDER,
+    items: normalizedItems,
   }
 }
 
@@ -607,6 +998,12 @@ async function requireMetricsAccess(
   }
 }
 
+const executiveKpisEnabled = String(
+  process.env.EXECUTIVE_KPIS_ENABLED
+  ?? process.env.executive_kpis_enabled
+  ?? 'true',
+).toLowerCase() !== 'false'
+
 export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
   .use(authPlugin)
 
@@ -652,17 +1049,56 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
         count(*) filter (
           where completed_at is not null
             and due_at is not null
+            and due_at >= created_at
             and completed_at >= ${sinceIso}
             and completed_at <= due_at
         )::int as on_time_count_curr,
         count(*) filter (
           where completed_at is not null
             and due_at is not null
+            and due_at >= created_at
             and completed_at >= ${sinceIso}
         )::int as tasks_with_due_curr,
         count(*) filter (
           where completed_at is not null
             and due_at is not null
+            and due_at >= created_at
+            and completed_at >= ${sinceIso}
+            and created_at < ${sinceIso}
+            and completed_at <= due_at
+        )::int as on_time_count_planned_curr,
+        count(*) filter (
+          where completed_at is not null
+            and due_at is not null
+            and due_at >= created_at
+            and completed_at >= ${sinceIso}
+            and created_at < ${sinceIso}
+        )::int as tasks_with_due_planned_curr,
+        count(*) filter (
+          where completed_at is not null
+            and due_at is not null
+            and due_at >= created_at
+            and completed_at >= ${sinceIso}
+            and created_at >= ${sinceIso}
+            and completed_at <= due_at
+        )::int as on_time_count_unplanned_curr,
+        count(*) filter (
+          where completed_at is not null
+            and due_at is not null
+            and due_at >= created_at
+            and completed_at >= ${sinceIso}
+            and created_at >= ${sinceIso}
+        )::int as tasks_with_due_unplanned_curr,
+        count(*) filter (
+          where completed_at is not null
+            and completed_at >= ${sinceIso}
+            and due_at is not null
+            and due_at >= created_at
+        )::int as valid_due_completed_curr,
+        count(*) filter (
+          where completed_at is not null
+            and due_at is not null
+            and due_at >= created_at
             and completed_at >= ${prevSinceIso}
             and completed_at < ${sinceIso}
             and completed_at <= due_at
@@ -670,6 +1106,7 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
         count(*) filter (
           where completed_at is not null
             and due_at is not null
+            and due_at >= created_at
             and completed_at >= ${prevSinceIso}
             and completed_at < ${sinceIso}
         )::int as tasks_with_due_prev
@@ -692,6 +1129,11 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
     const tasksWithDueCountCurr = toNumber(taskAgg.tasks_with_due_curr)
     const onTimeCountPrev = toNumber(taskAgg.on_time_count_prev)
     const tasksWithDueCountPrev = toNumber(taskAgg.tasks_with_due_prev)
+    const onTimeCountPlannedCurr = toNumber(taskAgg.on_time_count_planned_curr)
+    const tasksWithDueCountPlannedCurr = toNumber(taskAgg.tasks_with_due_planned_curr)
+    const onTimeCountUnplannedCurr = toNumber(taskAgg.on_time_count_unplanned_curr)
+    const tasksWithDueCountUnplannedCurr = toNumber(taskAgg.tasks_with_due_unplanned_curr)
+    const validDueCompletedCurr = toNumber(taskAgg.valid_due_completed_curr)
 
     const [storyAgg] = await db.select({
       total: sql<number>`count(*)::int`,
@@ -721,6 +1163,15 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
     const delivCompletionRate = totalDeliveries > 0 ? Math.round((completedDeliveries / totalDeliveries) * 100) : 0
     const onTimeRate = tasksWithDueCountCurr > 0 ? Math.round((onTimeCountCurr / tasksWithDueCountCurr) * 100) : 100
     const onTimeRatePrev = tasksWithDueCountPrev > 0 ? Math.round((onTimeCountPrev / tasksWithDueCountPrev) * 100) : onTimeRate
+    const onTimeRatePlanned = tasksWithDueCountPlannedCurr > 0
+      ? Math.round((onTimeCountPlannedCurr / tasksWithDueCountPlannedCurr) * 100)
+      : 100
+    const onTimeRateUnplanned = tasksWithDueCountUnplannedCurr > 0
+      ? Math.round((onTimeCountUnplannedCurr / tasksWithDueCountUnplannedCurr) * 100)
+      : 100
+    const dueDateQualityRate = tasksCompletedCurr > 0
+      ? Math.round((validDueCompletedCurr / tasksCompletedCurr) * 100)
+      : 100
 
     const [agingWipRow] = await db.execute(sql`
       select
@@ -766,6 +1217,118 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
         missingReviewer: atRiskCurrent.missingReviewer,
       },
     ]
+
+    const atRiskOwnerRows = await db.execute(sql`
+      with latest_block as (
+        select task_id, max(changed_at) as blocked_at
+        from task_status_history
+        where to_status = 'blocked'
+          and ${buildProductScopeSql('product_id', productIds)}
+        group by task_id
+      )
+      select
+        t.id,
+        t.status,
+        t.due_at,
+        t.started_at,
+        t.created_at,
+        t.updated_at,
+        t.owner_user_id,
+        t.owner_team_id,
+        t.reviewer_user_ids,
+        u.name as owner_user_name,
+        ot.name as owner_team_name,
+        lb.blocked_at
+      from tasks t
+      left join users u on u.id = t.owner_user_id
+      left join organization_teams ot on ot.id = t.owner_team_id
+      left join latest_block lb on lb.task_id = t.id
+      where ${buildProductScopeSql('t.product_id', productIds)}
+        and ${buildTeamScopeSql('t.owner_team_id', 't.assignee_team_ids', 't.reviewer_team_ids', teamId)}
+        and t.status not in ('done', 'archived')
+    `)
+
+    const nowMs = snapshotNow.getTime()
+    const ownerRollups = new Map<string, {
+      ownerType: 'user' | 'team' | 'unassigned'
+      ownerId: string | null
+      ownerName: string
+      taskCount: number
+      overdue: number
+      blocked: number
+      agingWip: number
+      missingOwner: number
+      missingReviewer: number
+    }>()
+    const riskDurationsDays: number[] = []
+
+    for (const row of atRiskOwnerRows as any[]) {
+      const dueAt = row.due_at ? new Date(row.due_at).getTime() : null
+      const startedAt = row.started_at ? new Date(row.started_at).getTime() : null
+      const createdAt = row.created_at ? new Date(row.created_at).getTime() : nowMs
+      const updatedAt = row.updated_at ? new Date(row.updated_at).getTime() : createdAt
+      const blockedAt = row.blocked_at ? new Date(row.blocked_at).getTime() : null
+      const status = String(row.status || '')
+      const reviewerIds = Array.isArray(row.reviewer_user_ids) ? row.reviewer_user_ids : []
+
+      const overdue = dueAt !== null && dueAt < nowMs
+      const blocked = status === 'blocked'
+      const agingWip = nowMs - (startedAt ?? createdAt) > 7 * 86400000
+      const missingOwner = !row.owner_user_id
+      const missingReviewer = status === 'in_review' && reviewerIds.length === 0
+      const risky = overdue || blocked || agingWip || missingOwner || missingReviewer
+      if (!risky) continue
+
+      const riskStarts: number[] = []
+      if (overdue && dueAt !== null) riskStarts.push(dueAt)
+      if (blocked) riskStarts.push(blockedAt ?? updatedAt)
+      if (agingWip) riskStarts.push((startedAt ?? createdAt) + 7 * 86400000)
+      if (missingOwner || missingReviewer) riskStarts.push(createdAt)
+      const riskSince = riskStarts.length > 0 ? Math.min(...riskStarts) : createdAt
+      riskDurationsDays.push(roundTo(Math.max(0, (nowMs - riskSince) / 86400000)))
+
+      const ownerUserId = typeof row.owner_user_id === 'string' ? row.owner_user_id : null
+      const ownerTeamId = typeof row.owner_team_id === 'string' ? row.owner_team_id : null
+      const ownerType: 'user' | 'team' | 'unassigned' = ownerUserId
+        ? 'user'
+        : ownerTeamId
+          ? 'team'
+          : 'unassigned'
+      const ownerId = ownerUserId ?? ownerTeamId
+      const ownerName = ownerType === 'user'
+        ? toText(row.owner_user_name, 'Unknown user')
+        : ownerType === 'team'
+          ? toText(row.owner_team_name, 'Unknown team')
+          : 'Unassigned'
+      const key = `${ownerType}:${ownerId ?? 'none'}`
+      const current = ownerRollups.get(key) ?? {
+        ownerType,
+        ownerId,
+        ownerName,
+        taskCount: 0,
+        overdue: 0,
+        blocked: 0,
+        agingWip: 0,
+        missingOwner: 0,
+        missingReviewer: 0,
+      }
+      current.taskCount += 1
+      if (overdue) current.overdue += 1
+      if (blocked) current.blocked += 1
+      if (agingWip) current.agingWip += 1
+      if (missingOwner) current.missingOwner += 1
+      if (missingReviewer) current.missingReviewer += 1
+      ownerRollups.set(key, current)
+    }
+
+    const atRiskByOwner = [...ownerRollups.values()]
+      .sort((a, b) => b.taskCount - a.taskCount || b.blocked - a.blocked || a.ownerName.localeCompare(b.ownerName))
+      .slice(0, Math.max(5, Math.min(teamLimit, 30)))
+    const timeInRisk = {
+      medianDays: roundTo(percentile(riskDurationsDays, 50)),
+      p85Days: roundTo(percentile(riskDurationsDays, 85)),
+      sampleSize: riskDurationsDays.length,
+    }
 
     const sparkWeeks = Math.max(2, Math.min(26, Math.ceil(period / 7)))
     const sparkHorizonDays = sparkWeeks * 7
@@ -885,7 +1448,13 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
         tasksCompleted: { current: tasksCompletedCurr, previous: tasksCompletedPrev },
         storiesCompleted: storiesCompletedCurr,
         taskCompletionRate, storyCompletionRate, initCompletionRate, delivCompletionRate,
-        avgCycleTime, avgLeadTime, onTimeRate,
+        avgCycleTime, avgLeadTime,
+        onTimeRate,
+        onTimeRatePlanned,
+        onTimeRateUnplanned,
+        onTimeDueCountPlanned: tasksWithDueCountPlannedCurr,
+        onTimeDueCountUnplanned: tasksWithDueCountUnplannedCurr,
+        dueDateQualityRate,
         blockedCount, overdueCount, inProgressCount, inReviewCount,
         totalTasks, totalStories, totalInitiatives, totalDeliveries,
       },
@@ -909,6 +1478,8 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
           missingReviewer: atRiskCurrent.missingReviewer,
         },
         trend: atRiskTrend,
+        byOwner: atRiskByOwner,
+        timeInRisk,
       },
       sparkline,
       team: { workload: teamWorkload, totalMembers: teamWorkload.length },
@@ -917,6 +1488,8 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
         completedCurrent: tasksCompletedCurr,
         teamMembers: teamWorkload.length,
         atRisk: atRiskCurrent.total,
+        atRiskOwners: atRiskByOwner.length,
+        atRiskTimeSamples: timeInRisk.sampleSize,
       }, { cacheTtl }),
       }
     }
@@ -1257,6 +1830,7 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
         p85: Math.round(percentile(ctValues, 85) * 10) / 10,
         p95: Math.round(percentile(ctValues, 95) * 10) / 10,
         average: ctValues.length > 0 ? Math.round((ctValues.reduce((a, b) => a + b, 0) / ctValues.length) * 10) / 10 : 0,
+        sampleSize: ctValues.length,
       },
       leadTime: {
         data: leadTimeData,
@@ -1264,6 +1838,7 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
         p85: Math.round(percentile(ltValues, 85) * 10) / 10,
         p95: Math.round(percentile(ltValues, 95) * 10) / 10,
         average: ltValues.length > 0 ? Math.round((ltValues.reduce((a, b) => a + b, 0) / ltValues.length) * 10) / 10 : 0,
+        sampleSize: ltValues.length,
       },
       percentileTrend,
       agingWip,
@@ -1390,6 +1965,12 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
     const reopenRate = completedInPeriod.length > 0
       ? Math.round((reopenTransitions.length / completedInPeriod.length) * 100)
       : 0
+    const reworkPer100Completed = completedInPeriod.length > 0
+      ? roundTo((reworkTransitions.length / completedInPeriod.length) * 100, 1)
+      : 0
+    const reopenPer100Completed = completedInPeriod.length > 0
+      ? roundTo((reopenTransitions.length / completedInPeriod.length) * 100, 1)
+      : 0
 
     const escapedIssuesRows = await db.execute(sql`
       select date_trunc('week', created_at) as week_start, count(*)::int as count
@@ -1477,10 +2058,34 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
         count: point.reopened,
       }
     })
+    const weeklyReworkRates = weekKeys.map((bucket) => {
+      const denominator = Math.max(1, completedByWeek[bucket] || 0)
+      return ((reworkByWeek[bucket] || 0) / denominator) * 100
+    })
+    const weeklyReopenRates = weekKeys.map((bucket) => {
+      const denominator = Math.max(1, completedByWeek[bucket] || 0)
+      const reopened = weeklyOutcomes.find((point) => point.bucket === bucket)?.reopened || 0
+      return (reopened / denominator) * 100
+    })
+    const reworkSlope = weeklyReworkRates.length > 1
+      ? roundTo(weeklyReworkRates[weeklyReworkRates.length - 1]! - weeklyReworkRates[0]!)
+      : 0
+    const reopenSlope = weeklyReopenRates.length > 1
+      ? roundTo(weeklyReopenRates[weeklyReopenRates.length - 1]! - weeklyReopenRates[0]!)
+      : 0
+    const reworkThreshold = 12
+    const reopenThreshold = 10
+    const thresholdStatus = (value: number, threshold: number): 'healthy' | 'watch' | 'breach' => {
+      if (value <= threshold) return 'healthy'
+      if (value <= threshold * 1.3) return 'watch'
+      return 'breach'
+    }
 
     return normalizeQualityHomeFields({
       firstPassRate, reworkRate, bugRate,
       reopenRate,
+      reworkPer100Completed,
+      reopenPer100Completed,
       reopenCount: reopenTransitions.length,
       escapedDefects,
       totalCompleted: completedInPeriod.length,
@@ -1493,6 +2098,14 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
       reopenControl: {
         targetRate: 10,
         points: reopenControlPoints,
+      },
+      trend: {
+        reworkSlope,
+        reopenSlope,
+        reworkThreshold,
+        reopenThreshold,
+        reworkStatus: thresholdStatus(reworkPer100Completed, reworkThreshold),
+        reopenStatus: thresholdStatus(reopenPer100Completed, reopenThreshold),
       },
       taxonomyNote: 'Bug rate is based on task type and reopen transitions. Escaped defects are issues linked to deliveries.',
       reworkByWeek: Object.entries(reworkByWeek).sort(([a], [b]) => a.localeCompare(b)).map(([date, count]) => ({ date, count })),
@@ -1548,12 +2161,17 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
     `)
     const blockedTasks = (blockedRows as any[]).map(row => {
       const blockedSince = new Date(row.blocked_since)
+      const priority = String(row.priority || 'medium')
+      const blockedDays = Math.round(((now - blockedSince.getTime()) / 86400000) * 10) / 10
+      const priorityWeight = blockedPriorityWeight(priority)
       return {
         taskId: row.task_id as string,
         title: row.title as string,
-        priority: row.priority as string,
+        priority,
         blockedReason: (row.blocked_reason || 'No reason provided') as string,
-        blockedDays: Math.round(((now - blockedSince.getTime()) / 86400000) * 10) / 10,
+        blockedDays,
+        priorityWeight,
+        weightedBlockedDays: roundTo(blockedDays * priorityWeight),
         assignee: row.assignee_name
           ? {
               userId: (row.assignee_id ?? null) as string | null,
@@ -1619,6 +2237,13 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
       ? Math.round((unblockedWithinSla / blockDurations.length) * 100)
       : 100
     const longOpenBreaches = blockedTasks.filter(task => task.blockedDays > unblockSlaDays).length
+    const weightedBlockedDays = roundTo(
+      blockedTasks.reduce((sum, task) => sum + toNumber((task as any).weightedBlockedDays), 0),
+    )
+    const blockedSlaBreaches = longOpenBreaches
+    const blockedSlaBreachRate = blockedTasks.length > 0
+      ? roundTo((blockedSlaBreaches / blockedTasks.length) * 100, 1)
+      : 0
 
     const unblockDistributionBuckets: Record<string, number> = {
       '<1d': 0,
@@ -1671,6 +2296,9 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
     return normalizeBlockersHomeFields({
       currentlyBlocked: blockedTasks,
       blockedCount: blockedTasks.length,
+      weightedBlockedDays,
+      blockedSlaBreaches,
+      blockedSlaBreachRate,
       avgBlockDuration,
       medianUnblockDays,
       unblockSlaDays,
@@ -1850,10 +2478,14 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
         const p85Date = p85BufferWeeks !== null
           ? new Date(Date.now() + (weeksToComplete! + p85BufferWeeks) * 7 * 86400000).toISOString()
           : null
-        const confidenceScore = Math.max(0, Math.min(100, Math.round(
+        let confidenceScore = Math.max(0, Math.min(100, Math.round(
           100 - (Math.min(100, (departureStd / Math.max(avgDeparturePerWeek, 1)) * 100))
         )))
-        const confidenceBand = confidenceScore >= 75 ? 'high' : confidenceScore >= 45 ? 'medium' : 'low'
+        let confidenceBand: 'high' | 'medium' | 'low' = confidenceScore >= 75
+          ? 'high'
+          : confidenceScore >= 45
+            ? 'medium'
+            : 'low'
 
         const estimateRows = await db.execute(sql`
       select
@@ -1907,6 +2539,45 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
         and ${buildTeamScopeSql('t.owner_team_id', 't.assignee_team_ids', 't.reviewer_team_ids', teamId)}
     `)
         const scopeChangeCount = toNumber((scopeChangeRow as any)?.value)
+        const avgPositiveVarianceDays = deliveryMetrics.length > 0
+          ? roundTo(average(deliveryMetrics.map((delivery) => Math.max(0, delivery.scheduleVarianceDays))))
+          : 0
+        const scopeChurnPenalty = Math.min(35, Math.round(scopeChangeCount * 1.5))
+        const variancePenalty = Math.min(35, Math.round(avgPositiveVarianceDays * 3))
+        const completionStabilityPenalty = Math.min(
+          30,
+          Math.round((departureStd / Math.max(avgDeparturePerWeek, 1)) * 30),
+        )
+        const confidenceDrivers = {
+          scopeChurn: {
+            value: scopeChangeCount,
+            penalty: scopeChurnPenalty,
+            contribution: 35 - scopeChurnPenalty,
+          },
+          scheduleVariance: {
+            value: avgPositiveVarianceDays,
+            penalty: variancePenalty,
+            contribution: 35 - variancePenalty,
+          },
+          completionStability: {
+            value: roundTo(departureStd),
+            baseline: avgDeparturePerWeek,
+            penalty: completionStabilityPenalty,
+            contribution: 30 - completionStabilityPenalty,
+          },
+        }
+        confidenceScore = Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round(
+              confidenceDrivers.scopeChurn.contribution
+                + confidenceDrivers.scheduleVariance.contribution
+                + confidenceDrivers.completionStability.contribution,
+            ),
+          ),
+        )
+        confidenceBand = confidenceScore >= 75 ? 'high' : confidenceScore >= 45 ? 'medium' : 'low'
         const riskMatrix = deliveryMetrics.map((delivery) => ({
           deliveryId: delivery.deliveryId,
           title: delivery.title,
@@ -1926,6 +2597,7 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
             remainingScope,
             avgDeparturePerWeek,
           },
+          confidenceDrivers,
           riskMatrix,
           onTimeRate, overdueCount, scopeChangeCount,
           avgPredictability: deliveryMetrics.length > 0 ? Math.round(deliveryMetrics.reduce((s, d) => s + d.predictability, 0) / deliveryMetrics.length) : 0,
@@ -1964,6 +2636,15 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
         overloadWipThreshold: products.metricsOverloadWipThreshold,
       }).from(products).where(eq(products.id, access.cacheProductId)))[0]?.overloadWipThreshold ?? 5)
       : 5
+    const roleCapacityFactors: Record<string, number> = {
+      super_admin: 0.9,
+      admin: 0.9,
+      product_admin: 0.95,
+      product_manager: 0.9,
+      business_analyst: 0.95,
+      developer: 1.15,
+      viewer: 0.75,
+    }
 
     const memberRows = await db.execute(sql`
       with relevant_tasks as (
@@ -2044,6 +2725,8 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
       where coalesce(ts.total_tasks, 0) > 0
       order by coalesce(ts.wip_count, 0) desc, u.name asc
     `)
+    const teamMemberCount = (memberRows as any[]).length
+    const teamAdjustmentFactor = teamMemberCount <= 3 ? 0.9 : teamMemberCount >= 10 ? 1.1 : 1
 
     const byStatusRows = await db.execute(sql`
       with relevant_tasks as (
@@ -2148,8 +2831,16 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
       const completedCount = toNumber(row.completed_count)
       const wipCount = toNumber(row.wip_count)
       const overdueCount = toNumber(row.overdue_count)
-      const capacity = overloadWipThreshold
-      const loadRatio = capacity > 0 ? Math.round((wipCount / capacity) * 100) / 100 : wipCount
+      const sampleSize = totalTasks
+      const roleKey = String(row.role || '').toLowerCase()
+      const roleFactor = roleCapacityFactors[roleKey] ?? 1
+      const baseCapacity = overloadWipThreshold
+      const calibratedCapacity = Math.max(1, roundTo(baseCapacity * roleFactor * teamAdjustmentFactor))
+      const loadRatioCalibrated = calibratedCapacity > 0 ? roundTo(wipCount / calibratedCapacity, 2) : wipCount
+      const sampleConfidence = toConfidenceBand(sampleSize)
+      const capacityConfidence = roleCapacityFactors[roleKey] !== undefined
+        ? toConfidenceBand(sampleSize)
+        : (sampleSize >= 15 ? 'medium' : 'low')
       const buildLoad = Math.max(1, wipCount - toNumber(row.review_load))
       return {
         id: row.id as string,
@@ -2164,15 +2855,21 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
         overdueCount,
         overdueTasks: overdueByUser.get(row.id as string) || [],
         completionRate: totalTasks > 0 ? Math.round((completedCount / totalTasks) * 100) : 0,
-        capacity,
-        loadRatio,
+        sampleSize,
+        baseCapacity,
+        capacity: calibratedCapacity,
+        calibratedCapacity,
+        loadRatio: loadRatioCalibrated,
+        loadRatioCalibrated,
+        capacityConfidence,
+        sampleConfidence,
         reviewVsBuildRatio: Math.round((toNumber(row.review_load) / buildLoad) * 100) / 100,
       }
     })
 
-    const overloaded = memberWorkload.filter(member => member.wipCount > overloadWipThreshold)
+    const overloaded = memberWorkload.filter(member => member.loadRatioCalibrated > 1)
     const idle = memberWorkload.filter(member => member.wipCount === 0)
-    const loadRatios = memberWorkload.map(member => member.loadRatio)
+    const loadRatios = memberWorkload.map(member => member.loadRatioCalibrated)
     const meanLoad = average(loadRatios)
     const loadBalanceIndex = meanLoad > 0
       ? Math.round((stdDev(loadRatios) / meanLoad) * 100)
@@ -2183,6 +2880,10 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
       overloaded,
       idle,
       overloadThreshold: overloadWipThreshold,
+      capacityModel: {
+        teamAdjustmentFactor,
+        roleCapacityFactors,
+      },
       totalMembers: memberWorkload.length,
       loadBalanceIndex,
       meta: buildMetricsMeta(period, {
@@ -2256,14 +2957,33 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
             ? Math.round(((new Date(projectedEndDate).getTime() - new Date(row.end_date).getTime()) / 86400000) * 10) / 10
             : 0
 
+          const varianceThresholdDays = 7
+          const varianceWatchThresholdDays = 2
+          const scopeThreshold = 1
+          const blockedPressureThreshold = 15
+          const blockedPressure = totalTasks > 0
+            ? roundTo((blocked / totalTasks) * 100, 1)
+            : (blocked > 0 ? 100 : 0)
+          const varianceBreach = scheduleVarianceDays > varianceThresholdDays
+          const varianceWatch = scheduleVarianceDays > varianceWatchThresholdDays
+          const scopeBreach = scopeAddedAfterStart >= scopeThreshold
+          const blockedPressureBreach = blockedPressure >= blockedPressureThreshold
+          const ruleScore = (varianceBreach ? 50 : varianceWatch ? 25 : 0)
+            + (scopeBreach ? 20 : 0)
+            + (blockedPressureBreach ? 30 : 0)
+
           const riskReasons: string[] = []
-          if (scheduleVarianceDays > 7) riskReasons.push('Projected end exceeds planned end by >7 days')
-          if (scopeAddedAfterStart > 0) riskReasons.push('Scope added after delivery start')
-          if (blocked > 0) riskReasons.push('Blocked tasks present')
+          if (varianceBreach) {
+            riskReasons.push(`Variance ${scheduleVarianceDays > 0 ? '+' : ''}${scheduleVarianceDays}d exceeds ${varianceThresholdDays}d threshold`)
+          } else if (varianceWatch) {
+            riskReasons.push(`Variance ${scheduleVarianceDays > 0 ? '+' : ''}${scheduleVarianceDays}d is above watch threshold (${varianceWatchThresholdDays}d)`)
+          }
+          if (scopeBreach) riskReasons.push(`Scope added after start: ${scopeAddedAfterStart} task(s)`)
+          if (blockedPressureBreach) riskReasons.push(`Blocked pressure ${blockedPressure}% exceeds ${blockedPressureThreshold}% threshold`)
           if (riskReasons.length === 0) riskReasons.push('No major risk signals')
           const riskBadge =
-            scheduleVarianceDays > 7 || blocked > 0 ? 'at_risk' :
-              scheduleVarianceDays > 2 || scopeAddedAfterStart > 0 ? 'watch' :
+            varianceBreach || blockedPressureBreach ? 'at_risk' :
+              varianceWatch || scopeBreach ? 'watch' :
                 'on_track'
 
           return {
@@ -2277,6 +2997,18 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
             scopeAddedAfterStart,
             riskBadge,
             riskReasons,
+            riskBreakdown: {
+              varianceDays: scheduleVarianceDays,
+              varianceThresholdDays,
+              varianceBreach,
+              scopeAddedAfterStart,
+              scopeThreshold,
+              scopeBreach,
+              blockedPressure,
+              blockedPressureThreshold,
+              blockedPressureBreach,
+              ruleScore,
+            },
             totalTasks,
             completed,
             blocked,
@@ -2329,4 +3061,849 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
       : await computeDeliveryMetrics()
 
     return normalizeDeliveriesHomeFields(payload)
+  })
+
+  // ==================== EXECUTIVE KPI DASHBOARD ====================
+  .get('/executive-kpis', async ({ query, jwt, headers, set }) => {
+    if (!executiveKpisEnabled) {
+      set.status = 404
+      return { error: 'Not found' }
+    }
+
+    const access = await requireMetricsAccess(query as Record<string, string | undefined>, jwt.verify, headers, set)
+    if ('error' in access) return access
+    const productIds = access.productIds
+    const teamId = access.teamId
+    const period = parseQueryNumber(query.period, 90, 14, 365)
+    const cacheTtl = parseQueryNumber(query.cacheTtl, 180, 30, 1800)
+    const since = daysAgo(period)
+    const sinceIso = since.toISOString()
+
+    const computeExecutiveKpis = async () => {
+      const productRows = await db.select({
+        id: products.id,
+        name: products.name,
+      }).from(products).where(buildProductCondition(products.id, productIds))
+      const productNameById = new Map(productRows.map((row) => [row.id, row.name]))
+
+      const taskSummaryRows = await db.execute(sql`
+        select
+          count(*) filter (where status not in ('done', 'archived'))::int as open_tasks,
+          count(*) filter (where status = 'blocked')::int as blocked_open,
+          count(*) filter (where status = 'overdue')::int as overdue_open,
+          count(*) filter (
+            where status not in ('done', 'archived')
+              and now() - coalesce(started_at, created_at) > interval '7 days'
+          )::int as aging_wip_open
+        from tasks
+        where ${buildProductScopeSql('product_id', productIds)}
+          and ${buildTeamScopeSql('owner_team_id', 'assignee_team_ids', 'reviewer_team_ids', teamId)}
+      `)
+      const taskSummary = (taskSummaryRows[0] as any) || {}
+      const openTasks = toNumber(taskSummary.open_tasks)
+      const blockedOpen = toNumber(taskSummary.blocked_open)
+
+      const deliveryRows = await db.execute(sql`
+        select
+          d.id as delivery_id,
+          d.product_id,
+          p.name as product_name,
+          d.title,
+          d.status,
+          d.start_date,
+          d.end_date,
+          d.created_at,
+          count(t.id)::int as planned,
+          count(t.id) filter (where t.status = 'done')::int as completed,
+          count(t.id) filter (
+            where d.start_date is not null and t.created_at > d.start_date
+          )::int as scope_added_after_start
+        from deliveries d
+        left join tasks t on t.delivery_id = d.id
+          and ${buildProductScopeSql('t.product_id', productIds)}
+          and ${buildTeamScopeSql('t.owner_team_id', 't.assignee_team_ids', 't.reviewer_team_ids', teamId)}
+        left join products p on p.id = d.product_id
+        where ${buildProductScopeSql('d.product_id', productIds)}
+          and (
+            d.created_at >= ${sinceIso}
+            or d.status in ('initialized', 'in_progress', 'blocked', 'overdue')
+          )
+        group by d.id, d.product_id, p.name, d.title, d.status, d.start_date, d.end_date, d.created_at
+        order by d.created_at desc
+      `)
+
+      const deliverySignals = (deliveryRows as any[]).map((row) => {
+        const planned = toNumber(row.planned)
+        const completed = toNumber(row.completed)
+        const scopeAddedAfterStart = toNumber(row.scope_added_after_start)
+        let projectedEndDate: string | null = null
+        let scheduleVarianceDays = 0
+        if (row.start_date && planned > 0 && completed > 0) {
+          const startMs = new Date(row.start_date).getTime()
+          const elapsedWeeks = Math.max(1, (Date.now() - startMs) / (7 * 86400000))
+          const completionPerWeek = completed / elapsedWeeks
+          const remaining = Math.max(0, planned - completed)
+          const projectedMs = Date.now() + (remaining / Math.max(completionPerWeek, 0.1)) * 7 * 86400000
+          projectedEndDate = new Date(projectedMs).toISOString()
+          if (row.end_date) {
+            scheduleVarianceDays = roundTo((projectedMs - new Date(row.end_date).getTime()) / 86400000, 1)
+          }
+        } else if (row.end_date) {
+          projectedEndDate = new Date(row.end_date).toISOString()
+        }
+        const confidenceScore = clamp(Math.round(
+          (planned > 0 ? (completed / planned) * 70 : 0)
+          + (scopeAddedAfterStart === 0 ? 20 : Math.max(0, 20 - scopeAddedAfterStart * 2))
+          + (scheduleVarianceDays <= 0 ? 10 : Math.max(0, 10 - Math.abs(scheduleVarianceDays))),
+        ))
+        const predictability = planned > 0 ? clamp(Math.round((completed / planned) * 100)) : 0
+        return {
+          deliveryId: row.delivery_id as string,
+          productId: row.product_id as string,
+          productName: String(row.product_name || productNameById.get(row.product_id as string) || 'Unnamed product'),
+          title: String(row.title || 'Unnamed delivery'),
+          status: String(row.status || ''),
+          createdAt: row.created_at ? new Date(row.created_at as string) : new Date(),
+          planned,
+          completed,
+          predictability,
+          projectedEndDate,
+          scheduleVarianceDays,
+          scopeAddedAfterStart,
+          confidenceScore,
+        }
+      })
+
+      const deliveryConfidenceBands = {
+        high: deliverySignals.filter((row) => row.confidenceScore >= 75).length,
+        medium: deliverySignals.filter((row) => row.confidenceScore >= 45 && row.confidenceScore < 75).length,
+        low: deliverySignals.filter((row) => row.confidenceScore < 45).length,
+      }
+      const deliveryCount = deliverySignals.length
+      const highConfidencePercent = deliveryCount > 0
+        ? Math.round((deliveryConfidenceBands.high / deliveryCount) * 100)
+        : 0
+
+      const meanVarianceDays = deliverySignals.length > 0
+        ? roundTo(average(deliverySignals.map((row) => row.scheduleVarianceDays)), 1)
+        : 0
+      const lateCount = deliverySignals.filter((row) => row.scheduleVarianceDays > 1).length
+      const earlyCount = deliverySignals.filter((row) => row.scheduleVarianceDays < -1).length
+      const onTimeCount = Math.max(0, deliverySignals.length - lateCount - earlyCount)
+      const forecastBiasDirection = meanVarianceDays > 1
+        ? 'late'
+        : meanVarianceDays < -1
+          ? 'early'
+          : 'balanced'
+
+      const forecastByProductMap = new Map<string, { sumVariance: number; late: number; early: number; onTime: number; deliveries: number }>()
+      for (const row of deliverySignals) {
+        const current = forecastByProductMap.get(row.productId) || { sumVariance: 0, late: 0, early: 0, onTime: 0, deliveries: 0 }
+        current.sumVariance += row.scheduleVarianceDays
+        current.deliveries += 1
+        if (row.scheduleVarianceDays > 1) current.late += 1
+        else if (row.scheduleVarianceDays < -1) current.early += 1
+        else current.onTime += 1
+        forecastByProductMap.set(row.productId, current)
+      }
+      const forecastByProduct = [...forecastByProductMap.entries()].map(([productId, stats]) => ({
+        productId,
+        productName: productNameById.get(productId) || 'Unnamed product',
+        meanVarianceDays: stats.deliveries > 0 ? roundTo(stats.sumVariance / stats.deliveries, 1) : 0,
+        lateCount: stats.late,
+        earlyCount: stats.early,
+        onTimeCount: stats.onTime,
+        deliveries: stats.deliveries,
+      }))
+
+      const forecastByTeam: Array<{
+        teamId: string
+        teamName: string
+        meanVarianceDays: number
+        lateCount: number
+        earlyCount: number
+        onTimeCount: number
+        deliveries: number
+      }> = []
+      if (deliverySignals.length > 0) {
+        const deliveryIds = [...new Set(deliverySignals.map((row) => row.deliveryId))]
+        const deliveryIdSql = sql.join(deliveryIds.map((id) => sql`${id}::uuid`), sql`, `)
+        const teamRows = await db.execute(sql`
+          select
+            t.delivery_id,
+            t.owner_team_id,
+            ot.name as team_name,
+            count(*)::int as task_count
+          from tasks t
+          left join organization_teams ot on ot.id = t.owner_team_id
+          where t.owner_team_id is not null
+            and t.delivery_id in (${deliveryIdSql})
+            and ${buildProductScopeSql('t.product_id', productIds)}
+            and ${buildTeamScopeSql('t.owner_team_id', 't.assignee_team_ids', 't.reviewer_team_ids', teamId)}
+          group by t.delivery_id, t.owner_team_id, ot.name
+        `)
+        const primaryTeamByDelivery = new Map<string, { teamId: string; teamName: string; taskCount: number }>()
+        for (const row of teamRows as any[]) {
+          const deliveryId = String(row.delivery_id || '')
+          const candidate = {
+            teamId: String(row.owner_team_id || ''),
+            teamName: String(row.team_name || 'Unassigned team'),
+            taskCount: toNumber(row.task_count),
+          }
+          const current = primaryTeamByDelivery.get(deliveryId)
+          if (!current || candidate.taskCount > current.taskCount) {
+            primaryTeamByDelivery.set(deliveryId, candidate)
+          }
+        }
+        const byTeamMap = new Map<string, { teamName: string; sumVariance: number; late: number; early: number; onTime: number; deliveries: number }>()
+        for (const signal of deliverySignals) {
+          const team = primaryTeamByDelivery.get(signal.deliveryId)
+          if (!team?.teamId) continue
+          const current = byTeamMap.get(team.teamId) || {
+            teamName: team.teamName,
+            sumVariance: 0,
+            late: 0,
+            early: 0,
+            onTime: 0,
+            deliveries: 0,
+          }
+          current.sumVariance += signal.scheduleVarianceDays
+          current.deliveries += 1
+          if (signal.scheduleVarianceDays > 1) current.late += 1
+          else if (signal.scheduleVarianceDays < -1) current.early += 1
+          else current.onTime += 1
+          byTeamMap.set(team.teamId, current)
+        }
+        for (const [teamId, stats] of byTeamMap.entries()) {
+          forecastByTeam.push({
+            teamId,
+            teamName: stats.teamName,
+            meanVarianceDays: stats.deliveries > 0 ? roundTo(stats.sumVariance / stats.deliveries, 1) : 0,
+            lateCount: stats.late,
+            earlyCount: stats.early,
+            onTimeCount: stats.onTime,
+            deliveries: stats.deliveries,
+          })
+        }
+      }
+
+      const volatilityTrendMap = new Map<string, { scopeAdded: number; planned: number; onTrack: number; atRisk: number }>()
+      for (const signal of deliverySignals) {
+        const bucket = toWeekKey(signal.createdAt)
+        const current = volatilityTrendMap.get(bucket) || { scopeAdded: 0, planned: 0, onTrack: 0, atRisk: 0 }
+        current.scopeAdded += signal.scopeAddedAfterStart
+        current.planned += signal.planned
+        const isAtRisk = signal.scheduleVarianceDays > 2 || signal.scopeAddedAfterStart > 0 || signal.confidenceScore < 45
+        if (isAtRisk) current.atRisk += 1
+        else current.onTrack += 1
+        volatilityTrendMap.set(bucket, current)
+      }
+      const scopeVolatilityTrend = [...volatilityTrendMap.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([bucket, stats]) => ({
+          bucket,
+          scopeAddedAfterStart: stats.scopeAdded,
+          scopeChangeRate: roundTo(safePercent(stats.scopeAdded, Math.max(1, stats.planned)), 1),
+          onTrackCount: stats.onTrack,
+          atRiskCount: stats.atRisk,
+        }))
+      const totalScopeAdded = deliverySignals.reduce((sum, row) => sum + row.scopeAddedAfterStart, 0)
+      const totalPlannedScope = deliverySignals.reduce((sum, row) => sum + row.planned, 0)
+      const volatilityStressScore = clamp(Math.round(safePercent(totalScopeAdded, Math.max(1, totalPlannedScope))))
+
+      const riskTrendWeeks = Math.max(2, Math.min(12, Math.ceil(period / 7)))
+      const riskBurndownTrend: Array<{ bucket: string; totalAtRisk: number }> = []
+      for (let index = riskTrendWeeks - 1; index >= 0; index -= 1) {
+        const snapshotDate = daysAgo(index * 7)
+        const snapshot = await computeAtRiskSnapshot(productIds, teamId, snapshotDate)
+        riskBurndownTrend.push({
+          bucket: toWeekKey(snapshotDate),
+          totalAtRisk: snapshot.total,
+        })
+      }
+      const currentAtRisk = riskBurndownTrend[riskBurndownTrend.length - 1]?.totalAtRisk ?? 0
+      const previousAtRisk = riskBurndownTrend[riskBurndownTrend.length - 2]?.totalAtRisk ?? currentAtRisk
+      const riskBurndownDelta = currentAtRisk - previousAtRisk
+
+      const riskBurndownByProduct = await Promise.all(productRows.map(async (row) => {
+        const current = await computeAtRiskSnapshot([row.id], teamId, new Date())
+        const previous = await computeAtRiskSnapshot([row.id], teamId, daysAgo(7))
+        return {
+          productId: row.id,
+          productName: row.name,
+          totalAtRisk: current.total,
+          delta: current.total - previous.total,
+        }
+      }))
+
+      const computeInitiativeRiskSnapshot = async (snapshotDate: Date) => {
+        const snapshotIso = snapshotDate.toISOString()
+        const rows = await db.execute(sql`
+          with status_snapshot as (
+            select
+              t.initiative_id,
+              coalesce(
+                (
+                  select h.to_status
+                  from task_status_history h
+                  where h.task_id = t.id
+                    and h.changed_at <= ${snapshotIso}
+                    and ${buildProductScopeSql('h.product_id', productIds)}
+                  order by h.changed_at desc
+                  limit 1
+                ),
+                t.status
+              ) as status_at_snapshot,
+              t.due_at,
+              t.started_at,
+              t.created_at,
+              t.owner_user_id,
+              t.reviewer_user_ids
+            from tasks t
+            where ${buildProductScopeSql('t.product_id', productIds)}
+              and ${buildTeamScopeSql('t.owner_team_id', 't.assignee_team_ids', 't.reviewer_team_ids', teamId)}
+              and t.created_at <= ${snapshotIso}
+              and t.initiative_id is not null
+          )
+          select
+            initiative_id,
+            count(*) filter (
+              where status_at_snapshot not in ('done', 'archived')
+                and due_at is not null
+                and due_at < ${snapshotIso}
+            )::int as overdue,
+            count(*) filter (where status_at_snapshot = 'blocked')::int as blocked,
+            count(*) filter (
+              where status_at_snapshot not in ('done', 'archived')
+                and ${snapshotIso}::timestamptz - coalesce(started_at, created_at) > interval '7 days'
+            )::int as aging_wip,
+            count(*) filter (
+              where status_at_snapshot not in ('done', 'archived')
+                and owner_user_id is null
+            )::int as missing_owner,
+            count(*) filter (
+              where status_at_snapshot = 'in_review'
+                and (reviewer_user_ids is null or cardinality(reviewer_user_ids) = 0)
+            )::int as missing_reviewer
+          from status_snapshot
+          group by initiative_id
+        `)
+        const result = new Map<string, number>()
+        for (const row of rows as any[]) {
+          const total = toNumber(row.overdue)
+            + toNumber(row.blocked)
+            + toNumber(row.aging_wip)
+            + toNumber(row.missing_owner)
+            + toNumber(row.missing_reviewer)
+          result.set(String(row.initiative_id || ''), total)
+        }
+        return result
+      }
+
+      const initiativeRiskCurrent = await computeInitiativeRiskSnapshot(new Date())
+      const initiativeRiskPrevious = await computeInitiativeRiskSnapshot(daysAgo(7))
+      const initiativeIds = [...new Set([...initiativeRiskCurrent.keys(), ...initiativeRiskPrevious.keys()])].filter(Boolean)
+      const initiativeTitleById = new Map<string, string>()
+      if (initiativeIds.length > 0) {
+        const initiativeIdSql = sql.join(initiativeIds.map((id) => sql`${id}::uuid`), sql`, `)
+        const initiativeRows = await db.execute(sql`
+          select id, title
+          from initiatives
+          where id in (${initiativeIdSql})
+        `)
+        for (const row of initiativeRows as any[]) {
+          initiativeTitleById.set(String(row.id || ''), String(row.title || 'Untitled initiative'))
+        }
+      }
+      const riskBurndownByInitiative = initiativeIds
+        .map((initiativeId) => {
+          const totalAtRisk = initiativeRiskCurrent.get(initiativeId) || 0
+          const previous = initiativeRiskPrevious.get(initiativeId) || 0
+          return {
+            initiativeId,
+            initiativeTitle: initiativeTitleById.get(initiativeId) || 'Untitled initiative',
+            totalAtRisk,
+            delta: totalAtRisk - previous,
+          }
+        })
+        .sort((left, right) => right.totalAtRisk - left.totalAtRisk)
+        .slice(0, 16)
+
+      const scopedTaskIdsSql = buildScopedTaskIdsSql(productIds, teamId)
+      const [completedTasksRow] = await db.execute(sql`
+        select count(*)::int as value
+        from tasks
+        where completed_at is not null
+          and completed_at >= ${sinceIso}
+          and ${buildProductScopeSql('product_id', productIds)}
+          and ${buildTeamScopeSql('owner_team_id', 'assignee_team_ids', 'reviewer_team_ids', teamId)}
+      `)
+      const completedTasks = toNumber((completedTasksRow as any)?.value)
+      const reworkTransitions = await db.select({
+        taskId: taskStatusHistory.taskId,
+        fromStatus: taskStatusHistory.fromStatus,
+        toStatus: taskStatusHistory.toStatus,
+      }).from(taskStatusHistory).where(and(
+        sql`${taskStatusHistory.changedAt} >= ${sinceIso}`,
+        or(
+          eq(taskStatusHistory.fromStatus, 'in_review'),
+          eq(taskStatusHistory.fromStatus, 'done'),
+        ),
+        or(
+          eq(taskStatusHistory.toStatus, 'in_progress'),
+          eq(taskStatusHistory.toStatus, 'assigned'),
+        ),
+        buildProductCondition(taskStatusHistory.productId, productIds),
+        ...(teamId ? [sql`${taskStatusHistory.taskId} in (${scopedTaskIdsSql})`] : []),
+      ))
+      const reworkTaskIds = new Set(reworkTransitions.map((entry) => entry.taskId))
+      const reopenTransitions = reworkTransitions.filter((entry) =>
+        entry.fromStatus === 'done' && (entry.toStatus === 'in_progress' || entry.toStatus === 'assigned'),
+      )
+      const reworkRate = completedTasks > 0
+        ? Math.round((reworkTaskIds.size / completedTasks) * 100)
+        : 0
+      const reopenRate = completedTasks > 0
+        ? Math.round((reopenTransitions.length / completedTasks) * 100)
+        : 0
+      const [escapedDefectsRow] = await db.execute(sql`
+        select count(*)::int as value
+        from issues
+        where created_at >= ${sinceIso}
+          and delivery_id is not null
+          and ${buildProductScopeSql('product_id', productIds)}
+      `)
+      const escapedDefects = toNumber((escapedDefectsRow as any)?.value)
+      const escapedDefectsPer100Completed = roundTo(safePercent(escapedDefects, Math.max(1, completedTasks)), 1)
+      const qualityCostIndex = clamp(Math.round(
+        (0.45 * reworkRate)
+        + (0.35 * reopenRate)
+        + (0.20 * escapedDefectsPer100Completed),
+      ))
+      const qualityScore = clamp(Math.round(
+        (100 - reworkRate * 0.5 - reopenRate * 0.5) - (escapedDefectsPer100Completed * 0.1),
+      ))
+
+      const throughputWeeks = Math.max(4, Math.min(26, Math.ceil(period / 7)))
+      const throughputRows = await db.execute(sql`
+        select date_trunc('week', completed_at) as week_start, count(*)::int as value
+        from tasks
+        where completed_at is not null
+          and completed_at >= ${daysAgo(throughputWeeks * 7).toISOString()}
+          and ${buildProductScopeSql('product_id', productIds)}
+          and ${buildTeamScopeSql('owner_team_id', 'assignee_team_ids', 'reviewer_team_ids', teamId)}
+        group by week_start
+        order by week_start asc
+      `)
+      const throughputMap = new Map<string, number>()
+      for (const row of throughputRows as any[]) {
+        throughputMap.set(toWeekKey(new Date(row.week_start)), toNumber(row.value))
+      }
+      const throughputSeries: Array<{ bucket: string; completed: number; rollingMean: number; rollingStd: number }> = []
+      const values: number[] = []
+      for (let i = throughputWeeks - 1; i >= 0; i -= 1) {
+        const bucket = toWeekKey(daysAgo(i * 7))
+        const completed = throughputMap.get(bucket) || 0
+        values.push(completed)
+        const windowValues = values.slice(Math.max(0, values.length - 4))
+        throughputSeries.push({
+          bucket,
+          completed,
+          rollingMean: roundTo(average(windowValues), 1),
+          rollingStd: roundTo(stdDev(windowValues), 1),
+        })
+      }
+      const throughputMean = average(values)
+      const throughputStd = stdDev(values)
+      const throughputCv = throughputMean > 0 ? throughputStd / throughputMean : 1
+      const throughputStabilityIndex = clamp(Math.round(100 - Math.min(100, throughputCv * 100)))
+
+      const productTaskRows = await db.execute(sql`
+        select
+          product_id,
+          count(*) filter (where status not in ('done', 'archived'))::int as open_tasks,
+          count(*) filter (where status = 'blocked')::int as blocked_open
+        from tasks
+        where ${buildProductScopeSql('product_id', productIds)}
+          and ${buildTeamScopeSql('owner_team_id', 'assignee_team_ids', 'reviewer_team_ids', teamId)}
+        group by product_id
+      `)
+      const productTaskMap = new Map<string, { openTasks: number; blockedOpen: number }>()
+      for (const row of productTaskRows as any[]) {
+        productTaskMap.set(String(row.product_id || ''), {
+          openTasks: toNumber(row.open_tasks),
+          blockedOpen: toNumber(row.blocked_open),
+        })
+      }
+
+      const productUserRows = await db.execute(sql`
+        with relevant_tasks as (
+          select product_id, owner_user_id, assignee_user_ids, owner_team_id, assignee_team_ids, reviewer_team_ids
+          from tasks
+          where ${buildProductScopeSql('product_id', productIds)}
+            and ${buildTeamScopeSql('owner_team_id', 'assignee_team_ids', 'reviewer_team_ids', teamId)}
+            and status not in ('done', 'archived')
+        ),
+        task_users as (
+          select product_id, owner_user_id as user_id
+          from relevant_tasks
+          where owner_user_id is not null
+          union all
+          select product_id, unnest(assignee_user_ids) as user_id
+          from relevant_tasks
+          where assignee_user_ids is not null
+        )
+        select product_id, user_id, count(*)::int as open_count
+        from task_users
+        group by product_id, user_id
+      `)
+
+      const openCountsByUser = new Map<string, number>()
+      const perProductUserLoads = new Map<string, number[]>()
+      for (const row of productUserRows as any[]) {
+        const userId = String(row.user_id || '')
+        const productId = String(row.product_id || '')
+        const openCount = toNumber(row.open_count)
+        openCountsByUser.set(userId, (openCountsByUser.get(userId) || 0) + openCount)
+        const current = perProductUserLoads.get(productId) || []
+        current.push(openCount)
+        perProductUserLoads.set(productId, current)
+      }
+
+      const loadValues = [...openCountsByUser.values()]
+      const meanLoad = average(loadValues)
+      const loadBalanceIndex = meanLoad > 0
+        ? Math.round((stdDev(loadValues) / meanLoad) * 100)
+        : 0
+      const overloadedMembers = loadValues.filter((value) => value > 5).length
+
+      const bottleneckCells = productRows.map((product) => {
+        const productStats = productTaskMap.get(product.id) || { openTasks: 0, blockedOpen: 0 }
+        const userLoads = perProductUserLoads.get(product.id) || []
+        const activeMembers = userLoads.length
+        const overloadedForProduct = userLoads.filter((count) => count > 5).length
+        const blockedPressure = safePercent(productStats.blockedOpen, Math.max(1, productStats.openTasks))
+        const overloadPressure = safePercent(overloadedForProduct, Math.max(1, activeMembers))
+        const bottleneckScore = clamp(Math.round((0.55 * blockedPressure) + (0.45 * overloadPressure)))
+        return {
+          productId: product.id,
+          productName: product.name,
+          blockedCount: productStats.blockedOpen,
+          openTaskCount: productStats.openTasks,
+          activeMembers,
+          overloadedMembers: overloadedForProduct,
+          blockedPressure: roundTo(blockedPressure, 1),
+          overloadPressure: roundTo(overloadPressure, 1),
+          bottleneckScore,
+        }
+      }).sort((left, right) => right.bottleneckScore - left.bottleneckScore)
+      const maxBottleneckScore = bottleneckCells[0]?.bottleneckScore ?? 0
+
+      const initiativeRows = await db.select({
+        id: initiatives.id,
+        title: initiatives.title,
+        status: initiatives.status,
+      }).from(initiatives).where(buildProductCondition(initiatives.productId, productIds))
+
+      const deliverySignalById = new Map(deliverySignals.map((row) => [row.deliveryId, row]))
+      const initiativeDeliveryRows = await db.execute(sql`
+        select di.initiative_id, di.delivery_id
+        from delivery_initiatives di
+        inner join deliveries d on d.id = di.delivery_id
+        where ${buildProductScopeSql('d.product_id', productIds)}
+      `)
+      const deliveryIdsByInitiative = new Map<string, string[]>()
+      for (const row of initiativeDeliveryRows as any[]) {
+        const initiativeId = String(row.initiative_id || '')
+        const deliveryId = String(row.delivery_id || '')
+        const current = deliveryIdsByInitiative.get(initiativeId) || []
+        current.push(deliveryId)
+        deliveryIdsByInitiative.set(initiativeId, current)
+      }
+      const initiativeBlockerRows = await db.execute(sql`
+        select
+          initiative_id,
+          count(*) filter (where status = 'blocked')::int as blocked_count,
+          count(*) filter (where status not in ('done', 'archived'))::int as open_count
+        from tasks
+        where initiative_id is not null
+          and ${buildProductScopeSql('product_id', productIds)}
+          and ${buildTeamScopeSql('owner_team_id', 'assignee_team_ids', 'reviewer_team_ids', teamId)}
+        group by initiative_id
+      `)
+      const initiativeBlockerMap = new Map<string, { blocked: number; open: number }>()
+      for (const row of initiativeBlockerRows as any[]) {
+        initiativeBlockerMap.set(String(row.initiative_id || ''), {
+          blocked: toNumber(row.blocked_count),
+          open: toNumber(row.open_count),
+        })
+      }
+      const initiativeStatusScore = (status: string): number => {
+        const normalized = status.trim().toLowerCase()
+        if (normalized === 'completed') return 100
+        if (normalized === 'in_progress' || normalized === 'active') return 65
+        if (normalized === 'blocked') return 35
+        if (normalized === 'overdue') return 25
+        return 50
+      }
+      const initiativeConfidenceItems = initiativeRows.map((row) => {
+        const linkedDeliveries = deliveryIdsByInitiative.get(row.id) || []
+        const linkedPredictabilityValues = linkedDeliveries
+          .map((deliveryId) => deliverySignalById.get(deliveryId)?.predictability ?? null)
+          .filter((value): value is number => typeof value === 'number')
+        const linkedPredictabilityScore = linkedPredictabilityValues.length > 0
+          ? roundTo(average(linkedPredictabilityValues), 1)
+          : 50
+        const blockerStats = initiativeBlockerMap.get(row.id) || { blocked: 0, open: 0 }
+        const blockerRatio = safePercent(blockerStats.blocked, Math.max(1, blockerStats.open))
+        const blockerPenalty = Math.min(40, Math.round(blockerRatio))
+        const score = clamp(Math.round(
+          (0.4 * initiativeStatusScore(String(row.status || '')))
+          + (0.6 * linkedPredictabilityScore)
+          - blockerPenalty,
+        ))
+        return {
+          initiativeId: row.id,
+          title: row.title,
+          status: row.status,
+          linkedDeliveries: linkedDeliveries.length,
+          linkedPredictabilityScore,
+          blockerRatio: roundTo(blockerRatio, 1),
+          score,
+        }
+      })
+      const initiativeExecutionConfidence = initiativeConfidenceItems.length > 0
+        ? Math.round(average(initiativeConfidenceItems.map((item) => item.score)))
+        : 0
+      const initiativeBands = {
+        high: initiativeConfidenceItems.filter((item) => item.score >= 75).length,
+        medium: initiativeConfidenceItems.filter((item) => item.score >= 45 && item.score < 75).length,
+        low: initiativeConfidenceItems.filter((item) => item.score < 45).length,
+      }
+
+      const feedbackRows = await db.select({
+        id: consumerFeedbacks.id,
+        priority: consumerFeedbacks.priority,
+        status: consumerFeedbacks.status,
+        createdAt: consumerFeedbacks.createdAt,
+        acknowledgedAt: consumerFeedbacks.acknowledgedAt,
+        resolvedAt: consumerFeedbacks.resolvedAt,
+      }).from(consumerFeedbacks).where(and(
+        buildProductCondition(consumerFeedbacks.productId, productIds),
+        sql`${consumerFeedbacks.createdAt} >= ${sinceIso}`,
+      ))
+      const openFeedbackStatuses = new Set(['new', 'acknowledged', 'investigating'])
+      const criticalOpenFeedback = feedbackRows.filter((row) =>
+        row.priority === 'critical' && openFeedbackStatuses.has(String(row.status || '')),
+      ).length
+      const totalOpenFeedback = feedbackRows.filter((row) =>
+        openFeedbackStatuses.has(String(row.status || '')),
+      ).length
+      const acknowledgeHours = feedbackRows
+        .filter((row) => row.acknowledgedAt)
+        .map((row) => (new Date(row.acknowledgedAt!).getTime() - new Date(row.createdAt).getTime()) / 3600000)
+        .filter((value) => Number.isFinite(value) && value >= 0)
+      const resolveHours = feedbackRows
+        .filter((row) => row.resolvedAt)
+        .map((row) => (new Date(row.resolvedAt!).getTime() - new Date(row.createdAt).getTime()) / 3600000)
+        .filter((value) => Number.isFinite(value) && value >= 0)
+      const p85AcknowledgeHours = acknowledgeHours.length > 0 ? roundTo(percentile(acknowledgeHours, 85), 1) : 0
+      const p85ResolveHours = resolveHours.length > 0 ? roundTo(percentile(resolveHours, 85), 1) : 0
+      const criticalBacklogPressure = Math.min(100, safePercent(criticalOpenFeedback, Math.max(1, totalOpenFeedback)))
+      const acknowledgeSlaHours = 24
+      const resolveSlaHours = 120
+      const acknowledgePressure = Math.min(100, safePercent(p85AcknowledgeHours, acknowledgeSlaHours))
+      const resolvePressure = Math.min(100, safePercent(p85ResolveHours, resolveSlaHours))
+      const customerImpactProxy = clamp(Math.round(
+        (0.50 * criticalBacklogPressure)
+        + (0.25 * acknowledgePressure)
+        + (0.25 * resolvePressure),
+      ))
+      const customerImpactTrendMap = new Map<string, { criticalCount: number; acknowledgeHours: number[]; resolveHours: number[] }>()
+      for (const row of feedbackRows) {
+        const bucket = toWeekKey(new Date(row.createdAt))
+        const current = customerImpactTrendMap.get(bucket) || { criticalCount: 0, acknowledgeHours: [], resolveHours: [] }
+        if (row.priority === 'critical') current.criticalCount += 1
+        if (row.acknowledgedAt) {
+          const hours = (new Date(row.acknowledgedAt).getTime() - new Date(row.createdAt).getTime()) / 3600000
+          if (Number.isFinite(hours) && hours >= 0) current.acknowledgeHours.push(hours)
+        }
+        if (row.resolvedAt) {
+          const hours = (new Date(row.resolvedAt).getTime() - new Date(row.createdAt).getTime()) / 3600000
+          if (Number.isFinite(hours) && hours >= 0) current.resolveHours.push(hours)
+        }
+        customerImpactTrendMap.set(bucket, current)
+      }
+      const customerImpactTrend = [...customerImpactTrendMap.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([bucket, stats]) => ({
+          bucket,
+          criticalCount: stats.criticalCount,
+          avgAcknowledgeHours: stats.acknowledgeHours.length > 0 ? roundTo(average(stats.acknowledgeHours), 1) : 0,
+          avgResolveHours: stats.resolveHours.length > 0 ? roundTo(average(stats.resolveHours), 1) : 0,
+        }))
+
+      const predictabilityScore = deliverySignals.length > 0
+        ? Math.round(average(deliverySignals.map((row) => row.predictability)))
+        : 0
+      const blockedPer100Open = openTasks > 0
+        ? roundTo((blockedOpen / openTasks) * 100, 1)
+        : 0
+      const blockerScore = clamp(Math.round(100 - Math.min(100, blockedPer100Open)))
+      const workloadBalanceScore = clamp(Math.round(100 - Math.min(100, loadBalanceIndex)))
+      const portfolioHealthScore = clamp(Math.round(
+        (0.35 * predictabilityScore)
+        + (0.25 * qualityScore)
+        + (0.20 * blockerScore)
+        + (0.20 * workloadBalanceScore),
+      ))
+
+      return {
+        kpis: {
+          portfolioHealthScore: {
+            value: portfolioHealthScore,
+            unit: 'score',
+            sampleSize: deliverySignals.length + completedTasks + loadValues.length,
+          },
+          deliveryConfidenceDistribution: {
+            value: highConfidencePercent,
+            unit: 'percent_high',
+            sampleSize: deliveryCount,
+          },
+          forecastBias: {
+            value: meanVarianceDays,
+            unit: 'days',
+            direction: forecastBiasDirection,
+            sampleSize: deliveryCount,
+          },
+          scopeVolatilityBurn: {
+            value: volatilityStressScore,
+            unit: 'score',
+            sampleSize: deliveryCount,
+          },
+          riskBurndown: {
+            value: riskBurndownDelta,
+            unit: 'delta_tasks',
+            sampleSize: currentAtRisk,
+          },
+          initiativeExecutionConfidence: {
+            value: initiativeExecutionConfidence,
+            unit: 'score',
+            sampleSize: initiativeConfidenceItems.length,
+          },
+          qualityCostIndex: {
+            value: qualityCostIndex,
+            unit: 'cost_index',
+            sampleSize: completedTasks,
+          },
+          throughputStabilityIndex: {
+            value: throughputStabilityIndex,
+            unit: 'score',
+            sampleSize: throughputSeries.length,
+          },
+          crossProductBottleneckHeatmap: {
+            value: maxBottleneckScore,
+            unit: 'score',
+            sampleSize: bottleneckCells.length,
+          },
+          customerImpactProxy: {
+            value: customerImpactProxy,
+            unit: 'score',
+            sampleSize: feedbackRows.length,
+          },
+        },
+        details: {
+          deliveryConfidenceDistribution: {
+            ...deliveryConfidenceBands,
+            total: deliveryCount,
+            highPercent: highConfidencePercent,
+          },
+          forecastBias: {
+            meanVarianceDays,
+            direction: forecastBiasDirection,
+            lateCount,
+            earlyCount,
+            onTimeCount,
+            byProduct: forecastByProduct,
+            byTeam: forecastByTeam,
+          },
+          scopeVolatilityBurn: {
+            score: volatilityStressScore,
+            totalScopeAddedAfterStart: totalScopeAdded,
+            totalPlannedScope,
+            trend: scopeVolatilityTrend,
+          },
+          riskBurndown: {
+            delta: riskBurndownDelta,
+            currentAtRisk,
+            previousAtRisk,
+            trend: riskBurndownTrend,
+            byProduct: riskBurndownByProduct,
+            byInitiative: riskBurndownByInitiative,
+          },
+          initiativeExecutionConfidence: {
+            averageScore: initiativeExecutionConfidence,
+            bands: initiativeBands,
+            items: initiativeConfidenceItems
+              .sort((left, right) => right.score - left.score)
+              .slice(0, 20),
+          },
+          qualityCostIndex: {
+            score: qualityCostIndex,
+            reworkRate,
+            reopenRate,
+            escapedDefects,
+            escapedDefectsPer100Completed,
+          },
+          throughputStabilityIndex: {
+            score: throughputStabilityIndex,
+            meanDeparture: roundTo(throughputMean, 1),
+            stdDeparture: roundTo(throughputStd, 1),
+            coefficientOfVariation: roundTo(throughputCv, 2),
+            trend: throughputSeries,
+          },
+          crossProductBottleneckHeatmap: {
+            maxScore: maxBottleneckScore,
+            cells: bottleneckCells,
+          },
+          customerImpactProxy: {
+            score: customerImpactProxy,
+            criticalOpenFeedback,
+            totalOpenFeedback,
+            p85AcknowledgeHours,
+            p85ResolveHours,
+            acknowledgeSlaHours,
+            resolveSlaHours,
+            trend: customerImpactTrend,
+          },
+          portfolioHealthScore: {
+            score: portfolioHealthScore,
+            components: {
+              predictabilityScore,
+              qualityScore,
+              blockerScore,
+              workloadBalanceScore,
+              blockedPer100Open,
+              loadBalanceIndex,
+            },
+          },
+        },
+        meta: buildMetricsMeta(period, {
+          deliveries: deliverySignals.length,
+          tasksOpen: openTasks,
+          initiatives: initiativeRows.length,
+          feedback: feedbackRows.length,
+        }, { cacheTtl }),
+      }
+    }
+
+    const payload = access.cacheProductId
+      ? await withMetricsCache(
+        { endpoint: 'executive-kpis', productId: access.cacheProductId, period },
+        cacheTtl,
+        computeExecutiveKpis,
+      )
+      : await computeExecutiveKpis()
+
+    return payload
   })

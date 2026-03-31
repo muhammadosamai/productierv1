@@ -39,6 +39,7 @@ This guide documents what to disable, keep, and enforce when promoting Productie
 
 ## Suggested Pre-Deploy Validation
 
+- Verify a restorable DB snapshot exists, then run `SAFE_MIGRATION_BACKUP_CONFIRMED=true bun run db:migrate:safe`.
 - Start server with production config and verify startup passes all required checks.
 - Validate auth token issue/verify path with current `JWT_ACTIVE_KID`.
 - Validate integrations encryption/decryption using `INTEGRATIONS_SECRET_KEY`.

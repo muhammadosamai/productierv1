@@ -12,6 +12,7 @@
     "test:integration": "bun run db:migration:status:strict && vitest run --config vitest.config.ts",
     "db:generate": "bun ./node_modules/drizzle-kit/bin.cjs generate",
     "db:migrate": "bun ./node_modules/drizzle-kit/bin.cjs migrate",
+    "db:migrate:safe": "bun src/db/migrate-safe.ts",
     "db:push": "bun ./node_modules/drizzle-kit/bin.cjs push",
     "db:preflight:cutover": "bun src/db/preflight-cutover.ts",
     "db:integrity:post-cutover": "bun src/db/post-cutover-integrity-check.ts",

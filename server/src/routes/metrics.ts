@@ -6,6 +6,7 @@ import { authPlugin } from '../plugins/auth'
 import { requireOrganizationAccess } from '../lib/authz'
 import { HomeScopeResolutionError, resolveMetricsProductScope, type HomeScopeMode } from '../lib/homeScope'
 import { withMetricsCache } from '../lib/metricsCache'
+import { isSchemaMismatchError, schemaMismatchMessage } from '../lib/schemaMismatch'
 
 // Helper: get date N days ago
 function daysAgo(n: number) { return new Date(Date.now() - n * 86400000) }
@@ -597,6 +598,10 @@ async function requireMetricsAccess(
     if (error instanceof HomeScopeResolutionError) {
       set.status = error.status
       return { error: error.message }
+    }
+    if (isSchemaMismatchError(error)) {
+      set.status = 503
+      return { error: schemaMismatchMessage('Metrics schema') }
     }
     throw error
   }

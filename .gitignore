@@ -53,7 +53,7 @@ Endpoint Docs/endpoint-results.json
 
 # Server
 server/node_modules
-server/drizzle/
+# Keep drizzle migrations tracked for CI/stage strict migration checks.
 server/database-docs/database-schema.md
 # Keep seeded logo assets, ignore runtime upload content
 server/uploads/*

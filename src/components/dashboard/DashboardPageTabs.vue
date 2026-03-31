@@ -9,12 +9,14 @@ const props = withDefaults(defineProps<{
   templatesEnabled?: boolean
   showLoadTemplateButton?: boolean
   showAddPageButton?: boolean
+  showPageActionsMenu?: boolean
   allowReorder?: boolean
   busy?: boolean
 }>(), {
   templatesEnabled: true,
   showLoadTemplateButton: true,
   showAddPageButton: true,
+  showPageActionsMenu: true,
   allowReorder: false,
   busy: false,
 })
@@ -111,7 +113,7 @@ function onMoveRight() {
         Add Page
       </button>
       <DashboardPageActionsMenu
-        v-if="activePage"
+        v-if="activePage && props.showPageActionsMenu"
         :page="activePage"
         :busy="props.busy"
         :templates-enabled="props.templatesEnabled"

@@ -7,6 +7,7 @@ import { useProductStore } from '@/stores/products'
 import { useRolesStore } from '@/stores/roles'
 import { useAuthStore } from '@/stores/auth'
 import { usePagePermissions } from '@/lib/pagePermissions'
+import InviteMembersPanel from '@/components/users/InviteMembersPanel.vue'
 import type { UserRole } from '@/types/user'
 
 const usersStore = useUsersStore()
@@ -231,7 +232,15 @@ watch(() => route.query.user, async (queryValue) => {
     </div>
 
     <div class="flex-1 min-h-0 px-8 py-6">
-      <div class="h-full grid grid-cols-[minmax(380px,1fr)_minmax(360px,420px)] gap-5">
+      <div class="h-full flex flex-col gap-5">
+        <InviteMembersPanel
+          v-if="canEditUsers"
+          :can-invite="canEditUsers"
+          heading="Invite Organization Members"
+          description="Add teammates by name and email, then share invite links manually during the POC."
+        />
+
+        <div class="min-h-0 flex-1 grid grid-cols-[minmax(380px,1fr)_minmax(360px,420px)] gap-5">
         <div class="bg-white border border-gray-200 rounded-xl overflow-hidden flex flex-col min-h-0">
           <div class="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
             <h2 class="text-sm font-semibold text-gray-700">Users</h2>
@@ -450,6 +459,7 @@ watch(() => route.query.user, async (queryValue) => {
               {{ usersStore.error }}
             </p>
           </div>
+        </div>
         </div>
       </div>
     </div>

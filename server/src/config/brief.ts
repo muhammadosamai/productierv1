@@ -2,6 +2,7 @@ import { readBooleanEnv, readEnumEnv, readEnv, readNumberEnv } from './env'
 
 export type HomeBriefProvider = 'none' | 'openai'
 export type HomeBriefApiKeySource = 'home_daily_brief' | 'search_embedding' | 'none'
+export type HomeBriefReasoningEffort = 'low' | 'medium' | 'high'
 export type HomeBriefProviderReadinessIssue =
   | 'feature_disabled'
   | 'provider_not_selected'
@@ -24,6 +25,7 @@ export interface HomeBriefConfig {
   summaryMaxTokens: number
   fullMaxTokens: number
   temperature: number
+  reasoningEffort: HomeBriefReasoningEffort
   retryModel: string
   retryContextMaxChars: number
   cacheTtlMs: number
@@ -82,8 +84,11 @@ export function getHomeBriefConfig(): HomeBriefConfig {
   const maxTokens = readPositiveIntegerEnv('HOME_DAILY_BRIEF_MAX_TOKENS', 500)
   const summaryMaxTokens = readPositiveIntegerEnv('HOME_DAILY_BRIEF_SUMMARY_MAX_TOKENS', maxTokens)
   const fullMaxTokens = readPositiveIntegerEnv('HOME_DAILY_BRIEF_FULL_MAX_TOKENS', Math.max(maxTokens, 900))
-  const temperature = readTemperatureEnv('HOME_DAILY_BRIEF_TEMPERATURE', 0.2)
-  const retryModel = readEnv('HOME_DAILY_BRIEF_RETRY_MODEL') ?? 'gpt-5.4-mini'
+  const configuredTemperature = readTemperatureEnv('HOME_DAILY_BRIEF_TEMPERATURE', 0.2)
+  const temperature = model.startsWith('gpt-5') ? 1 : configuredTemperature
+  const reasoningEffort = readEnumEnv('HOME_DAILY_BRIEF_REASONING_EFFORT', ['low', 'medium', 'high'] as const)
+    ?? 'low'
+  const retryModel = readEnv('HOME_DAILY_BRIEF_RETRY_MODEL') ?? model
   const retryContextMaxChars = readPositiveIntegerEnv('HOME_DAILY_BRIEF_RETRY_CONTEXT_MAX_CHARS', 4200)
   const cacheTtlMs = readPositiveIntegerEnv('HOME_DAILY_BRIEF_CACHE_TTL_MS', 3600000)
   const fallbackCacheTtlMs = readNonNegativeIntegerEnv('HOME_DAILY_BRIEF_FALLBACK_CACHE_TTL_MS', 15000)
@@ -104,6 +109,7 @@ export function getHomeBriefConfig(): HomeBriefConfig {
     summaryMaxTokens,
     fullMaxTokens,
     temperature,
+    reasoningEffort,
     retryModel,
     retryContextMaxChars,
     cacheTtlMs,

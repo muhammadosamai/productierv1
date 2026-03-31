@@ -142,6 +142,13 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => !!token.value && !!user.value)
 
+  function applyAuthSession(payload: { token: string; user: User }) {
+    token.value = payload.token
+    user.value = payload.user
+    error.value = null
+    persistToken(payload.token)
+  }
+
   async function login(email: string, password: string): Promise<boolean> {
     loading.value = true
     error.value = null
@@ -154,9 +161,7 @@ export const useAuthStore = defineStore('auth', () => {
         return false
       }
 
-      token.value = tokenValue
-      user.value = userValue
-      persistToken(tokenValue)
+      applyAuthSession({ token: tokenValue, user: userValue })
       return true
     } catch (e) {
       if (e instanceof ApiError) {
@@ -189,9 +194,7 @@ export const useAuthStore = defineStore('auth', () => {
         error.value = 'Unexpected response from auth service.'
         return false
       }
-      token.value = tokenValue
-      user.value = userValue
-      persistToken(tokenValue)
+      applyAuthSession({ token: tokenValue, user: userValue })
       return true
     } catch (e) {
       if (e instanceof ApiError) {
@@ -315,6 +318,6 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     user, token, loading, error, isAuthenticated, initialized,
-    login, register, forgotPassword, fetchMe, updateProfile, logout, init,
+    login, register, forgotPassword, fetchMe, updateProfile, logout, init, applyAuthSession,
   }
 })

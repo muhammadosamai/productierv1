@@ -155,6 +155,9 @@ function formatSkippedReason(reason: string): string {
     cannot_invite_self: 'Cannot invite your own account',
     owner_role_requires_owner: 'Only organization owners can invite other owners',
     already_member: 'User is already an organization member',
+    invalid_workspace: 'Selected workspace is invalid for this organization',
+    invalid_team: 'Selected team is invalid for this organization',
+    invalid_title: 'Selected title is invalid or archived',
   }
   return dictionary[reason] || reason.replace(/_/g, ' ')
 }

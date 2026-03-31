@@ -247,6 +247,7 @@ describe('runtime configuration', () => {
     process.env.HOME_DAILY_BRIEF_FALLBACK_CACHE_TTL_MS = ''
     process.env.HOME_DAILY_BRIEF_RETRY_MODEL = ''
     process.env.HOME_DAILY_BRIEF_RETRY_CONTEXT_MAX_CHARS = ''
+    process.env.HOME_DAILY_BRIEF_REASONING_EFFORT = ''
 
     const config = getHomeBriefConfig()
     expect(config.enabled).toBe(false)
@@ -262,6 +263,7 @@ describe('runtime configuration', () => {
     expect(config.fullMaxTokens).toBe(900)
     expect(config.timeoutMs).toBe(15000)
     expect(config.fallbackCacheTtlMs).toBe(15000)
+    expect(config.reasoningEffort).toBe('low')
     expect(config.retryModel).toBe('gpt-5.4-mini')
     expect(config.retryContextMaxChars).toBe(4200)
   })
@@ -279,8 +281,9 @@ describe('runtime configuration', () => {
     process.env.HOME_DAILY_BRIEF_TEMPERATURE = '0.4'
     process.env.HOME_DAILY_BRIEF_CACHE_TTL_MS = '120000'
     process.env.HOME_DAILY_BRIEF_FALLBACK_CACHE_TTL_MS = '5000'
-    process.env.HOME_DAILY_BRIEF_RETRY_MODEL = 'gpt-5.4-mini'
+    process.env.HOME_DAILY_BRIEF_RETRY_MODEL = 'gpt-4.1-mini'
     process.env.HOME_DAILY_BRIEF_RETRY_CONTEXT_MAX_CHARS = '3600'
+    process.env.HOME_DAILY_BRIEF_REASONING_EFFORT = 'high'
 
     const config = getHomeBriefConfig()
     expect(config.enabled).toBe(true)
@@ -295,11 +298,38 @@ describe('runtime configuration', () => {
     expect(config.maxTokens).toBe(180)
     expect(config.summaryMaxTokens).toBe(240)
     expect(config.fullMaxTokens).toBe(640)
-    expect(config.temperature).toBe(0.4)
+    expect(config.temperature).toBe(1)
     expect(config.cacheTtlMs).toBe(120000)
     expect(config.fallbackCacheTtlMs).toBe(5000)
-    expect(config.retryModel).toBe('gpt-5.4-mini')
+    expect(config.reasoningEffort).toBe('high')
+    expect(config.retryModel).toBe('gpt-4.1-mini')
     expect(config.retryContextMaxChars).toBe(3600)
+  })
+
+  it('preserves configured temperature for non-gpt-5 brief models', () => {
+    process.env.HOME_DAILY_BRIEF_ENABLED = 'true'
+    process.env.HOME_DAILY_BRIEF_PROVIDER = 'openai'
+    process.env.HOME_DAILY_BRIEF_MODEL = 'gpt-4.1-mini'
+    process.env.HOME_DAILY_BRIEF_API_KEY = 'brief-key'
+    process.env.SEARCH_EMBEDDING_API_KEY = ''
+    process.env.HOME_DAILY_BRIEF_TEMPERATURE = '0.4'
+
+    const config = getHomeBriefConfig()
+    expect(config.model).toBe('gpt-4.1-mini')
+    expect(config.temperature).toBe(0.4)
+  })
+
+  it('keeps configured retry model when it matches primary gpt-5 model', () => {
+    process.env.HOME_DAILY_BRIEF_ENABLED = 'true'
+    process.env.HOME_DAILY_BRIEF_PROVIDER = 'openai'
+    process.env.HOME_DAILY_BRIEF_MODEL = 'gpt-5.4-mini'
+    process.env.HOME_DAILY_BRIEF_API_KEY = 'brief-key'
+    process.env.SEARCH_EMBEDDING_API_KEY = ''
+    process.env.HOME_DAILY_BRIEF_RETRY_MODEL = 'gpt-5.4-mini'
+
+    const config = getHomeBriefConfig()
+    expect(config.model).toBe('gpt-5.4-mini')
+    expect(config.retryModel).toBe('gpt-5.4-mini')
   })
 
   it('falls back mode token envs to legacy max token config', () => {

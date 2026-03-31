@@ -238,6 +238,90 @@ describe('onboarding store', () => {
     expect(store.lastSkippedInvites).toEqual([{ email: 'bad-email', reason: 'invalid_email' }])
   })
 
+  it('forwards optional invite assignment metadata when creating invites', async () => {
+    const authStore = useAuthStore()
+    authStore.token = 'token-3'
+    authStore.user = {
+      id: 'user-3',
+      name: 'User',
+      email: 'user3@example.com',
+      role: 'viewer',
+      isActive: true,
+      avatar: null,
+      createdAt: new Date().toISOString(),
+    }
+
+    onboardingApiMock.createInvites.mockResolvedValueOnce({
+      created: [
+        {
+          id: 'invite-2',
+          email: 'metadata@example.com',
+          inviteeName: 'Metadata User',
+          role: 'member',
+          workspaceProductId: 'product-1',
+          organizationTeamId: 'team-1',
+          titleId: 'title-1',
+          status: 'pending',
+          expiresAt: new Date().toISOString(),
+          inviteLink: '/onboarding/accept-invite?token=xyz',
+        },
+      ],
+      skipped: [],
+      onboarding: { currentStep: 'invites', isCompleted: false },
+    })
+    onboardingApiMock.getState.mockResolvedValue({
+      progress: {
+        currentStep: 'invites',
+        isCompleted: false,
+        completedAt: null,
+      },
+      activeOrganizationId: 'org-3',
+      organizations: [
+        {
+          id: 'org-3',
+          name: 'Org Three',
+          slug: 'org-three',
+          description: null,
+          logo: null,
+          role: 'owner',
+          workspaceCount: 1,
+          pendingInviteCount: 1,
+        },
+      ],
+    })
+    onboardingApiMock.listInvites.mockResolvedValueOnce([])
+
+    const store = useOnboardingStore()
+    const ok = await store.createInvites({
+      organizationId: 'org-3',
+      invites: [
+        {
+          email: 'metadata@example.com',
+          name: 'Metadata User',
+          role: 'member',
+          workspaceProductId: 'product-1',
+          organizationTeamId: 'team-1',
+          titleId: 'title-1',
+        },
+      ],
+    })
+
+    expect(ok).toBe(true)
+    expect(onboardingApiMock.createInvites).toHaveBeenCalledWith({
+      organizationId: 'org-3',
+      invites: [
+        {
+          email: 'metadata@example.com',
+          name: 'Metadata User',
+          role: 'member',
+          workspaceProductId: 'product-1',
+          organizationTeamId: 'team-1',
+          titleId: 'title-1',
+        },
+      ],
+    }, 'token-3')
+  })
+
   it('cancels signup draft and resets local onboarding state', async () => {
     const authStore = useAuthStore()
     authStore.token = 'token-cancel'

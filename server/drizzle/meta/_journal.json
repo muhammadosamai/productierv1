@@ -1,0 +1,237 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1773685975844,
+      "tag": "0000_tense_stingray",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1774704379405,
+      "tag": "0001_next_yellow_claw",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774710000000,
+      "tag": "0003_update_story_statuses",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1774726740000,
+      "tag": "0009_data_consistency_cutover",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1774788374103,
+      "tag": "0003_add_metrics_overload_wip_threshold",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1774790000000,
+      "tag": "0010_p1_capability_foundations",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1774791000000,
+      "tag": "0011_add_role_permission_can_delete",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1774792000000,
+      "tag": "0011_metrics_snapshots_cache",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1774793000000,
+      "tag": "0012_scalability_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1774805000000,
+      "tag": "0016_global_search_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1774811177902,
+      "tag": "0018_pgvector_semantic_cutover",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1774817334938,
+      "tag": "0019_search_relevance_tuning_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1774817335938,
+      "tag": "0013_access_control_policy_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1774817336938,
+      "tag": "0014_roles_titles_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1774817337938,
+      "tag": "0015_notifications_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1774817338938,
+      "tag": "0017_notifications_lifecycle_controls",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1774817339938,
+      "tag": "0019_notifications_channels_product_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1774900000000,
+      "tag": "0020_notifications_reminder_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1774906000000,
+      "tag": "0021_organization_onboarding_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1774907000000,
+      "tag": "0022_member_team_separation",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1774908000000,
+      "tag": "0023_notifications_daily_rollup_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1774930000000,
+      "tag": "0024_organization_profile_branding",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1774940000000,
+      "tag": "0025_strict_organization_product_isolation",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1774945000000,
+      "tag": "0026_initiative_assignment_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1774955000000,
+      "tag": "0027_dashboard_pages_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1774960000000,
+      "tag": "0028_dashboard_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1774980000000,
+      "tag": "0029_dashboard_page_ordering",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1774995000000,
+      "tag": "0030_story_backlog_prioritization",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1775005000000,
+      "tag": "0031_platform_runtime_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1775010000000,
+      "tag": "0032_product_membership_org_enforcement",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1775100000000,
+      "tag": "0033_dashboard_viewer_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1775200000000,
+      "tag": "0034_task_subtasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1775300000000,
+      "tag": "0035_invite_assignment_metadata",
+      "breakpoints": true
+    }
+  ]
+}

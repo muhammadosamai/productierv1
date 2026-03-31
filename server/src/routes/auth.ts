@@ -22,6 +22,7 @@ import { getApiConfig } from '../config/api'
 import { generateDailyBrief, resolveDailyBriefEntityFocus } from '../lib/brief/dailyBrief'
 import { HomeScopeResolutionError, resolveAccessibleHomeScope } from '../lib/homeScope'
 import { consumeRateLimit, resolveClientAddress } from '../lib/inMemoryRateLimiter'
+import { isSchemaMismatchError, schemaMismatchMessage } from '../lib/schemaMismatch'
 import {
   decodeCursor,
   encodeCursor,
@@ -611,6 +612,10 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
         set.status = 503
         return { error: 'Database is unavailable. Start PostgreSQL and try again.' }
       }
+      if (isSchemaMismatchError(error)) {
+        set.status = 503
+        return { error: schemaMismatchMessage('Auth schema') }
+      }
 
       console.error('Login endpoint failed:', error)
       set.status = 500
@@ -769,6 +774,10 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
       if (isDatabaseUnavailableError(error)) {
         set.status = 503
         return { error: 'Database is unavailable. Start PostgreSQL and try again.' }
+      }
+      if (isSchemaMismatchError(error)) {
+        set.status = 503
+        return { error: schemaMismatchMessage('Auth schema') }
       }
 
       console.error('Auth me endpoint failed:', error)
@@ -1192,6 +1201,10 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
       if (error instanceof HomeScopeResolutionError) {
         set.status = error.status
         return { error: error.message }
+      }
+      if (isSchemaMismatchError(error)) {
+        set.status = 503
+        return { error: schemaMismatchMessage('Home scope schema') }
       }
       throw error
     }
@@ -1668,6 +1681,10 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
           set.status = error.status
           return { error: error.message }
         }
+        if (isSchemaMismatchError(error)) {
+          set.status = 503
+          return { error: schemaMismatchMessage('Home scope schema') }
+        }
         throw error
       }
 
@@ -1694,6 +1711,10 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
         if (error instanceof HomeScopeResolutionError) {
           set.status = error.status
           return { error: error.message }
+        }
+        if (isSchemaMismatchError(error)) {
+          set.status = 503
+          return { error: schemaMismatchMessage('Home scope schema') }
         }
         throw error
       }

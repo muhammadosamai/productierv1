@@ -1031,6 +1031,7 @@ onBeforeUnmount(() => {
       :templates-enabled="dashboardTemplatesEnabled"
       :show-load-template-button="false"
       :show-add-page-button="false"
+      :show-page-actions-menu="false"
       :allow-reorder="canReorderPages"
       :busy="homeBusy"
       @select-page="dashboard.selectPage"

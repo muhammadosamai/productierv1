@@ -463,11 +463,15 @@ export const organizationInvites = pgTable('organization_invites', {
   id: uuid('id').primaryKey().defaultRandom(),
   organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
   email: varchar('email', { length: 255 }).notNull(),
+  inviteeName: varchar('invitee_name', { length: 255 }),
   tokenHash: varchar('token_hash', { length: 255 }).notNull().unique(),
   role: organizationMemberRoleEnum('role').notNull().default('member'),
   status: organizationInviteStatusEnum('status').notNull().default('pending'),
   invitedByUserId: uuid('invited_by_user_id').notNull().references(() => users.id),
   acceptedByUserId: uuid('accepted_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  workspaceProductId: uuid('workspace_product_id').references(() => products.id, { onDelete: 'set null' }),
+  organizationTeamId: uuid('organization_team_id').references(() => organizationTeams.id, { onDelete: 'set null' }),
+  titleId: uuid('title_id').references(() => titles.id, { onDelete: 'set null' }),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   acceptedAt: timestamp('accepted_at', { withTimezone: true }),
   cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
@@ -477,6 +481,9 @@ export const organizationInvites = pgTable('organization_invites', {
   index('organization_invites_org_idx').on(table.organizationId),
   index('organization_invites_email_idx').on(table.email),
   index('organization_invites_status_idx').on(table.status),
+  index('organization_invites_workspace_idx').on(table.workspaceProductId),
+  index('organization_invites_team_idx').on(table.organizationTeamId),
+  index('organization_invites_title_idx').on(table.titleId),
 ])
 
 export const onboardingProgress = pgTable('onboarding_progress', {

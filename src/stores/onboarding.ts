@@ -250,7 +250,14 @@ export const useOnboardingStore = defineStore('onboarding', () => {
 
   async function createInvites(input: {
     organizationId: string
-    invites: Array<{ email: string; role?: 'owner' | 'admin' | 'member' | 'viewer' }>
+    invites: Array<{
+      email: string
+      name?: string | null
+      role?: 'owner' | 'admin' | 'member' | 'viewer'
+      workspaceProductId?: string | null
+      organizationTeamId?: string | null
+      titleId?: string | null
+    }>
   }): Promise<boolean> {
     if (!authStore.token) return false
     submitting.value = true

@@ -1,5 +1,6 @@
 import { Elysia, t } from 'elysia'
 import crypto from 'node:crypto'
+import bcrypt from 'bcryptjs'
 import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm'
 import { db } from '../db'
 import {
@@ -7,9 +8,13 @@ import {
   onboardingProgress,
   organizationInvites,
   organizationMembers,
+  organizationTeamMembers,
+  organizationTeams,
   organizations,
   productMembers,
   products,
+  titles,
+  userTitles,
   users,
 } from '../db/schema'
 import { authPlugin } from '../plugins/auth'
@@ -17,6 +22,7 @@ import { requireAuth, requireOrganizationAccess } from '../lib/authz'
 import { computeChanges, logActivity } from '../lib/logActivity'
 import { PRODUCT_CREATOR_MEMBER_ROLE } from '../lib/productMembershipPolicy'
 import { consumeRateLimit, resolveClientAddress } from '../lib/inMemoryRateLimiter'
+import { isMissingColumnError } from '../lib/schemaMismatch'
 import { getStorage } from '../storage'
 
 const ORGANIZATION_MANAGER_ROLES = ['owner', 'admin'] as const
@@ -25,6 +31,8 @@ const MAX_INVITES_PER_REQUEST = 20
 const MAX_PENDING_INVITES_PER_ORGANIZATION = 200
 const MAX_ORGANIZATION_DESCRIPTION_LENGTH = 2000
 const MAX_LOGO_URL_LENGTH = 1000
+const MAX_INVITEE_NAME_LENGTH = 255
+const PASSWORD_MIN_LENGTH = 12
 
 type OnboardingStep = 'account' | 'organization' | 'workspace' | 'invites' | 'completed'
 
@@ -35,12 +43,6 @@ interface MembershipSummary {
   organizationDescription: string | null
   organizationLogo: string | null
   role: string
-}
-
-function isMissingColumnError(error: unknown, columnToken: string): boolean {
-  if (!error || typeof error !== 'object') return false
-  const maybeError = error as { code?: string; message?: string }
-  return maybeError.code === '42703' && (maybeError.message || '').includes(columnToken)
 }
 
 function normalizeEmail(value: string): string {
@@ -63,6 +65,36 @@ function normalizeOptionalLogo(value: string | null | undefined): string | null 
   const normalized = value.trim()
   if (!normalized) return null
   return normalized.slice(0, MAX_LOGO_URL_LENGTH)
+}
+
+function normalizeOptionalInviteeName(value: string | null | undefined): string | null {
+  return normalizeOptionalText(value, MAX_INVITEE_NAME_LENGTH)
+}
+
+function normalizeOptionalId(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim()
+  if (!normalized) return null
+  return normalized
+}
+
+function validatePasswordPolicy(password: string): { ok: true } | { ok: false; message: string } {
+  if (password.length < PASSWORD_MIN_LENGTH) {
+    return { ok: false, message: `Password must be at least ${PASSWORD_MIN_LENGTH} characters long` }
+  }
+  if (!/[a-z]/.test(password)) {
+    return { ok: false, message: 'Password must include at least one lowercase letter' }
+  }
+  if (!/[A-Z]/.test(password)) {
+    return { ok: false, message: 'Password must include at least one uppercase letter' }
+  }
+  if (!/[0-9]/.test(password)) {
+    return { ok: false, message: 'Password must include at least one number' }
+  }
+  if (!/[^A-Za-z0-9]/.test(password)) {
+    return { ok: false, message: 'Password must include at least one special character' }
+  }
+  return { ok: true }
 }
 
 function slugifyOrganizationName(name: string): string {
@@ -647,7 +679,11 @@ export const onboardingRoutes = new Elysia({ prefix: '/api/onboarding' })
       id: row.id,
       organizationId: row.organizationId,
       email: row.email,
+      inviteeName: row.inviteeName,
       role: row.role,
+      workspaceProductId: row.workspaceProductId,
+      organizationTeamId: row.organizationTeamId,
+      titleId: row.titleId,
       status: row.status,
       expiresAt: row.expiresAt,
       acceptedAt: row.acceptedAt,
@@ -703,7 +739,11 @@ export const onboardingRoutes = new Elysia({ prefix: '/api/onboarding' })
     const created: Array<{
       id: string
       email: string
+      inviteeName: string | null
       role: string
+      workspaceProductId: string | null
+      organizationTeamId: string | null
+      titleId: string | null
       status: string
       expiresAt: Date
       inviteLink: string
@@ -725,6 +765,50 @@ export const onboardingRoutes = new Elysia({ prefix: '/api/onboarding' })
       if (requestedRole === 'owner' && access.memberRole !== 'owner') {
         skipped.push({ email, reason: 'owner_role_requires_owner' })
         continue
+      }
+
+      const inviteeName = normalizeOptionalInviteeName(inviteInput.name)
+      const workspaceProductId = normalizeOptionalId(inviteInput.workspaceProductId)
+      const organizationTeamId = normalizeOptionalId(inviteInput.organizationTeamId)
+      const titleId = normalizeOptionalId(inviteInput.titleId)
+
+      if (workspaceProductId) {
+        const workspace = await db.query.products.findFirst({
+          where: and(
+            eq(products.id, workspaceProductId),
+            eq(products.organizationId, body.organizationId),
+          ),
+          columns: { id: true },
+        })
+        if (!workspace) {
+          skipped.push({ email, reason: 'invalid_workspace' })
+          continue
+        }
+      }
+
+      if (organizationTeamId) {
+        const team = await db.query.organizationTeams.findFirst({
+          where: and(
+            eq(organizationTeams.id, organizationTeamId),
+            eq(organizationTeams.organizationId, body.organizationId),
+          ),
+          columns: { id: true },
+        })
+        if (!team) {
+          skipped.push({ email, reason: 'invalid_team' })
+          continue
+        }
+      }
+
+      if (titleId) {
+        const title = await db.query.titles.findFirst({
+          where: eq(titles.id, titleId),
+          columns: { id: true, isActive: true },
+        })
+        if (!title || !title.isActive) {
+          skipped.push({ email, reason: 'invalid_title' })
+          continue
+        }
       }
 
       const existingUser = await db.query.users.findFirst({
@@ -761,10 +845,14 @@ export const onboardingRoutes = new Elysia({ prefix: '/api/onboarding' })
       const [invite] = await db.insert(organizationInvites).values({
         organizationId: body.organizationId,
         email,
+        inviteeName,
         tokenHash: inviteTokenHash(token),
         role: requestedRole,
         status: 'pending',
         invitedByUserId: access.user.id,
+        workspaceProductId,
+        organizationTeamId,
+        titleId,
         expiresAt: inviteExpiresAt(),
       }).returning()
 
@@ -782,7 +870,11 @@ export const onboardingRoutes = new Elysia({ prefix: '/api/onboarding' })
       created.push({
         id: invite!.id,
         email: invite!.email,
+        inviteeName: invite!.inviteeName,
         role: invite!.role,
+        workspaceProductId: invite!.workspaceProductId,
+        organizationTeamId: invite!.organizationTeamId,
+        titleId: invite!.titleId,
         status: invite!.status,
         expiresAt: invite!.expiresAt,
         inviteLink: buildInviteLink(token),
@@ -809,12 +901,16 @@ export const onboardingRoutes = new Elysia({ prefix: '/api/onboarding' })
       organizationId: t.String({ minLength: 1 }),
       invites: t.Array(t.Object({
         email: t.String({ minLength: 3, maxLength: 255 }),
+        name: t.Optional(t.Nullable(t.String({ maxLength: MAX_INVITEE_NAME_LENGTH }))),
         role: t.Optional(t.Union([
           t.Literal('owner'),
           t.Literal('admin'),
           t.Literal('member'),
           t.Literal('viewer'),
         ])),
+        workspaceProductId: t.Optional(t.Nullable(t.String({ minLength: 1 }))),
+        organizationTeamId: t.Optional(t.Nullable(t.String({ minLength: 1 }))),
+        titleId: t.Optional(t.Nullable(t.String({ minLength: 1 }))),
       })),
     }),
   })
@@ -864,6 +960,225 @@ export const onboardingRoutes = new Elysia({ prefix: '/api/onboarding' })
     })
 
     return { success: true }
+  })
+
+  // POST /api/onboarding/invites/activate
+  .post('/invites/activate', async ({ body, jwt, headers, set }) => {
+    const clientAddress = resolveClientAddress(headers)
+    const activateByAddressRateLimit = consumeRateLimit({
+      key: `onboarding:activate-invite:address:${clientAddress}`,
+      windowMs: 5 * 60 * 1000,
+      max: 40,
+    })
+    if (!activateByAddressRateLimit.allowed) {
+      set.status = 429
+      return { error: `Too many invite activations from this address. Try again in ${activateByAddressRateLimit.retryAfterSeconds} seconds.` }
+    }
+
+    const activateByTokenRateLimit = consumeRateLimit({
+      key: `onboarding:activate-invite:token:${inviteTokenHash(body.token)}`,
+      windowMs: 5 * 60 * 1000,
+      max: 10,
+    })
+    if (!activateByTokenRateLimit.allowed) {
+      set.status = 429
+      return { error: `Too many activation attempts for this invite. Try again in ${activateByTokenRateLimit.retryAfterSeconds} seconds.` }
+    }
+
+    const passwordPolicy = validatePasswordPolicy(body.password)
+    if (!passwordPolicy.ok) {
+      set.status = 400
+      return { error: passwordPolicy.message }
+    }
+
+    const invite = await resolveOrganizationByInviteToken(body.token)
+    if (!invite) {
+      set.status = 404
+      return { error: 'Invite not found' }
+    }
+
+    if (invite.status !== 'pending') {
+      set.status = 409
+      return { error: 'Invite is no longer pending' }
+    }
+
+    if (invite.expiresAt < new Date()) {
+      await db.update(organizationInvites)
+        .set({
+          status: 'expired',
+          updatedAt: new Date(),
+        })
+        .where(eq(organizationInvites.id, invite.id))
+      set.status = 410
+      return { error: 'Invite has expired' }
+    }
+
+    const normalizedEmail = normalizeEmail(invite.email)
+    const inviteName = normalizeOptionalInviteeName(invite.inviteeName)
+    const requestName = normalizeOptionalInviteeName(body.name)
+    const nameFromEmail = normalizedEmail.split('@')[0] || 'Invited User'
+    const resolvedName = requestName || inviteName || nameFromEmail
+    const hashedPassword = await bcrypt.hash(body.password, 10)
+
+    const existingUser = await db.query.users.findFirst({
+      where: eq(users.email, normalizedEmail),
+    })
+
+    let activatedUser = existingUser
+    if (!activatedUser) {
+      const [createdUser] = await db.insert(users).values({
+        name: resolvedName,
+        email: normalizedEmail,
+        password: hashedPassword,
+        role: 'viewer',
+        isActive: true,
+      }).returning()
+      activatedUser = createdUser || null
+    } else {
+      if (!activatedUser.isActive) {
+        set.status = 403
+        return { error: 'Account is deactivated. Contact an administrator.' }
+      }
+
+      const shouldUpdateName = Boolean(requestName)
+      const [updatedUser] = await db.update(users)
+        .set({
+          password: hashedPassword,
+          ...(shouldUpdateName ? { name: resolvedName } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, activatedUser.id))
+        .returning()
+      activatedUser = updatedUser || activatedUser
+    }
+
+    if (!activatedUser) {
+      set.status = 500
+      return { error: 'Failed to activate invite account' }
+    }
+
+    await db.insert(organizationMembers).values({
+      organizationId: invite.organizationId,
+      userId: activatedUser.id,
+      role: invite.role,
+      invitedByUserId: invite.invitedByUserId,
+    }).onConflictDoNothing()
+
+    const workspaceProductId = normalizeOptionalId(invite.workspaceProductId)
+    if (workspaceProductId) {
+      const workspace = await db.query.products.findFirst({
+        where: and(
+          eq(products.id, workspaceProductId),
+          eq(products.organizationId, invite.organizationId),
+        ),
+        columns: { id: true },
+      })
+      if (workspace) {
+        await db.insert(productMembers).values({
+          productId: workspace.id,
+          userId: activatedUser.id,
+          role: 'member',
+        }).onConflictDoNothing()
+      }
+    }
+
+    const organizationTeamId = normalizeOptionalId(invite.organizationTeamId)
+    if (organizationTeamId) {
+      const team = await db.query.organizationTeams.findFirst({
+        where: and(
+          eq(organizationTeams.id, organizationTeamId),
+          eq(organizationTeams.organizationId, invite.organizationId),
+        ),
+        columns: { id: true },
+      })
+      if (team) {
+        await db.insert(organizationTeamMembers).values({
+          organizationTeamId: team.id,
+          userId: activatedUser.id,
+          role: 'member',
+          addedByUserId: invite.invitedByUserId,
+        }).onConflictDoNothing()
+      }
+    }
+
+    const titleId = normalizeOptionalId(invite.titleId)
+    if (titleId) {
+      const title = await db.query.titles.findFirst({
+        where: eq(titles.id, titleId),
+        columns: { id: true, isActive: true },
+      })
+      if (title?.isActive) {
+        await db.insert(userTitles).values({
+          userId: activatedUser.id,
+          titleId: title.id,
+          assignedByUserId: invite.invitedByUserId,
+          assignedAt: new Date(),
+        }).onConflictDoUpdate({
+          target: userTitles.userId,
+          set: {
+            titleId: title.id,
+            assignedByUserId: invite.invitedByUserId,
+            assignedAt: new Date(),
+            updatedAt: new Date(),
+          },
+        })
+      }
+    }
+
+    await db.update(organizationInvites)
+      .set({
+        status: 'accepted',
+        acceptedByUserId: activatedUser.id,
+        acceptedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(organizationInvites.id, invite.id))
+
+    const [workspaceCountRow] = await db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(products)
+      .where(eq(products.organizationId, invite.organizationId))
+    const workspaceCount = Number(workspaceCountRow?.value || 0)
+    const isCompleted = workspaceCount > 0
+
+    await upsertOnboardingState({
+      userId: activatedUser.id,
+      organizationId: invite.organizationId,
+      currentStep: isCompleted ? 'completed' : 'workspace',
+      isCompleted,
+    })
+
+    const organization = await db.query.organizations.findFirst({
+      where: eq(organizations.id, invite.organizationId),
+      columns: { id: true, name: true, slug: true },
+    })
+    const token = await jwt.sign({ userId: activatedUser.id, role: activatedUser.role })
+
+    return {
+      success: true,
+      token,
+      user: {
+        id: activatedUser.id,
+        name: activatedUser.name,
+        email: activatedUser.email,
+        role: activatedUser.role,
+        isActive: activatedUser.isActive,
+        avatar: activatedUser.avatar,
+        createdAt: activatedUser.createdAt,
+      },
+      organization,
+      membershipRole: invite.role,
+      onboarding: {
+        currentStep: isCompleted ? 'completed' : 'workspace',
+        isCompleted,
+      },
+    }
+  }, {
+    body: t.Object({
+      token: t.String({ minLength: 20, maxLength: 500 }),
+      password: t.String({ minLength: PASSWORD_MIN_LENGTH }),
+      name: t.Optional(t.Nullable(t.String({ maxLength: MAX_INVITEE_NAME_LENGTH }))),
+    }),
   })
 
   // POST /api/onboarding/invites/accept

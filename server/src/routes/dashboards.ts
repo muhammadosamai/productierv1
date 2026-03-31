@@ -27,6 +27,7 @@ import {
   requireProductAccess,
   type AuthenticatedUser,
 } from '../lib/authz'
+import { isMissingColumnError, isSchemaMismatchError } from '../lib/schemaMismatch'
 
 type DashboardScopeType = 'product' | 'workspace'
 type DashboardVisibility = 'personal' | 'team' | 'invited'
@@ -153,10 +154,9 @@ function normalizeViewerRole(value: unknown): DashboardViewerAccessRole {
 }
 
 function isMissingAccessRoleColumnError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false
-  const maybeErr = error as { code?: string; message?: string }
-  if (String(maybeErr.code || '').toUpperCase() === '42703') return true
-  const message = String(maybeErr.message || '').toLowerCase()
+  if (isMissingColumnError(error, 'access_role')) return true
+  if (!isSchemaMismatchError(error)) return false
+  const message = String((error as { message?: unknown }).message || '').toLowerCase()
   return message.includes('access_role') && message.includes('does not exist')
 }
 

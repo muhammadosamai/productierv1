@@ -1,0 +1,61 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+.DS_Store
+Thumbs.db
+dist
+dist-ssr
+coverage
+*.local
+.envrc
+.direnv/
+
+# Environment files (local secrets)
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+*.tsbuildinfo
+
+.eslintcache
+
+# Cypress
+/cypress/videos/
+/cypress/screenshots/
+
+# Vitest
+__screenshots__/
+
+# Vite
+*.timestamp-*-*.mjs
+
+# Endpoint Docs generated artifacts
+Endpoint Docs/endpoint-report.md
+Endpoint Docs/endpoint-results.json
+
+# Server
+server/node_modules
+server/drizzle/
+server/database-docs/database-schema.md
+# Keep seeded logo assets, ignore runtime upload content
+server/uploads/*
+!server/uploads/logos/
+!server/uploads/logos/*.svg

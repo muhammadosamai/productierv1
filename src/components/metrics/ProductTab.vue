@@ -1,0 +1,605 @@
+<script setup lang="ts">
+import { ref, onMounted, computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { useProductStore } from '@/stores/products'
+import { useBacklogStore } from '@/stores/backlog'
+import { useInitiativesStore } from '@/stores/initiatives'
+import { useActivitiesStore } from '@/stores/activities'
+import { useProductMembersStore } from '@/stores/productMembers'
+import { useAuthStore } from '@/stores/auth'
+import { usePagePermissions } from '@/lib/pagePermissions'
+import { usersApi } from '@/lib/api'
+import {
+  Loader2, Plus, X, Search, Clock, UserPlus, Users,
+  Signal, FileText, Type, Tag, CalendarClock, Hourglass, User,
+} from 'lucide-vue-next'
+import type { Activity } from '@/stores/activities'
+import { buildHomeActivityEntityRoute } from '@/lib/homeEntityRouting'
+
+const productStore = useProductStore()
+const backlogStore = useBacklogStore()
+const initiativesStore = useInitiativesStore()
+const activitiesStore = useActivitiesStore()
+const membersStore = useProductMembersStore()
+const authStore = useAuthStore()
+const router = useRouter()
+const teamPermissions = usePagePermissions('team')
+const canCreateTeamMembers = computed(() => teamPermissions.canCreate.value)
+const canDeleteTeamMembers = computed(() => teamPermissions.canDelete.value)
+const activeProductLogoFailed = ref(false)
+const activeProductLogoVisible = computed(
+  () => Boolean(productStore.activeProduct.logo) && !activeProductLogoFailed.value,
+)
+
+// Team member search
+const showAddMember = ref(false)
+const memberSearch = ref('')
+const memberSearchResults = ref<{ id: string; name: string; email: string; avatar: string | null }[]>([])
+const memberSearchLoading = ref(false)
+let searchTimeout: ReturnType<typeof setTimeout> | null = null
+
+// Activity helpers
+
+onMounted(() => {
+  loadData()
+})
+
+watch(() => productStore.activeProduct.id, () => {
+  loadData()
+})
+
+function activeProductId(): string {
+  return productStore.activeProduct.id || ''
+}
+
+async function loadStoriesForFeed(productId: string) {
+  await backlogStore.fetchStories(productId, { limit: 80 })
+  let safetyCounter = 0
+  while (backlogStore.hasMore && backlogStore.nextCursor && safetyCounter < 10) {
+    await backlogStore.fetchStories(productId, {
+      limit: 80,
+      cursor: backlogStore.nextCursor,
+      append: true,
+    })
+    safetyCounter += 1
+  }
+}
+
+async function loadData() {
+  const product = activeProductId()
+  if (!product) return
+  await Promise.all([
+    loadStoriesForFeed(product),
+    initiativesStore.fetchInitiatives(),
+    activitiesStore.fetchActivities(product),
+    membersStore.fetchMembers(product),
+  ])
+}
+
+function onActiveProductLogoError(): void {
+  activeProductLogoFailed.value = true
+}
+
+watch(() => productStore.activeProduct.id, () => {
+  activeProductLogoFailed.value = false
+})
+
+watch(() => productStore.activeProduct.logo, () => {
+  activeProductLogoFailed.value = false
+})
+
+// Stats
+const totalStories = computed(() => backlogStore.stories.length)
+const totalInitiatives = computed(() => initiativesStore.initiatives.length)
+const inProgressStories = computed(() => backlogStore.stories.filter(i => i.status === 'in_progress').length)
+const completedStories = computed(() => backlogStore.stories.filter(i => i.status === 'completed').length)
+const productFeedErrors = computed(() => (
+  [
+    backlogStore.error,
+    initiativesStore.error,
+    activitiesStore.error,
+    membersStore.error,
+  ].filter((value): value is string => Boolean(value))
+))
+
+// Group activities by date
+const groupedActivities = computed(() => {
+  const groups: { label: string; activities: Activity[] }[] = []
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const yesterday = new Date(today.getTime() - 86400000)
+
+  const dateMap = new Map<string, Activity[]>()
+
+  for (const activity of activitiesStore.activities) {
+    const d = new Date(activity.createdAt)
+    const day = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+    let label: string
+    if (day.getTime() === today.getTime()) {
+      label = `Today ${formatDateHeader(d)}`
+    } else if (day.getTime() === yesterday.getTime()) {
+      label = `Yesterday, ${formatDateHeader(d)}`
+    } else {
+      label = formatDateHeader(d)
+    }
+    if (!dateMap.has(label)) dateMap.set(label, [])
+    dateMap.get(label)!.push(activity)
+  }
+
+  for (const [label, acts] of dateMap) {
+    groups.push({ label, activities: acts })
+  }
+
+  return groups
+})
+
+function formatDateHeader(date: Date) {
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${days[date.getDay()]} ${months[date.getMonth()]} ${date.getDate()}${getOrdinal(date.getDate())}, ${date.getFullYear()}`
+}
+
+function getOrdinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd']
+  const v = n % 100
+  return s[(v - 20) % 10] || s[v] || s[0]!
+}
+
+
+function activityActionColor(action: string) {
+  switch (action) {
+    case 'created': return 'bg-[#00c875]'
+    case 'updated': return 'bg-[#579bfc]'
+    case 'deleted': return 'bg-[#e2445c]'
+    default: return 'bg-gray-400'
+  }
+}
+
+function formatRelativeTime(dateStr: string) {
+  const now = new Date()
+  const d = new Date(dateStr)
+  const diffMs = now.getTime() - d.getTime()
+  const mins = Math.floor(diffMs / 60000)
+  if (mins < 1) return 'Just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d ago`
+  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
+}
+
+function entityTypeLabel(type: string) {
+  switch (type) {
+    case 'initiative': return 'Initiative'
+    case 'story': return 'Story'
+    case 'task': return 'Task'
+    default: return type
+  }
+}
+
+function statusStyle(status: string) {
+  switch (status) {
+    case 'backlog': case 'created': return 'bg-[#c4c4c4] text-white'
+    case 'drafted': return 'bg-[#a25ddc] text-white'
+    case 'initialized': return 'bg-[#579bfc] text-white'
+    case 'in_progress': case 'active': return 'bg-[#fdab3d] text-white'
+    case 'completed': case 'done': return 'bg-[#00c875] text-white'
+    case 'assigned': return 'bg-[#a25ddc] text-white'
+    case 'in_review': return 'bg-[#579bfc] text-white'
+    case 'overdue': return 'bg-red-500 text-white'
+    case 'blocked': case 'paused': return 'bg-[#e2445c] text-white'
+    case 'planning': return 'bg-[#fdab3d] text-white'
+    case 'pending': return 'bg-[#a25ddc] text-white'
+    case 'archived': return 'bg-gray-400 text-white'
+    default: return 'bg-gray-200 text-gray-600'
+  }
+}
+
+function formatLabel(field: string) {
+  return field.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+}
+
+function changeFieldIcon(field: string) {
+  switch (field) {
+    case 'status': return Signal
+    case 'priority': return Signal
+    case 'type': return Type
+    case 'title': return FileText
+    case 'owner': case 'leader': return User
+    case 'initiative': return Tag
+    case 'delivery': return CalendarClock
+    case 'estimate': return Hourglass
+    default: return FileText
+  }
+}
+
+function changeIconColor(change: { from: string | null; to: string | null }): string {
+  if (!change.from && change.to) return 'text-green-500'
+  if (change.from && !change.to) return 'text-red-400'
+  return 'text-[#579bfc]'
+}
+
+function changeDescription(change: { field: string; from: string | null; to: string | null }): string {
+  if (!change.from && change.to) return `Set ${formatLabel(change.field)}`
+  if (change.from && !change.to) return `Cleared ${formatLabel(change.field)}`
+  return `Changed ${formatLabel(change.field)}`
+}
+
+// Member search
+async function searchUsers(query: string) {
+  memberSearchLoading.value = true
+  try {
+    const payload = await usersApi.list({ q: query }, authStore.token)
+    const all = Array.isArray(payload)
+      ? payload
+      : (Array.isArray(payload?.items) ? payload.items : [])
+    // Filter out existing members
+    const existingIds = new Set(membersStore.members.map(m => m.userId))
+    memberSearchResults.value = all.filter((u: any) => !existingIds.has(u.id))
+  } catch {
+    memberSearchResults.value = []
+  } finally {
+    memberSearchLoading.value = false
+  }
+}
+
+function onMemberSearchInput() {
+  if (searchTimeout) clearTimeout(searchTimeout)
+  searchTimeout = setTimeout(() => {
+    searchUsers(memberSearch.value)
+  }, 200)
+}
+
+async function addMember(user: { id: string; name: string }) {
+  if (!canCreateTeamMembers.value) return
+  const productId = activeProductId()
+  if (!productId) return
+  await membersStore.addMember(productId, user.id)
+  memberSearch.value = ''
+  memberSearchResults.value = []
+  showAddMember.value = false
+}
+
+async function removeMember(userId: string) {
+  if (!canDeleteTeamMembers.value) return
+  const productId = activeProductId()
+  if (!productId) return
+  await membersStore.removeMember(productId, userId)
+}
+
+function openAddMember() {
+  if (!canCreateTeamMembers.value) return
+  showAddMember.value = true
+  memberSearch.value = ''
+  memberSearchResults.value = []
+  searchUsers('')
+}
+
+function userInitials(name: string) {
+  return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
+}
+
+function activityRoute(activity: Activity) {
+  return buildHomeActivityEntityRoute(activity.entityType, activity.entityId)
+}
+
+function openActivityEntity(activity: Activity) {
+  const targetRoute = activityRoute(activity)
+  if (!targetRoute) return
+  router.push(targetRoute)
+}
+</script>
+
+<template>
+  <div class="p-4 sm:p-6 lg:p-8" style="background-color: #F8FAFF">
+    <div class="max-w-[1200px] mx-auto w-full">
+      <div
+        v-if="productFeedErrors.length > 0"
+        class="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+      >
+        <p class="font-semibold">Some product feed sections failed to load.</p>
+        <p class="mt-1 text-xs text-red-600">{{ productFeedErrors[0] }}</p>
+      </div>
+
+      <!-- Stats Cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+        <div class="bg-white rounded-xl border border-gray-100 p-5">
+          <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Total Stories</p>
+          <p class="text-2xl font-semibold text-gray-900 mt-2">{{ totalStories }}</p>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-100 p-5">
+          <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Initiatives</p>
+          <p class="text-2xl font-semibold text-gray-900 mt-2">{{ totalInitiatives }}</p>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-100 p-5">
+          <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">In Progress</p>
+          <p class="text-2xl font-semibold text-blue-600 mt-2">{{ inProgressStories }}</p>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-100 p-5">
+          <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Completed</p>
+          <p class="text-2xl font-semibold text-green-600 mt-2">{{ completedStories }}</p>
+        </div>
+      </div>
+
+      <!-- Two-column layout -->
+      <div class="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6">
+        <!-- Left: Activity Timeline -->
+        <div class="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          <!-- Header -->
+          <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            <div class="flex items-center gap-2">
+              <Clock :size="18" class="text-gray-400" />
+              <h2 class="text-sm font-semibold text-gray-900">Activities</h2>
+            </div>
+            <button
+              v-if="activitiesStore.activities.length > 0"
+              class="text-xs text-gray-400 hover:text-gray-600"
+              @click="activitiesStore.fetchActivities()"
+            >
+              Refresh
+            </button>
+          </div>
+
+          <!-- Loading -->
+          <div v-if="activitiesStore.loading" class="flex items-center justify-center py-16">
+            <Loader2 :size="20" class="animate-spin text-gray-400" />
+          </div>
+
+          <!-- Empty -->
+          <div v-else-if="activitiesStore.activities.length === 0" class="text-center py-16">
+            <Clock :size="32" class="text-gray-200 mx-auto mb-3" />
+            <p class="text-sm text-gray-400">No activity yet</p>
+            <p class="text-xs text-gray-300 mt-1">Changes to stories and initiatives will appear here</p>
+          </div>
+
+          <!-- Activity groups -->
+          <div v-else>
+            <div v-for="group in groupedActivities" :key="group.label">
+              <!-- Date header -->
+              <div class="pt-3 pb-1.5 px-6">
+                <span class="text-[11px] font-bold tracking-wider text-[#4857FE]">{{ group.label }}</span>
+              </div>
+
+              <!-- Activities in group -->
+              <div class="relative px-6">
+                <!-- Timeline line -->
+                <div class="absolute left-[39px] top-0 bottom-0 w-px bg-gray-100"></div>
+
+                <div v-for="activity in group.activities" :key="activity.id" class="relative py-3">
+                  <div class="flex items-start gap-3">
+                    <!-- Avatar with action dot -->
+                    <div class="relative shrink-0 z-10">
+                      <div class="w-8 h-8 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden ring-2 ring-white">
+                        <img
+                          v-if="activity.userAvatar"
+                          :src="activity.userAvatar"
+                          class="w-8 h-8 rounded-full object-cover"
+                          :alt="activity.userName"
+                        />
+                        <span v-else>{{ userInitials(activity.userName) }}</span>
+                      </div>
+                      <div
+                        class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white"
+                        :class="activityActionColor(activity.action)"
+                      ></div>
+                    </div>
+
+                    <!-- Content -->
+                    <div class="flex-1 min-w-0">
+                      <!-- Row 1: User name + entity tag (left) + Time (right) -->
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-1.5 min-w-0">
+                          <span class="text-sm font-semibold text-gray-900">{{ activity.userName }}</span>
+                          <button
+                            v-if="activityRoute(activity)"
+                            type="button"
+                            class="text-[9px] font-medium rounded px-1.5 py-0.5 truncate max-w-[160px]"
+                            :class="activity.entityType === 'story' ? 'text-orange-600 bg-orange-50' : activity.entityType === 'task' ? 'text-[#4857FE] bg-[#4857FE]/8' : 'text-purple-600 bg-purple-50'"
+                            :title="activity.entityTitle"
+                            @click.stop="openActivityEntity(activity)"
+                          >{{ entityTypeLabel(activity.entityType) }}: {{ activity.entityTitle }}</button>
+                          <span
+                            v-else
+                            class="text-[9px] font-medium rounded px-1.5 py-0.5 truncate max-w-[160px]"
+                            :class="activity.entityType === 'story' ? 'text-orange-600 bg-orange-50' : activity.entityType === 'task' ? 'text-[#4857FE] bg-[#4857FE]/8' : 'text-purple-600 bg-purple-50'"
+                            :title="activity.entityTitle"
+                          >{{ entityTypeLabel(activity.entityType) }}: {{ activity.entityTitle }}</span>
+                        </div>
+                        <span class="text-[11px] text-gray-400 shrink-0 ml-2">{{ formatRelativeTime(activity.createdAt) }}</span>
+                      </div>
+
+                      <!-- Row 2: Action details inline -->
+                      <div class="mt-2 bg-gray-50 rounded-lg p-2.5 border border-gray-100">
+                        <!-- Created -->
+                        <div v-if="activity.action === 'created'" class="flex items-center gap-2">
+                          <span class="w-1.5 h-1.5 rounded-full bg-[#00c875] shrink-0"></span>
+                          <span class="text-xs font-medium text-gray-600">{{ entityTypeLabel(activity.entityType) }} created</span>
+                        </div>
+                        <!-- Deleted -->
+                        <div v-else-if="activity.action === 'deleted'" class="flex items-center gap-2">
+                          <span class="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
+                          <span class="text-xs font-medium text-gray-600">{{ entityTypeLabel(activity.entityType) }} deleted</span>
+                        </div>
+                        <!-- Updated — inline change lines -->
+                        <div v-else-if="activity.changes && activity.changes.length > 0" class="space-y-2">
+                          <div v-for="(change, ci) in activity.changes" :key="ci" class="flex items-start gap-2">
+                            <component :is="changeFieldIcon(change.field)" :size="12" class="shrink-0 mt-0.5" :class="changeIconColor(change)" />
+                            <div class="text-xs text-gray-600 min-w-0">
+                              <span class="font-medium">{{ changeDescription(change) }}</span>
+                              <!-- Status: colored pill badges -->
+                              <template v-if="change.field === 'status'">
+                                <span
+                                  v-if="change.from"
+                                  class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ml-1 align-middle"
+                                  :class="statusStyle(change.from)"
+                                >{{ formatLabel(change.from) }}</span>
+                                <span v-if="change.from && change.to" class="text-gray-300 mx-0.5 align-middle">→</span>
+                                <span
+                                  v-if="change.to"
+                                  class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold align-middle"
+                                  :class="statusStyle(change.to)"
+                                >{{ formatLabel(change.to) }}</span>
+                              </template>
+                              <!-- Other fields: text badges -->
+                              <template v-else-if="change.field !== 'description' && change.field !== 'acceptanceCriteria' && change.field !== 'ownerAvatar'">
+                                <span v-if="change.from" class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-200 text-gray-600 text-[10px] font-medium ml-1 align-middle">{{ formatLabel(change.from) }}</span>
+                                <span v-if="change.from && change.to" class="text-gray-300 mx-0.5 align-middle">→</span>
+                                <span v-if="change.to" class="inline-flex items-center px-1.5 py-0.5 rounded bg-[#4857FE]/10 text-[#4857FE] text-[10px] font-medium align-middle">{{ formatLabel(change.to) }}</span>
+                              </template>
+                            </div>
+                          </div>
+                        </div>
+                        <!-- Fallback -->
+                        <div v-else class="flex items-center gap-2">
+                          <span class="w-1.5 h-1.5 rounded-full bg-[#579bfc] shrink-0"></span>
+                          <span class="text-xs font-medium text-gray-600">{{ formatLabel(activity.action) }} {{ entityTypeLabel(activity.entityType).toLowerCase() }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right column -->
+        <div class="space-y-6">
+
+        <!-- Product Info -->
+        <div class="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          <div class="p-5">
+            <div class="flex items-center gap-3.5 mb-4">
+              <img
+                v-if="activeProductLogoVisible"
+                :src="productStore.activeProduct.logo"
+                :alt="productStore.activeProduct.name"
+                class="w-12 h-12 rounded-xl object-cover border border-gray-100"
+                @error="onActiveProductLogoError"
+              />
+              <div v-else class="w-12 h-12 rounded-xl bg-[#4857FE]/10 flex items-center justify-center text-lg font-bold text-[#4857FE]">
+                {{ productStore.activeProduct.name?.[0] }}
+              </div>
+              <div class="min-w-0">
+                <h3 class="text-base font-semibold text-gray-900 truncate">{{ productStore.activeProduct.name }}</h3>
+                <span class="text-xs text-gray-400">{{ productStore.activeProduct.members }} members</span>
+              </div>
+            </div>
+            <p class="text-sm text-gray-500 leading-relaxed">
+              {{ productStore.activeProduct.description || 'No description added yet. Add a description to help your team understand this product.' }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Team Members -->
+        <div class="bg-white rounded-xl border border-gray-100 h-fit">
+          <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div class="flex items-center gap-2">
+              <Users :size="18" class="text-gray-400" />
+              <h2 class="text-sm font-semibold text-gray-900">Team Members</h2>
+              <span class="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{{ membersStore.members.length }}</span>
+            </div>
+            <button
+              class="flex items-center gap-1 text-xs font-medium transition-colors"
+              :class="canCreateTeamMembers ? 'text-[#4857FE] hover:text-[#3E4BDE]' : 'text-gray-400 cursor-not-allowed'"
+              :disabled="!canCreateTeamMembers"
+              :title="teamPermissions.deniedReason('create', 'team members') || 'Add team member'"
+              @click="openAddMember"
+            >
+              <UserPlus :size="14" />
+              Add
+            </button>
+          </div>
+
+          <!-- Add member search -->
+          <div v-if="showAddMember" class="px-5 py-3 border-b border-gray-100">
+            <div class="relative">
+              <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-2.5 py-1.5 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white">
+                <Search :size="14" class="text-gray-400 shrink-0" />
+                <input
+                  v-model="memberSearch"
+                  class="text-sm text-gray-900 bg-transparent outline-none w-full placeholder-gray-400"
+                  placeholder="Search users..."
+                  autofocus
+                  @input="onMemberSearchInput"
+                />
+                <button @click="showAddMember = false" class="text-gray-400 hover:text-gray-600 shrink-0">
+                  <X :size="14" />
+                </button>
+              </div>
+
+              <!-- Results dropdown -->
+              <div
+                v-if="memberSearchResults.length > 0"
+                class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-[200px] overflow-auto"
+              >
+                <button
+                  v-for="user in memberSearchResults"
+                  :key="user.id"
+                  class="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
+                  @click="addMember(user)"
+                >
+                  <div class="w-7 h-7 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden shrink-0">
+                    <img v-if="user.avatar" :src="user.avatar" class="w-7 h-7 rounded-full object-cover" :alt="user.name" />
+                    <span v-else>{{ userInitials(user.name) }}</span>
+                  </div>
+                  <div class="flex flex-col min-w-0">
+                    <span class="text-sm font-medium text-gray-900 truncate">{{ user.name }}</span>
+                    <span class="text-[10px] text-gray-400 truncate">{{ user.email }}</span>
+                  </div>
+                </button>
+              </div>
+
+              <div
+                v-else-if="memberSearch && !memberSearchLoading && memberSearchResults.length === 0"
+                class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-3"
+              >
+                <p class="text-xs text-gray-400 text-center">No users found</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Loading -->
+          <div v-if="membersStore.loading" class="flex items-center justify-center py-8">
+            <Loader2 :size="16" class="animate-spin text-gray-400" />
+          </div>
+
+          <!-- Empty -->
+          <div v-else-if="membersStore.members.length === 0" class="text-center py-8 px-5">
+            <Users :size="24" class="text-gray-200 mx-auto mb-2" />
+            <p class="text-xs text-gray-400">No team members yet</p>
+          </div>
+
+          <!-- Members list -->
+          <div v-else class="divide-y divide-gray-50">
+            <div
+              v-for="member in membersStore.members"
+              :key="member.id"
+              class="flex items-center gap-3 px-5 py-3 hover:bg-gray-50/50 transition-colors group"
+            >
+              <div class="w-8 h-8 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden shrink-0">
+                <img v-if="member.userAvatar" :src="member.userAvatar" class="w-8 h-8 rounded-full object-cover" :alt="member.userName" />
+                <span v-else>{{ userInitials(member.userName) }}</span>
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-gray-900 truncate">{{ member.userName }}</p>
+                <p class="text-[11px] text-gray-400 truncate">{{ member.userEmail }}</p>
+              </div>
+              <span class="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded capitalize">{{ member.role }}</span>
+              <button
+                class="text-gray-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                :disabled="!canDeleteTeamMembers"
+                :title="teamPermissions.deniedReason('delete', 'team members') || 'Remove team member'"
+                @click="removeMember(member.userId)"
+              >
+                <X :size="14" />
+              </button>
+            </div>
+          </div>
+        </div>
+        </div><!-- /space-y-6 right column wrapper -->
+      </div>
+    </div>
+  </div>
+</template>

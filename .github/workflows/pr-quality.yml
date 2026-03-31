@@ -1,0 +1,85 @@
+name: PR Quality
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  frontend-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend lint
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Frontend type-check
+        continue-on-error: true
+        run: npm run type-check
+
+      - name: Frontend tests
+        run: npm run test
+
+  backend-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: productier_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d productier_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/productier_test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/productier_test
+      JWT_SECRET: ci-test-secret
+
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install backend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Apply database schema
+        run: bun run db:push
+
+      - name: Backend lint
+        run: bun run lint
+
+      - name: Backend type-check
+        run: bun run type-check
+
+      - name: Backend integration tests
+        run: bun run test:integration

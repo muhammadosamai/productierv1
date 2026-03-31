@@ -243,16 +243,31 @@ watch(
               {{ delivery.projectedEndDate ? formatDate(delivery.projectedEndDate) : '—' }}
             </div>
           </div>
-          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
             <div class="rounded-lg bg-gray-50 px-3 py-2">
               <p class="text-gray-500">Variance</p>
               <p class="font-semibold" :class="delivery.scheduleVarianceDays > 0 ? 'text-red-600' : 'text-emerald-600'">
                 {{ delivery.scheduleVarianceDays > 0 ? '+' : '' }}{{ delivery.scheduleVarianceDays }} days
               </p>
+              <p class="text-[10px] text-gray-400 mt-0.5">
+                limit {{ delivery.riskBreakdown.varianceThresholdDays }}d
+              </p>
             </div>
             <div class="rounded-lg bg-gray-50 px-3 py-2">
               <p class="text-gray-500">Scope Added</p>
               <p class="font-semibold text-gray-700">{{ delivery.scopeAddedAfterStart }}</p>
+              <p class="text-[10px] text-gray-400 mt-0.5">
+                limit {{ delivery.riskBreakdown.scopeThreshold }}
+              </p>
+            </div>
+            <div class="rounded-lg bg-gray-50 px-3 py-2">
+              <p class="text-gray-500">Blocked Pressure</p>
+              <p class="font-semibold" :class="delivery.riskBreakdown.blockedPressureBreach ? 'text-red-600' : 'text-emerald-600'">
+                {{ delivery.riskBreakdown.blockedPressure.toFixed(1) }}%
+              </p>
+              <p class="text-[10px] text-gray-400 mt-0.5">
+                limit {{ delivery.riskBreakdown.blockedPressureThreshold }}%
+              </p>
             </div>
             <div class="rounded-lg bg-gray-50 px-3 py-2">
               <p class="text-gray-500">Progress</p>
@@ -261,8 +276,15 @@ watch(
             <div class="rounded-lg bg-gray-50 px-3 py-2">
               <p class="text-gray-500">Velocity</p>
               <p class="font-semibold text-gray-700">{{ delivery.velocity }} tasks/week</p>
+              <p class="text-[10px] text-gray-400 mt-0.5">rule score {{ delivery.riskBreakdown.ruleScore }}</p>
             </div>
           </div>
+          <p class="mt-2 text-[11px] text-gray-500">
+            Rule checks:
+            variance {{ delivery.riskBreakdown.varianceBreach ? 'breach' : 'ok' }},
+            scope {{ delivery.riskBreakdown.scopeBreach ? 'breach' : 'ok' }},
+            blocked pressure {{ delivery.riskBreakdown.blockedPressureBreach ? 'breach' : 'ok' }}.
+          </p>
           <div class="mt-3 flex flex-wrap gap-2">
             <span v-for="reason in delivery.riskReasons" :key="reason" class="inline-flex px-2 py-1 rounded-md text-[11px] bg-gray-50 text-gray-600">
               {{ reason }}

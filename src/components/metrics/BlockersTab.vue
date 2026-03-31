@@ -128,36 +128,37 @@ watch(
       <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <div class="bg-white rounded-xl p-4 sm:p-5 border border-gray-100">
           <div class="flex items-center gap-2 mb-2">
-            <AlertTriangle :size="14" class="text-red-500" />
-            <span class="text-xs font-medium text-gray-400 uppercase">Currently Blocked</span>
+            <AlertTriangle :size="14" class="text-amber-500" />
+            <span class="text-xs font-medium text-gray-400 uppercase">Weighted Blocked Days</span>
+            <MetricHelpPopover metric-key="unblock_efficiency" />
           </div>
-          <div class="text-2xl font-bold text-gray-900">{{ data.blockedCount }}</div>
-          <div class="text-xs text-gray-400 mt-1">Open blocked tasks</div>
+          <div class="text-2xl font-bold text-gray-900">{{ data.weightedBlockedDays.toFixed(1) }}</div>
+          <div class="text-xs text-gray-400 mt-1">{{ data.blockedCount }} currently blocked tasks</div>
         </div>
         <div class="bg-white rounded-xl p-4 sm:p-5 border border-gray-100">
           <div class="flex items-center gap-2 mb-2">
-            <Clock :size="14" class="text-amber-500" />
+            <AlertTriangle :size="14" class="text-red-500" />
+            <span class="text-xs font-medium text-gray-400 uppercase">SLA Breach Rate</span>
+          </div>
+          <div class="text-2xl font-bold text-gray-900">{{ data.blockedSlaBreachRate.toFixed(1) }}%</div>
+          <div class="text-xs text-gray-400 mt-1">{{ data.blockedSlaBreaches }} of {{ Math.max(1, data.blockedCount) }} open blockers over SLA</div>
+        </div>
+        <div class="bg-white rounded-xl p-4 sm:p-5 border border-gray-100">
+          <div class="flex items-center gap-2 mb-2">
+            <Clock :size="14" class="text-violet-500" />
             <span class="text-xs font-medium text-gray-400 uppercase">Median Unblock</span>
             <MetricHelpPopover metric-key="unblock_efficiency" />
           </div>
           <div class="text-2xl font-bold text-gray-900">{{ formatDays(data.medianUnblockDays) }}</div>
-          <div class="text-xs text-gray-400 mt-1">Average: {{ formatDays(data.avgBlockDuration) }}</div>
+          <div class="text-xs text-gray-400 mt-1">SLA hit {{ data.unblockSlaHitRate }}% · Avg {{ formatDays(data.avgBlockDuration) }}</div>
         </div>
         <div class="bg-white rounded-xl p-4 sm:p-5 border border-gray-100">
           <div class="flex items-center gap-2 mb-2">
-            <BarChart3 :size="14" class="text-violet-500" />
-            <span class="text-xs font-medium text-gray-400 uppercase">SLA Hit Rate</span>
-          </div>
-          <div class="text-2xl font-bold text-gray-900">{{ data.unblockSlaHitRate }}%</div>
-          <div class="text-xs text-gray-400 mt-1">SLA threshold: {{ data.unblockSlaDays }} days</div>
-        </div>
-        <div class="bg-white rounded-xl p-4 sm:p-5 border border-gray-100">
-          <div class="flex items-center gap-2 mb-2">
-            <AlertTriangle :size="14" class="text-red-500" />
+            <BarChart3 :size="14" class="text-red-500" />
             <span class="text-xs font-medium text-gray-400 uppercase">Long-Open Breaches</span>
           </div>
           <div class="text-2xl font-bold text-gray-900">{{ data.longOpenBreaches }}</div>
-          <div class="text-xs text-gray-400 mt-1">Current blockers over SLA</div>
+          <div class="text-xs text-gray-400 mt-1">SLA threshold: {{ data.unblockSlaDays }} days</div>
         </div>
       </div>
 
@@ -246,6 +247,7 @@ watch(
                 <th class="px-5 py-3 font-medium">Priority</th>
                 <th class="px-5 py-3 font-medium">Reason</th>
                 <th class="px-5 py-3 font-medium">Assignee</th>
+              <th class="px-5 py-3 font-medium text-right">Weighted</th>
                 <th class="px-5 py-3 font-medium text-right">Blocked For</th>
               </tr>
             </thead>
@@ -272,6 +274,9 @@ watch(
                     <span class="text-gray-600">{{ task.assignee.name.split(' ')[0] }}</span>
                   </div>
                   <span v-else class="text-gray-300">—</span>
+                </td>
+                <td class="px-5 py-3 text-right text-gray-700">
+                  {{ task.weightedBlockedDays.toFixed(1) }}
                 </td>
                 <td class="px-5 py-3 text-right font-medium" :class="task.blockedDays > data.unblockSlaDays ? 'text-red-600' : 'text-amber-600'">
                   {{ formatDays(task.blockedDays) }}

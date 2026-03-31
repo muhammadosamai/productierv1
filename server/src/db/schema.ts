@@ -1671,6 +1671,8 @@ export const consumerFeedbacks = pgTable('consumer_feedbacks', {
   assignedToUserId: uuid('assigned_to_user_id').references(() => users.id),
   tags: text('tags').array(),
   upvoteCount: integer('upvote_count').notNull().default(0),
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 })

@@ -245,8 +245,37 @@ describe('operational constants', () => {
     expect(typeof dashboardAll.body?.kpi?.totalTasks).toBe('number')
     expect(dashboardAll.body?.kpi?.totalTasks).toBeGreaterThanOrEqual(2)
     expect(typeof dashboardAll.body?.kpi?.onTimeRate).toBe('number')
+    expect(typeof dashboardAll.body?.kpi?.onTimeRatePlanned).toBe('number')
+    expect(typeof dashboardAll.body?.kpi?.onTimeRateUnplanned).toBe('number')
+    expect(typeof dashboardAll.body?.kpi?.onTimeDueCountPlanned).toBe('number')
+    expect(typeof dashboardAll.body?.kpi?.onTimeDueCountUnplanned).toBe('number')
+    expect(typeof dashboardAll.body?.kpi?.dueDateQualityRate).toBe('number')
     expect(typeof dashboardAll.body?.atRiskWork?.total).toBe('number')
     expect(Array.isArray(dashboardAll.body?.atRiskWork?.trend)).toBe(true)
+    expect(Array.isArray(dashboardAll.body?.atRiskWork?.byOwner)).toBe(true)
+    expect(typeof dashboardAll.body?.atRiskWork?.timeInRisk?.medianDays).toBe('number')
+    expect(typeof dashboardAll.body?.atRiskWork?.timeInRisk?.p85Days).toBe('number')
+    expect(typeof dashboardAll.body?.atRiskWork?.timeInRisk?.sampleSize).toBe('number')
+
+    const teamLeadKpisAll = await apiRequest(app, '/api/metrics/team-lead-kpis?scopeMode=all&period=30', {
+      method: 'GET',
+      token,
+    })
+    expect(teamLeadKpisAll.status).toBe(200)
+    expect(Array.isArray(teamLeadKpisAll.body?.order)).toBe(true)
+    expect(teamLeadKpisAll.body?.order?.length).toBe(11)
+    expect(typeof teamLeadKpisAll.body?.items?.review_sla_adherence?.value).toBe('number')
+    expect(typeof teamLeadKpisAll.body?.items?.execution_focus_ratio?.value).toBe('number')
+
+    const executiveKpisAll = await apiRequest(app, '/api/metrics/executive-kpis?scopeMode=all&period=30', {
+      method: 'GET',
+      token,
+    })
+    expect(executiveKpisAll.status).toBe(200)
+    expect(typeof executiveKpisAll.body?.kpis?.portfolioHealthScore?.value).toBe('number')
+    expect(typeof executiveKpisAll.body?.kpis?.customerImpactProxy?.value).toBe('number')
+    expect(typeof executiveKpisAll.body?.details?.throughputStabilityIndex?.score).toBe('number')
+    expect(Array.isArray(executiveKpisAll.body?.details?.crossProductBottleneckHeatmap?.cells)).toBe(true)
 
     const workloadTeam = await apiRequest(
       app,
@@ -259,6 +288,14 @@ describe('operational constants', () => {
     expect(workloadTeam.status).toBe(200)
     expect(Array.isArray(workloadTeam.body?.memberWorkload)).toBe(true)
     expect(typeof workloadTeam.body?.overloadThreshold).toBe('number')
+    expect(typeof workloadTeam.body?.capacityModel?.teamAdjustmentFactor).toBe('number')
+    if (Array.isArray(workloadTeam.body?.memberWorkload) && workloadTeam.body.memberWorkload.length > 0) {
+      const firstMember = workloadTeam.body.memberWorkload[0]
+      expect(typeof firstMember?.sampleSize).toBe('number')
+      expect(typeof firstMember?.loadRatioCalibrated).toBe('number')
+      expect(typeof firstMember?.capacityConfidence).toBe('string')
+      expect(typeof firstMember?.sampleConfidence).toBe('string')
+    }
 
     const qualityAll = await apiRequest(app, '/api/metrics/quality?scopeMode=all&period=30', {
       method: 'GET',
@@ -267,7 +304,21 @@ describe('operational constants', () => {
     expect(qualityAll.status).toBe(200)
     expect(typeof qualityAll.body?.firstPassRate).toBe('number')
     expect(typeof qualityAll.body?.reworkRate).toBe('number')
+    expect(typeof qualityAll.body?.reworkPer100Completed).toBe('number')
+    expect(typeof qualityAll.body?.reopenPer100Completed).toBe('number')
+    expect(typeof qualityAll.body?.trend?.reworkSlope).toBe('number')
+    expect(typeof qualityAll.body?.trend?.reopenSlope).toBe('number')
+    expect(['healthy', 'watch', 'breach']).toContain(qualityAll.body?.trend?.reworkStatus)
     expect(Array.isArray(qualityAll.body?.reviewLoad)).toBe(true)
+
+    const blockersAll = await apiRequest(app, '/api/metrics/blockers?scopeMode=all&period=30', {
+      method: 'GET',
+      token,
+    })
+    expect(blockersAll.status).toBe(200)
+    expect(typeof blockersAll.body?.weightedBlockedDays).toBe('number')
+    expect(typeof blockersAll.body?.blockedSlaBreachRate).toBe('number')
+    expect(typeof blockersAll.body?.blockedSlaBreaches).toBe('number')
 
     const flowAll = await apiRequest(app, '/api/metrics/flow?scopeMode=all&period=30', {
       method: 'GET',
@@ -277,6 +328,8 @@ describe('operational constants', () => {
     expect(typeof flowAll.body?.flowEfficiency).toBe('number')
     expect(typeof flowAll.body?.cycleTime?.p85).toBe('number')
     expect(typeof flowAll.body?.leadTime?.p85).toBe('number')
+    expect(typeof flowAll.body?.cycleTime?.sampleSize).toBe('number')
+    expect(typeof flowAll.body?.leadTime?.sampleSize).toBe('number')
 
     const predictabilityAll = await apiRequest(app, '/api/metrics/predictability?scopeMode=all&period=30', {
       method: 'GET',
@@ -285,6 +338,9 @@ describe('operational constants', () => {
     expect(predictabilityAll.status).toBe(200)
     expect(typeof predictabilityAll.body?.avgPredictability).toBe('number')
     expect(Array.isArray(predictabilityAll.body?.riskMatrix)).toBe(true)
+    expect(typeof predictabilityAll.body?.confidenceDrivers?.scopeChurn?.penalty).toBe('number')
+    expect(typeof predictabilityAll.body?.confidenceDrivers?.scheduleVariance?.penalty).toBe('number')
+    expect(typeof predictabilityAll.body?.confidenceDrivers?.completionStability?.baseline).toBe('number')
 
     const deliveriesAll = await apiRequest(app, '/api/metrics/deliveries-metrics?scopeMode=all&period=30', {
       method: 'GET',
@@ -293,6 +349,12 @@ describe('operational constants', () => {
     expect(deliveriesAll.status).toBe(200)
     expect(typeof deliveriesAll.body?.activeDeliveries).toBe('number')
     expect(Array.isArray(deliveriesAll.body?.deliveryDetails)).toBe(true)
+    if (Array.isArray(deliveriesAll.body?.deliveryDetails) && deliveriesAll.body.deliveryDetails.length > 0) {
+      const firstDelivery = deliveriesAll.body.deliveryDetails[0]
+      expect(typeof firstDelivery?.riskBreakdown?.varianceDays).toBe('number')
+      expect(typeof firstDelivery?.riskBreakdown?.scopeAddedAfterStart).toBe('number')
+      expect(typeof firstDelivery?.riskBreakdown?.blockedPressure).toBe('number')
+    }
 
     const dashboardProductCompat = await apiRequest(
       app,

@@ -1599,13 +1599,28 @@ function compactContextForRetry(context: string, maxChars: number): string {
   return `${normalized.slice(0, maxChars)}\n\n[context truncated for retry]`
 }
 
-function resolveRetryMaxTokens(
+export function resolvePrimaryBriefMaxTokens(
+  mode: HomeBriefMode,
+  configuredModeMaxTokens: number,
+  model: string,
+  strategy: HomeBriefStrategy,
+): number {
+  if (!model.startsWith('gpt-5')) return configuredModeMaxTokens
+  if (strategy !== 'chunked') return configuredModeMaxTokens
+  const floor = mode === 'full' ? 1600 : 1200
+  return Math.max(configuredModeMaxTokens, floor)
+}
+
+export function resolveRetryBriefMaxTokens(
   mode: HomeBriefMode,
   modeMaxTokens: number,
   retryModel: string,
+  strategy: HomeBriefStrategy,
 ): number {
   if (!retryModel.startsWith('gpt-5')) return modeMaxTokens
-  const floor = mode === 'full' ? 1200 : 900
+  const floor = strategy === 'chunked'
+    ? (mode === 'full' ? 1800 : 1400)
+    : (mode === 'full' ? 1200 : 900)
   return Math.max(modeMaxTokens, floor)
 }
 
@@ -1617,6 +1632,7 @@ async function attemptRetryAiBrief(
   prompt: PromptTemplate,
   stuffedContext: string,
   mode: HomeBriefMode,
+  strategy: HomeBriefStrategy,
   modeMaxTokens: number,
   apiKey: string,
   knownTaskIds: Set<string>,
@@ -1635,7 +1651,7 @@ async function attemptRetryAiBrief(
     apiKey,
     model: config.retryModel,
     temperature: retryTemperature,
-    maxTokens: resolveRetryMaxTokens(mode, modeMaxTokens, config.retryModel),
+    maxTokens: resolveRetryBriefMaxTokens(mode, modeMaxTokens, config.retryModel, strategy),
     configuration: {
       baseURL: config.baseUrl,
     },
@@ -1707,7 +1723,8 @@ async function requestAiBrief(
     const knownTaskMap = buildKnownTaskMap(personal)
     const knownTaskIds = new Set([...knownTaskMap.keys()])
     const apiKey = config.apiKey
-    const modeMaxTokens = mode === 'full' ? config.fullMaxTokens : config.summaryMaxTokens
+    const configuredModeMaxTokens = mode === 'full' ? config.fullMaxTokens : config.summaryMaxTokens
+    const modeMaxTokens = resolvePrimaryBriefMaxTokens(mode, configuredModeMaxTokens, config.model, strategy)
     const primaryReasoning = config.model.startsWith('gpt-5')
       ? { effort: config.reasoningEffort }
       : undefined
@@ -1742,6 +1759,7 @@ async function requestAiBrief(
         prompt,
         stuffedContext,
         mode,
+        strategy,
         modeMaxTokens,
         apiKey,
         knownTaskIds,
@@ -1777,6 +1795,7 @@ async function requestAiBrief(
         prompt,
         stuffedContext,
         mode,
+        strategy,
         modeMaxTokens,
         apiKey,
         knownTaskIds,
@@ -1813,6 +1832,7 @@ async function requestAiBrief(
         prompt,
         stuffedContext,
         mode,
+        strategy,
         modeMaxTokens,
         apiKey,
         knownTaskIds,

@@ -286,6 +286,12 @@ async function createWorkspace() {
     return
   }
 
+  if (hasWorkspace.value) {
+    await ensureInvitesLoaded()
+    goToStep('invites')
+    return
+  }
+
   const name = workspaceName.value.trim()
   if (!name) {
     localError.value = 'Workspace name is required.'
@@ -669,16 +675,7 @@ onMounted(() => {
               </Button>
               <Button type="submit" class="h-11" :disabled="onboardingStore.submitting || !workspaceName.trim()">
                 <Loader2 v-if="onboardingStore.submitting" :size="16" class="mr-2 animate-spin" />
-                {{ hasWorkspace ? 'Create workspace' : 'Create workspace and continue' }}
-              </Button>
-              <Button
-                v-if="hasWorkspace"
-                type="button"
-                variant="ghost"
-                class="h-11"
-                @click="goToStep('invites')"
-              >
-                Continue to invites
+                {{ hasWorkspace ? 'Continue to invites' : 'Create workspace and continue' }}
               </Button>
             </div>
           </form>

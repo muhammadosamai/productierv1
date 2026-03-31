@@ -35,6 +35,18 @@ export interface DashboardTeamWorkloadMember {
   completionRate: number
 }
 
+export interface AtRiskOwnerRollup {
+  ownerType: 'user' | 'team' | 'unassigned'
+  ownerId: string | null
+  ownerName: string
+  taskCount: number
+  overdue: number
+  blocked: number
+  agingWip: number
+  missingOwner: number
+  missingReviewer: number
+}
+
 export interface DashboardMetricsResponse {
   kpi: {
     tasksCompleted: { current: number; previous: number }
@@ -46,6 +58,11 @@ export interface DashboardMetricsResponse {
     avgCycleTime: number
     avgLeadTime: number
     onTimeRate: number
+    onTimeRatePlanned: number
+    onTimeRateUnplanned: number
+    onTimeDueCountPlanned: number
+    onTimeDueCountUnplanned: number
+    dueDateQualityRate: number
     blockedCount: number
     overdueCount: number
     inProgressCount: number
@@ -83,11 +100,197 @@ export interface DashboardMetricsResponse {
       missingOwner: number
       missingReviewer: number
     }>
+    byOwner: AtRiskOwnerRollup[]
+    timeInRisk: {
+      medianDays: number
+      p85Days: number
+      sampleSize: number
+    }
   }
   sparkline: number[]
   team: {
     workload: DashboardTeamWorkloadMember[]
     totalMembers: number
+  }
+  meta: MetricsMeta
+}
+
+export interface ExecutiveKpiValue {
+  value: number
+  unit: string
+  sampleSize: number
+  direction?: 'late' | 'early' | 'balanced'
+}
+
+export type ExecutiveKpiKey =
+  | 'portfolioHealthScore'
+  | 'deliveryConfidenceDistribution'
+  | 'forecastBias'
+  | 'scopeVolatilityBurn'
+  | 'riskBurndown'
+  | 'initiativeExecutionConfidence'
+  | 'qualityCostIndex'
+  | 'throughputStabilityIndex'
+  | 'crossProductBottleneckHeatmap'
+  | 'customerImpactProxy'
+
+export interface ExecutiveKpiSummary {
+  portfolioHealthScore: ExecutiveKpiValue
+  deliveryConfidenceDistribution: ExecutiveKpiValue
+  forecastBias: ExecutiveKpiValue
+  scopeVolatilityBurn: ExecutiveKpiValue
+  riskBurndown: ExecutiveKpiValue
+  initiativeExecutionConfidence: ExecutiveKpiValue
+  qualityCostIndex: ExecutiveKpiValue
+  throughputStabilityIndex: ExecutiveKpiValue
+  crossProductBottleneckHeatmap: ExecutiveKpiValue
+  customerImpactProxy: ExecutiveKpiValue
+}
+
+export interface ExecutiveKpisResponse {
+  kpis: ExecutiveKpiSummary
+  details: {
+    portfolioHealthScore: {
+      score: number
+      components: {
+        predictabilityScore: number
+        qualityScore: number
+        blockerScore: number
+        workloadBalanceScore: number
+        blockedPer100Open: number
+        loadBalanceIndex: number
+      }
+    }
+    deliveryConfidenceDistribution: {
+      high: number
+      medium: number
+      low: number
+      total: number
+      highPercent: number
+    }
+    forecastBias: {
+      meanVarianceDays: number
+      direction: 'late' | 'early' | 'balanced'
+      lateCount: number
+      earlyCount: number
+      onTimeCount: number
+      byProduct: Array<{
+        productId: string
+        productName: string
+        meanVarianceDays: number
+        lateCount: number
+        earlyCount: number
+        onTimeCount: number
+        deliveries: number
+      }>
+      byTeam: Array<{
+        teamId: string
+        teamName: string
+        meanVarianceDays: number
+        lateCount: number
+        earlyCount: number
+        onTimeCount: number
+        deliveries: number
+      }>
+    }
+    scopeVolatilityBurn: {
+      score: number
+      totalScopeAddedAfterStart: number
+      totalPlannedScope: number
+      trend: Array<{
+        bucket: string
+        scopeAddedAfterStart: number
+        scopeChangeRate: number
+        onTrackCount: number
+        atRiskCount: number
+      }>
+    }
+    riskBurndown: {
+      delta: number
+      currentAtRisk: number
+      previousAtRisk: number
+      trend: Array<{
+        bucket: string
+        totalAtRisk: number
+      }>
+      byProduct: Array<{
+        productId: string
+        productName: string
+        totalAtRisk: number
+        delta: number
+      }>
+      byInitiative: Array<{
+        initiativeId: string
+        initiativeTitle: string
+        totalAtRisk: number
+        delta: number
+      }>
+    }
+    initiativeExecutionConfidence: {
+      averageScore: number
+      bands: {
+        high: number
+        medium: number
+        low: number
+      }
+      items: Array<{
+        initiativeId: string
+        title: string
+        status: string
+        linkedDeliveries: number
+        linkedPredictabilityScore: number
+        blockerRatio: number
+        score: number
+      }>
+    }
+    qualityCostIndex: {
+      score: number
+      reworkRate: number
+      reopenRate: number
+      escapedDefects: number
+      escapedDefectsPer100Completed: number
+    }
+    throughputStabilityIndex: {
+      score: number
+      meanDeparture: number
+      stdDeparture: number
+      coefficientOfVariation: number
+      trend: Array<{
+        bucket: string
+        completed: number
+        rollingMean: number
+        rollingStd: number
+      }>
+    }
+    crossProductBottleneckHeatmap: {
+      maxScore: number
+      cells: Array<{
+        productId: string
+        productName: string
+        blockedCount: number
+        openTaskCount: number
+        activeMembers: number
+        overloadedMembers: number
+        blockedPressure: number
+        overloadPressure: number
+        bottleneckScore: number
+      }>
+    }
+    customerImpactProxy: {
+      score: number
+      criticalOpenFeedback: number
+      totalOpenFeedback: number
+      p85AcknowledgeHours: number
+      p85ResolveHours: number
+      acknowledgeSlaHours: number
+      resolveSlaHours: number
+      trend: Array<{
+        bucket: string
+        criticalCount: number
+        avgAcknowledgeHours: number
+        avgResolveHours: number
+      }>
+    }
   }
   meta: MetricsMeta
 }
@@ -149,6 +352,24 @@ export interface PredictabilityMetricsResponse {
     remainingScope: number
     avgDeparturePerWeek: number
   }
+  confidenceDrivers: {
+    scopeChurn: {
+      value: number
+      penalty: number
+      contribution: number
+    }
+    scheduleVariance: {
+      value: number
+      penalty: number
+      contribution: number
+    }
+    completionStability: {
+      value: number
+      baseline: number
+      penalty: number
+      contribution: number
+    }
+  }
   riskMatrix: PredictabilityRiskPoint[]
   onTimeRate: number
   overdueCount: number
@@ -184,6 +405,7 @@ export interface FlowMetricsResponse {
     p85: number
     p95: number
     average: number
+    sampleSize: number
   }
   leadTime: {
     data: FlowTimePoint[]
@@ -191,6 +413,7 @@ export interface FlowMetricsResponse {
     p85: number
     p95: number
     average: number
+    sampleSize: number
   }
   percentileTrend: FlowPercentilePoint[]
   agingWip: Array<{
@@ -213,8 +436,10 @@ export interface FlowMetricsResponse {
 export interface QualityMetricsResponse {
   firstPassRate: number
   reworkRate: number
+  reworkPer100Completed: number
   bugRate: number
   reopenRate: number
+  reopenPer100Completed: number
   reopenCount: number
   escapedDefects: number
   totalCompleted: number
@@ -235,6 +460,14 @@ export interface QualityMetricsResponse {
     targetRate: number
     points: Array<{ bucket: string; rate: number; count: number }>
   }
+  trend: {
+    reworkSlope: number
+    reopenSlope: number
+    reworkThreshold: number
+    reopenThreshold: number
+    reworkStatus: 'healthy' | 'watch' | 'breach'
+    reopenStatus: 'healthy' | 'watch' | 'breach'
+  }
   reworkByWeek: Array<{ date: string; count: number }>
   taxonomyNote: string
   meta: MetricsMeta
@@ -247,9 +480,14 @@ export interface BlockersMetricsResponse {
     priority: TaskPriority | string
     blockedReason: string
     blockedDays: number
+    priorityWeight: number
+    weightedBlockedDays: number
     assignee: { userId: string | null; name: string; avatar: string | null } | null
   }>
   blockedCount: number
+  weightedBlockedDays: number
+  blockedSlaBreachRate: number
+  blockedSlaBreaches: number
   avgBlockDuration: number
   medianUnblockDays: number
   unblockSlaDays: number
@@ -280,8 +518,14 @@ export interface WorkloadMemberMetric {
   overdueCount: number
   overdueTasks: Array<{ taskId: string; title: string; dueAt: string; daysOverdue: number }>
   completionRate: number
+  sampleSize: number
+  baseCapacity: number
   capacity: number
+  calibratedCapacity: number
   loadRatio: number
+  loadRatioCalibrated: number
+  capacityConfidence: MetricsConfidenceBand
+  sampleConfidence: MetricsConfidenceBand
   reviewVsBuildRatio: number
 }
 
@@ -290,9 +534,26 @@ export interface WorkloadMetricsResponse {
   overloaded: WorkloadMemberMetric[]
   idle: WorkloadMemberMetric[]
   overloadThreshold: number
+  capacityModel: {
+    teamAdjustmentFactor: number
+    roleCapacityFactors: Record<string, number>
+  }
   totalMembers: number
   loadBalanceIndex: number
   meta: MetricsMeta
+}
+
+export interface DeliveryRiskBreakdown {
+  varianceDays: number
+  varianceThresholdDays: number
+  varianceBreach: boolean
+  scopeAddedAfterStart: number
+  scopeThreshold: number
+  scopeBreach: boolean
+  blockedPressure: number
+  blockedPressureThreshold: number
+  blockedPressureBreach: boolean
+  ruleScore: number
 }
 
 export interface DeliveryMetricsDetail {
@@ -306,6 +567,7 @@ export interface DeliveryMetricsDetail {
   scopeAddedAfterStart: number
   riskBadge: DeliveryRiskBadge
   riskReasons: string[]
+  riskBreakdown: DeliveryRiskBreakdown
   totalTasks: number
   completed: number
   blocked: number
@@ -328,5 +590,44 @@ export interface DeliveriesMetricsResponse {
   activeDeliveries: number
   avgProgress: number
   total: number
+  meta: MetricsMeta
+}
+
+export type TeamLeadKpiKey =
+  | 'review_sla_adherence'
+  | 'review_queue_age'
+  | 'aging_wip_index'
+  | 'dependency_delay_index'
+  | 'commitment_reliability_iteration'
+  | 'context_switch_pressure'
+  | 'execution_focus_ratio'
+  | 'defect_leakage_by_delivery'
+  | 'handoff_latency'
+  | 'overload_forecast_2w'
+  | 'assignee_concentration_risk'
+
+export type TeamLeadKpiUnit = 'percent' | 'days' | 'hours' | 'ratio' | 'count'
+export type TeamLeadKpiTrendDirection = 'up' | 'down' | 'flat'
+export type TeamLeadKpiTargetDirection = 'higher' | 'lower' | 'neutral'
+
+export interface TeamLeadKpiValue {
+  key: TeamLeadKpiKey
+  label: string
+  description: string
+  unit: TeamLeadKpiUnit
+  targetDirection: TeamLeadKpiTargetDirection
+  value: number
+  previousValue: number | null
+  deltaValue: number
+  trendDirection: TeamLeadKpiTrendDirection
+  numerator: number | null
+  denominator: number | null
+  warning: boolean
+  supporting: Record<string, number>
+}
+
+export interface TeamLeadKpisResponse {
+  order: TeamLeadKpiKey[]
+  items: Record<TeamLeadKpiKey, TeamLeadKpiValue>
   meta: MetricsMeta
 }

@@ -38,6 +38,18 @@ import DeliveriesTab from '@/components/metrics/DeliveriesTab.vue'
 import ProductFeedSummaryWidget from '@/components/metrics/widgets/ProductFeedSummaryWidget.vue'
 import ProductFeedActivitiesWidget from '@/components/metrics/widgets/ProductFeedActivitiesWidget.vue'
 import ProductFeedTeamMembersWidget from '@/components/metrics/widgets/ProductFeedTeamMembersWidget.vue'
+import TeamLeadKpiWidget from '@/components/metrics/widgets/TeamLeadKpiWidget.vue'
+import ExecutiveKpiWidget from '@/components/metrics/widgets/ExecutiveKpiWidget.vue'
+import {
+  TEAM_LEAD_KPI_BY_WIDGET_TYPE,
+  TEAM_LEAD_KPI_DEFINITIONS,
+  TEAM_LEAD_KPI_WIDGET_TYPES,
+} from '@/components/metrics/teamLeadKpis'
+import {
+  EXECUTIVE_KPI_BY_WIDGET_TYPE,
+  EXECUTIVE_KPI_DEFINITIONS,
+  EXECUTIVE_KPI_WIDGET_TYPES,
+} from '@/components/metrics/executiveKpis'
 
 const productStore = useProductStore()
 const authStore = useAuthStore()
@@ -50,6 +62,13 @@ const dashboardTemplatesEnabled = String(
   ?? envFlags.VITE_dashboard_templates_enabled
   ?? envFlags.DASHBOARD_TEMPLATES_ENABLED
   ?? envFlags.dashboard_templates_enabled
+  ?? 'true',
+).toLowerCase() !== 'false'
+const executiveKpisEnabled = String(
+  envFlags.VITE_EXECUTIVE_KPIS_ENABLED
+  ?? envFlags.VITE_executive_kpis_enabled
+  ?? envFlags.EXECUTIVE_KPIS_ENABLED
+  ?? envFlags.executive_kpis_enabled
   ?? 'true',
 ).toLowerCase() !== 'false'
 
@@ -74,6 +93,31 @@ const periodOptions = [
   { value: 180, label: 'Last 6 months' },
   { value: 365, label: 'Last year' },
 ]
+
+const teamLeadWidgetCatalog: DashboardWidgetCatalogEntry[] = TEAM_LEAD_KPI_DEFINITIONS.map((entry) => ({
+  type: entry.widgetType,
+  label: entry.label,
+  description: entry.description,
+  defaultGridW: entry.defaultGridW,
+  defaultGridH: entry.defaultGridH,
+}))
+
+const teamLeadWidgetRenderers = Object.fromEntries(
+  TEAM_LEAD_KPI_DEFINITIONS.map((entry) => [entry.widgetType, TeamLeadKpiWidget]),
+)
+
+const executiveWidgetCatalog: DashboardWidgetCatalogEntry[] = EXECUTIVE_KPI_DEFINITIONS.map((entry) => ({
+  type: entry.widgetType,
+  label: entry.label,
+  description: entry.description,
+  defaultGridW: entry.defaultGridW,
+  defaultGridH: entry.defaultGridH,
+}))
+
+const executiveWidgetRenderers = Object.fromEntries(
+  EXECUTIVE_KPI_DEFINITIONS.map((entry) => [entry.widgetType, ExecutiveKpiWidget]),
+)
+
 const period = ref<number>(
   normalizeMetricsPeriod(route.query.period)
   ?? normalizeMetricsPeriod(storageGet(STORAGE_KEYS.views.metrics.period))
@@ -137,6 +181,8 @@ const widgetCatalog: DashboardWidgetCatalogEntry[] = [
   { type: 'metrics_predictability', label: 'Predictability', description: 'Delivery predictability and confidence', defaultGridW: 2, defaultGridH: 2 },
   { type: 'metrics_workload', label: 'Workload', description: 'Team workload distribution', defaultGridW: 2, defaultGridH: 2 },
   { type: 'metrics_deliveries', label: 'Deliveries', description: 'Delivery pipeline and release outcomes', defaultGridW: 2, defaultGridH: 2 },
+  ...teamLeadWidgetCatalog,
+  ...(executiveKpisEnabled ? executiveWidgetCatalog : []),
 ]
 
 const widgetRenderers = {
@@ -152,6 +198,8 @@ const widgetRenderers = {
   metrics_predictability: PredictabilityTab,
   metrics_workload: WorkloadTab,
   metrics_deliveries: DeliveriesTab,
+  ...teamLeadWidgetRenderers,
+  ...executiveWidgetRenderers,
 }
 
 const dashboard = useDashboardPages({
@@ -276,6 +324,20 @@ function resolveWidgetProps(widget: DashboardWidget): Record<string, unknown> {
     || widget.widgetType === 'product_feed_team_members'
   ) {
     return {}
+  }
+  if (TEAM_LEAD_KPI_WIDGET_TYPES.includes(widget.widgetType)) {
+    const definition = TEAM_LEAD_KPI_BY_WIDGET_TYPE[widget.widgetType]
+    return {
+      period: period.value,
+      kpiKey: definition?.key,
+    }
+  }
+  if (EXECUTIVE_KPI_WIDGET_TYPES.includes(widget.widgetType)) {
+    const definition = EXECUTIVE_KPI_BY_WIDGET_TYPE[widget.widgetType]
+    return {
+      period: period.value,
+      kpiKey: definition?.key,
+    }
   }
   return { period: period.value }
 }

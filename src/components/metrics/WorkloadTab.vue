@@ -29,15 +29,17 @@ const statusKeys = ['in_progress', 'in_review', 'assigned', 'created', 'blocked'
 
 const filteredMembers = computed(() => {
   if (!data.value) return []
-  if (selectedLoadFilter.value === 'overloaded') return data.value.memberWorkload.filter((member) => member.loadRatio > 1)
+  if (selectedLoadFilter.value === 'overloaded') return data.value.memberWorkload.filter((member) => member.loadRatioCalibrated > 1)
   if (selectedLoadFilter.value === 'idle') return data.value.memberWorkload.filter((member) => member.wipCount === 0)
-  if (selectedLoadFilter.value === 'balanced') return data.value.memberWorkload.filter((member) => member.loadRatio >= 0.8 && member.loadRatio <= 1)
+  if (selectedLoadFilter.value === 'balanced') {
+    return data.value.memberWorkload.filter((member) => member.loadRatioCalibrated >= 0.8 && member.loadRatioCalibrated <= 1)
+  }
   return data.value.memberWorkload
 })
 
 const chartMembers = computed(() => {
   return [...filteredMembers.value]
-    .sort((a, b) => Math.abs(b.loadRatio - 1) - Math.abs(a.loadRatio - 1))
+    .sort((a, b) => Math.abs(b.loadRatioCalibrated - 1) - Math.abs(a.loadRatioCalibrated - 1))
     .slice(0, 15)
 })
 
@@ -142,6 +144,9 @@ watch(
           <p class="text-xs text-gray-400 uppercase tracking-wide">Load Balance Index</p>
           <p class="text-2xl font-bold text-gray-900 mt-1">{{ data.loadBalanceIndex }}</p>
           <p class="text-xs text-gray-500 mt-1">Higher means less balanced distribution</p>
+          <p class="text-[11px] text-gray-400 mt-1">
+            Team factor {{ data.capacityModel.teamAdjustmentFactor.toFixed(2) }} · base WIP cap {{ data.overloadThreshold }}
+          </p>
         </div>
       </div>
 
@@ -167,15 +172,15 @@ watch(
           :datasets="[
             {
               label: 'Load ratio delta',
-              data: chartMembers.map((member) => Number((member.loadRatio - 1).toFixed(2))),
-              backgroundColor: chartMembers.map((member) => member.loadRatio > 1 ? CHART_COLORS.danger : CHART_COLORS.success),
+              data: chartMembers.map((member) => Number((member.loadRatioCalibrated - 1).toFixed(2))),
+              backgroundColor: chartMembers.map((member) => member.loadRatioCalibrated > 1 ? CHART_COLORS.danger : CHART_COLORS.success),
             },
           ]"
           :height="260"
           :show-legend="false"
         />
         <div v-else class="text-center py-10 text-sm text-gray-400">No workload data for selected filter</div>
-        <p class="text-xs text-gray-500 mt-3">Above zero indicates overload (WIP higher than capacity threshold).</p>
+        <p class="text-xs text-gray-500 mt-3">Above zero indicates overload relative to calibrated role/team capacity.</p>
         <p v-if="filteredMembers.length > chartMembers.length" class="text-[11px] text-gray-400 mt-1">
           Showing top {{ chartMembers.length }} members by deviation from balanced load.
         </p>
@@ -208,15 +213,16 @@ watch(
           <thead>
             <tr class="border-b border-gray-50 text-left text-gray-400">
               <th class="px-5 py-3 font-medium">Member</th>
-              <th class="px-5 py-3 font-medium text-center">WIP / Cap</th>
-              <th class="px-5 py-3 font-medium text-center">Load Ratio</th>
+              <th class="px-5 py-3 font-medium text-center">WIP / Cal Cap</th>
+              <th class="px-5 py-3 font-medium text-center">Load Ratio (Cal)</th>
               <th class="px-5 py-3 font-medium text-center">Review:Build</th>
               <th class="px-5 py-3 font-medium text-center">Overdue</th>
+              <th class="px-5 py-3 font-medium text-center">Confidence</th>
               <th class="px-5 py-3 font-medium text-center">Completion</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="member in filteredMembers" :key="member.id" class="border-b border-gray-50 hover:bg-gray-50/50" :class="member.loadRatio > 1 ? 'bg-red-50/30' : ''">
+            <tr v-for="member in filteredMembers" :key="member.id" class="border-b border-gray-50 hover:bg-gray-50/50" :class="member.loadRatioCalibrated > 1 ? 'bg-red-50/30' : ''">
               <td class="px-5 py-3">
                 <div class="flex items-center gap-2">
                   <img v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
@@ -226,12 +232,27 @@ watch(
                   <span class="font-medium text-gray-700">{{ member.name }}</span>
                 </div>
               </td>
-              <td class="px-5 py-3 text-center text-gray-600">{{ member.wipCount }} / {{ member.capacity }}</td>
-              <td class="px-5 py-3 text-center font-medium" :class="member.loadRatio > 1 ? 'text-red-600' : 'text-emerald-600'">{{ member.loadRatio.toFixed(2) }}</td>
+              <td class="px-5 py-3 text-center text-gray-600">
+                {{ member.wipCount }} / {{ member.calibratedCapacity.toFixed(1) }}
+                <div class="text-[10px] text-gray-400">base {{ member.baseCapacity }}</div>
+              </td>
+              <td class="px-5 py-3 text-center font-medium" :class="member.loadRatioCalibrated > 1 ? 'text-red-600' : 'text-emerald-600'">{{ member.loadRatioCalibrated.toFixed(2) }}</td>
               <td class="px-5 py-3 text-center text-violet-600">{{ member.reviewVsBuildRatio.toFixed(2) }}</td>
               <td class="px-5 py-3 text-center">
                 <span v-if="member.overdueCount > 0" class="text-red-600 font-medium">{{ member.overdueCount }}</span>
                 <span v-else class="text-gray-300">0</span>
+              </td>
+              <td class="px-5 py-3 text-center">
+                <div class="flex items-center justify-center gap-1">
+                  <span class="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                    :class="member.capacityConfidence === 'high' ? 'bg-emerald-50 text-emerald-700' : member.capacityConfidence === 'medium' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'">
+                    cap {{ member.capacityConfidence }}
+                  </span>
+                  <span class="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                    :class="member.sampleConfidence === 'high' ? 'bg-emerald-50 text-emerald-700' : member.sampleConfidence === 'medium' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'">
+                    n {{ member.sampleSize }}
+                  </span>
+                </div>
               </td>
               <td class="px-5 py-3 text-center">
                 <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium"

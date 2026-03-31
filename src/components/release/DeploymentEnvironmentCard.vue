@@ -16,6 +16,7 @@ import type { ReleaseDeployment, DeploymentTarget, TargetStatus, DeploymentStatu
 const props = defineProps<{
   deployment: ReleaseDeployment
   releaseId: string
+  readonly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -163,6 +164,7 @@ function onTargetStatusChange(targetId: string, newStatus: string) {
                   @change="onTargetStatusChange(target.id, ($event.target as HTMLSelectElement).value)"
                   class="text-xs font-medium px-2 py-1 rounded-md border border-gray-200 outline-none focus:border-[#4857FE] cursor-pointer"
                   :class="targetStatusColor(target.status)"
+                  :disabled="props.readonly"
                 >
                   <option value="pending">Pending</option>
                   <option value="deploying">Deploying</option>
@@ -176,7 +178,9 @@ function onTargetStatusChange(targetId: string, newStatus: string) {
               <td class="px-3 py-2.5">
                 <button
                   @click="emit('removeTarget', deployment.id, target.id)"
-                  class="text-gray-300 hover:text-red-500 transition-colors"
+                  class="transition-colors"
+                  :class="props.readonly ? 'text-gray-200 cursor-not-allowed' : 'text-gray-300 hover:text-red-500'"
+                  :disabled="props.readonly"
                 >
                   <Trash2 :size="13" />
                 </button>
@@ -194,7 +198,9 @@ function onTargetStatusChange(targetId: string, newStatus: string) {
       <!-- Add Server Button -->
       <button
         @click="emit('addServer', deployment.id, deployment.environment)"
-        class="flex items-center gap-1.5 text-xs text-[#4857FE] hover:text-[#3a47e0] font-medium"
+        class="flex items-center gap-1.5 text-xs font-medium transition-colors"
+        :class="props.readonly ? 'text-gray-300 cursor-not-allowed' : 'text-[#4857FE] hover:text-[#3a47e0]'"
+        :disabled="props.readonly"
       >
         <Plus :size="13" />
         Add Server

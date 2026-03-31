@@ -1,6 +1,14 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useRolesStore } from '@/stores/roles'
+import { useOnboardingStore } from '@/stores/onboarding'
+
+const envFlags = import.meta.env as Record<string, string | undefined>
+const onboardingEnabled = String(
+  envFlags.VITE_NEW_ONBOARDING_ENABLED
+  ?? envFlags.NEW_ONBOARDING_ENABLED
+  ?? 'true',
+).toLowerCase() !== 'false'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -24,6 +32,18 @@ const router = createRouter({
       component: () => import('../views/ForgotPasswordView.vue'),
       meta: { guest: true },
     },
+    {
+      path: '/onboarding',
+      name: 'onboarding',
+      component: () => import('../views/OnboardingView.vue'),
+      meta: { requiresAuth: true, standalone: true },
+    },
+    {
+      path: '/onboarding/accept-invite',
+      name: 'onboarding-accept-invite',
+      component: () => import('../views/OnboardingAcceptInviteView.vue'),
+      meta: { standalone: true },
+    },
 
     // App pages (require auth)
     {
@@ -32,12 +52,16 @@ const router = createRouter({
     },
     {
       path: '/overview',
-      redirect: '/metrics',
+      redirect: '/dashboard',
+    },
+    {
+      path: '/metrics',
+      redirect: '/dashboard',
     },
     {
       path: '/home',
       name: 'home',
-      component: () => import('../views/HomeView.vue'),
+      component: () => import('../views/HomeDashboardView.vue'),
       meta: { requiresAuth: true },
     },
     {
@@ -105,8 +129,8 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
-      path: '/metrics',
-      name: 'metrics',
+      path: '/dashboard',
+      name: 'dashboard',
       component: () => import('../views/MetricsView.vue'),
       meta: { requiresAuth: true },
     },
@@ -155,6 +179,48 @@ const router = createRouter({
     {
       path: '/settings',
       name: 'settings',
+      redirect: (to) => {
+        const requestedTab = typeof to.query.tab === 'string' ? to.query.tab : ''
+        if (requestedTab === 'notifications') return '/settings/notifications'
+        if (requestedTab === 'roles') return '/settings/organization/roles'
+        if (requestedTab === 'titles') return '/settings/organization/titles'
+        return '/settings/profile'
+      },
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/settings/profile',
+      name: 'settings-profile',
+      component: () => import('../views/SettingsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/settings/notifications',
+      name: 'settings-notifications',
+      component: () => import('../views/SettingsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/settings/organization',
+      name: 'settings-organization',
+      redirect: '/settings/organization/members',
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/settings/organization/members',
+      name: 'settings-organization-members',
+      component: () => import('../views/SettingsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/settings/organization/roles',
+      name: 'settings-organization-roles',
+      component: () => import('../views/SettingsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/settings/organization/titles',
+      name: 'settings-organization-titles',
       component: () => import('../views/SettingsView.vue'),
       meta: { requiresAuth: true },
     },
@@ -162,35 +228,82 @@ const router = createRouter({
 })
 
 // Navigation guard
-router.beforeEach(async (to, from, next) => {
+router.beforeEach(async (to) => {
   const authStore = useAuthStore()
   const rolesStore = useRolesStore()
+  const onboardingStore = useOnboardingStore()
 
   // Wait for auth to initialize on first load
   if (!authStore.initialized) {
     await authStore.init()
   }
 
+  const isOnboardingRoute = to.name === 'onboarding' || to.name === 'onboarding-accept-invite'
+
+  if (!onboardingEnabled && isOnboardingRoute) {
+    if (authStore.isAuthenticated) return '/home'
+    return '/login'
+  }
+
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    next('/login')
-  } else if (to.meta.guest && authStore.isAuthenticated) {
-    next('/')
-  } else if (to.meta.requiresAuth && authStore.isAuthenticated) {
+    return '/login'
+  }
+
+  if (to.meta.guest && authStore.isAuthenticated) {
+    return '/'
+  }
+
+  if (to.meta.requiresAuth && authStore.isAuthenticated) {
+    if (onboardingEnabled) {
+      const currentUserId = authStore.user?.id || null
+      const shouldFetchOnboardingState = (
+        !onboardingStore.loaded
+        || onboardingStore.loadedForUserId !== currentUserId
+      )
+      if (
+        shouldFetchOnboardingState &&
+        !onboardingStore.loading
+      ) {
+        const loadedSuccessfully = await onboardingStore.fetchState()
+        if (!loadedSuccessfully && !onboardingStore.loaded && !isOnboardingRoute) {
+          return '/onboarding'
+        }
+      }
+    }
+
+    if (onboardingEnabled && onboardingStore.loaded) {
+      if (!onboardingStore.isOnboardingComplete && !isOnboardingRoute) {
+        return '/onboarding'
+      }
+      if (onboardingStore.isOnboardingComplete && to.name === 'onboarding') {
+        return '/home'
+      }
+    }
+
+    if (isOnboardingRoute) return true
+
     // Fetch role permissions if not loaded yet
-    if (!rolesStore.loaded && authStore.user?.role !== 'super_admin') {
+    if (
+      authStore.user?.role !== 'super_admin'
+      && (!rolesStore.loaded || rolesStore.loadedForUserId !== authStore.user?.id)
+    ) {
       await rolesStore.fetchMyPermissions()
+    }
+    if (authStore.user?.role === 'super_admin') {
+      await rolesStore.fetchCatalog()
     }
 
     // Check if user can access this route
     if (!rolesStore.canAccessRoute(to.path)) {
-      // Redirect to first accessible page
-      next('/home')
-    } else {
-      next()
+      const fallbackRoute = rolesStore.firstAccessibleRoute
+      if (fallbackRoute && fallbackRoute !== to.path) {
+        return fallbackRoute
+      }
+      return '/login'
     }
-  } else {
-    next()
   }
+
+  return true
 })
 
 export default router

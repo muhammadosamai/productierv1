@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { ChevronUp, ChevronDown, MoreHorizontal, Plus, Search, Filter } from 'lucide-vue-next'
-import type { Task, ItemType, TaskPriority, TaskStatus } from '@/types/backlog'
+import type { Task, TaskPriority, TaskStatus } from '@/types/backlog'
 
 interface TeamUser {
   id: string
@@ -26,10 +26,12 @@ function getUserById(id: string): TeamUser | undefined {
 // ============ STATUS GROUPS ============
 
 interface StatusGroup {
-  key: TaskStatus
+  key: BoardStatusKey
   label: string
   color: string
 }
+
+type BoardStatusKey = 'todo' | 'in_progress' | 'review' | 'done'
 
 const statusGroups: StatusGroup[] = [
   { key: 'todo', label: 'TO DO', color: '#c4c4c4' },
@@ -39,34 +41,49 @@ const statusGroups: StatusGroup[] = [
 ]
 
 // Collapsed state per group
-const collapsed = ref<Record<string, boolean>>({
+const collapsed = ref<Record<BoardStatusKey, boolean>>({
   todo: false,
   in_progress: false,
   review: false,
   done: false,
 })
 
-function toggleCollapse(key: string) {
+function toggleCollapse(key: BoardStatusKey) {
   collapsed.value[key] = !collapsed.value[key]
+}
+
+function toBoardStatus(status: TaskStatus): BoardStatusKey {
+  switch (status) {
+    case 'created':
+    case 'assigned':
+      return 'todo'
+    case 'in_review':
+      return 'review'
+    case 'done':
+    case 'archived':
+      return 'done'
+    case 'in_progress':
+    case 'overdue':
+    case 'blocked':
+      return 'in_progress'
+    default:
+      return 'todo'
+  }
 }
 
 // Group tasks by status
 const tasksByStatus = computed(() => {
-  const map: Record<string, Task[]> = {
+  const map: Record<BoardStatusKey, Task[]> = {
     todo: [],
     in_progress: [],
     review: [],
     done: [],
   }
+
   for (const task of props.tasks) {
-    if (task.status === 'created' || task.status === 'assigned') {
-      map.todo.push(task)
-    } else if (task.status === 'in_review') {
-      map.review.push(task)
-    } else if (map[task.status]) {
-      map[task.status].push(task)
-    }
+    map[toBoardStatus(task.status)].push(task)
   }
+
   return map
 })
 
@@ -140,7 +157,7 @@ function taskShortId(task: Task) {
                 class="text-xs font-bold tracking-wider"
                 :style="{ color: group.color }"
               >
-                {{ group.label }}  ({{ tasksByStatus[group.key]?.length || 0 }})
+                {{ group.label }}  ({{ tasksByStatus[group.key].length }})
               </span>
               <component
                 :is="collapsed[group.key] ? ChevronDown : ChevronUp"
@@ -157,7 +174,7 @@ function taskShortId(task: Task) {
           </div>
 
           <!-- Table -->
-          <div v-if="!collapsed[group.key] && tasksByStatus[group.key]?.length > 0">
+          <div v-if="!collapsed[group.key] && tasksByStatus[group.key].length > 0">
             <!-- Column headers -->
             <div class="grid grid-cols-[1fr_1.2fr_120px_100px_100px_40px] gap-x-3 items-center px-5 py-2 border-t border-b border-gray-100 bg-gray-50/50">
               <span class="text-[11px] font-medium text-gray-400 tracking-wide">Task Name</span>
@@ -242,7 +259,7 @@ function taskShortId(task: Task) {
 
           <!-- Empty collapsed or no tasks -->
           <div
-            v-if="!collapsed[group.key] && (!tasksByStatus[group.key] || tasksByStatus[group.key].length === 0)"
+            v-if="!collapsed[group.key] && tasksByStatus[group.key].length === 0"
             class="px-5 py-4 border-t border-gray-100"
           >
             <p class="text-xs text-gray-400 text-center">No tasks</p>

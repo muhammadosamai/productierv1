@@ -9,6 +9,8 @@ import {
 } from 'lucide-vue-next'
 import { useTestCyclesStore } from '@/stores/testCycles'
 import { useProductStore } from '@/stores/products'
+import { usePagePermissions } from '@/lib/pagePermissions'
+import { STORAGE_KEYS } from '@/constants/storageKeys'
 import CreateTestCycleDialog from '@/components/testCycle/CreateTestCycleDialog.vue'
 import type { TestCycle } from '@/types/testCycle'
 import FavoriteStar from '@/components/shared/FavoriteStar.vue'
@@ -16,22 +18,37 @@ import FavoriteStar from '@/components/shared/FavoriteStar.vue'
 const router = useRouter()
 const store = useTestCyclesStore()
 const productStore = useProductStore()
+const testCyclePermissions = usePagePermissions('test-cycles')
+const canCreateTestCycles = computed(() => testCyclePermissions.canCreate.value)
+const canEditTestCycles = computed(() => testCyclePermissions.canEdit.value)
+const TEST_CYCLES_VIEW_MODE_KEY = STORAGE_KEYS.views.testCycles.viewMode
 
 const showCreateDialog = ref(false)
 const searchQuery = ref('')
 const activeTab = ref<'active' | 'completed' | 'archived'>('active')
-const viewMode = ref<'table' | 'card'>(localStorage.getItem('test-cycles-view-mode') as 'table' | 'card' || 'table')
+const viewMode = ref<'table' | 'card'>(localStorage.getItem(TEST_CYCLES_VIEW_MODE_KEY) as 'table' | 'card' || 'table')
 const sortField = ref<string>('createdAt')
 const sortDir = ref<'asc' | 'desc'>('desc')
 
-watch(viewMode, (v) => localStorage.setItem('test-cycles-view-mode', v))
+watch(viewMode, (v) => localStorage.setItem(TEST_CYCLES_VIEW_MODE_KEY, v))
+
+async function refreshCycles() {
+  await store.fetchCycles(undefined, {
+    q: searchQuery.value.trim() || undefined,
+    limit: 60,
+  })
+}
 
 onMounted(() => {
-  store.fetchCycles()
+  refreshCycles()
 })
 
-watch(() => productStore.activeProduct.name, () => {
-  store.fetchCycles()
+watch(() => productStore.activeProduct.id, () => {
+  refreshCycles()
+})
+
+watch(searchQuery, () => {
+  refreshCycles()
 })
 
 const activeCycles = computed(() => store.cycles.filter(c => c.status === 'planned' || c.status === 'in_progress'))
@@ -73,11 +90,12 @@ function toggleSort(field: string) {
 
 function onCreated(id: string) {
   showCreateDialog.value = false
-  store.fetchCycles()
+  refreshCycles()
   router.push(`/test-cycles/${id}`)
 }
 
 async function archiveCycle(cycle: TestCycle, event: Event) {
+  if (!canEditTestCycles.value) return
   event.stopPropagation()
   await store.updateCycle(cycle.id, { status: 'archived' })
 }
@@ -135,11 +153,15 @@ function formatPeriod(start: string | null, end: string | null) {
 }
 
 function issueCount(cycle: TestCycle) {
-  return cycle.issues?.length || 0
+  return cycle.issues?.length || (cycle as any).issueCount || 0
 }
 
 function openCount(cycle: TestCycle) {
-  return cycle.issues?.filter(i => i.status === 'open' || i.status === 'in_progress').length || 0
+  const issues = cycle.issues
+  if (issues?.length) {
+    return issues.filter(i => i.status === 'open' || i.status === 'in_progress').length
+  }
+  return (cycle as any).issueCount || 0
 }
 </script>
 
@@ -156,7 +178,12 @@ function openCount(cycle: TestCycle) {
         </div>
         <div class="flex items-center gap-3">
           <button
-            class="flex items-center gap-1.5 bg-[#4857FE] hover:bg-[#3E4BDE] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer"
+            class="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            :class="canCreateTestCycles
+              ? 'bg-[#4857FE] hover:bg-[#3E4BDE] text-white cursor-pointer'
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+            :disabled="!canCreateTestCycles"
+            :title="testCyclePermissions.deniedReason('create', 'test cycles') || 'Add cycle'"
             @click="showCreateDialog = true"
           >
             <Plus :size="15" />
@@ -247,7 +274,12 @@ function openCount(cycle: TestCycle) {
         <p class="text-gray-400 text-xs mb-4">Create a test cycle to start tracking issues</p>
         <button
           v-if="activeTab === 'active'"
-          class="flex items-center gap-1.5 px-4 py-2 bg-[#4857FE] text-white text-sm font-medium rounded-lg hover:bg-[#3a46d9] transition-colors cursor-pointer"
+          class="flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors"
+          :class="canCreateTestCycles
+            ? 'bg-[#4857FE] text-white hover:bg-[#3a46d9] cursor-pointer'
+            : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+          :disabled="!canCreateTestCycles"
+          :title="testCyclePermissions.deniedReason('create', 'test cycles') || 'Add cycle'"
           @click="showCreateDialog = true"
         >
           <Plus :size="15" />
@@ -293,7 +325,7 @@ function openCount(cycle: TestCycle) {
             >
               <td class="px-5 py-3.5">
                 <div class="flex items-center gap-2.5 min-w-0">
-                  <FavoriteStar entity-type="test_cycle" :entity-id="cycle.id" :product-id="productStore.activeProduct.name" />
+                  <FavoriteStar entity-type="test_cycle" :entity-id="cycle.id" :product-id="productStore.activeProduct.id || ''" />
                   <span class="w-1 h-7 rounded-full flex-shrink-0" :class="statusDotColor(cycle.status)"></span>
                   <span class="text-sm font-medium text-gray-900 truncate">
                     <span v-if="parsePrefix(cycle.title).prefix" class="font-semibold" :class="statusTextColor(cycle.status)">{{ parsePrefix(cycle.title).prefix }}</span>
@@ -329,8 +361,12 @@ function openCount(cycle: TestCycle) {
               <td class="px-5 py-3.5">
                 <button
                   v-if="cycle.status !== 'archived'"
-                  class="p-1.5 rounded-md text-gray-300 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
-                  title="Archive cycle"
+                  class="p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-all"
+                  :class="canEditTestCycles
+                    ? 'text-gray-300 hover:text-gray-600 hover:bg-gray-100 cursor-pointer'
+                    : 'text-gray-200 cursor-not-allowed'"
+                  :disabled="!canEditTestCycles"
+                  :title="testCyclePermissions.deniedReason('edit', 'test cycles') || 'Archive cycle'"
                   @click="archiveCycle(cycle, $event)"
                 >
                   <Archive :size="14" />
@@ -351,7 +387,7 @@ function openCount(cycle: TestCycle) {
         >
           <div class="flex items-start justify-between gap-3 mb-3">
             <div class="flex items-center gap-2.5 min-w-0">
-              <FavoriteStar entity-type="test_cycle" :entity-id="cycle.id" :product-id="productStore.activeProduct.name" />
+              <FavoriteStar entity-type="test_cycle" :entity-id="cycle.id" :product-id="productStore.activeProduct.id || ''" />
               <span class="w-1 h-5 rounded-full flex-shrink-0" :class="statusDotColor(cycle.status)"></span>
               <h3 class="text-sm font-semibold text-gray-900 truncate group-hover:text-[#4857FE] transition-colors">
                 <span v-if="parsePrefix(cycle.title).prefix" :class="statusTextColor(cycle.status)">{{ parsePrefix(cycle.title).prefix }}</span>

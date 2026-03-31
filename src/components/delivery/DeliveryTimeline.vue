@@ -348,7 +348,7 @@ function formatTaskDate(task: Task) {
                             v-for="(userId, i) in task.assigneeUserIds.slice(0, 2)"
                             :key="userId"
                             class="w-5 h-5 rounded-full border-2 border-white overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[7px] font-bold"
-                            :style="{ zIndex: 3 - i }"
+                            :style="{ zIndex: 3 - Number(i) }"
                             :title="getUserById(userId)?.name || userId"
                           >
                             <img v-if="getUserById(userId)?.avatar" :src="getUserById(userId)!.avatar!" class="w-5 h-5 rounded-full object-cover" />

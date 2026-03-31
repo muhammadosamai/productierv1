@@ -1,20 +1,11 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
-import { servers, users } from '../db/schema'
+import { servers } from '../db/schema'
 import { eq, and } from 'drizzle-orm'
-import { jwt } from '@elysiajs/jwt'
-
-const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
-
-async function getUserFromHeader(jwtVerify: any, headers: Record<string, string | undefined>) {
-  const authHeader = headers.authorization
-  if (!authHeader?.startsWith('Bearer ')) return null
-  const token = authHeader.replace('Bearer ', '')
-  const payload = await jwtVerify(token)
-  if (!payload?.userId) return null
-  const user = await db.query.users.findFirst({ where: eq(users.id, payload.userId as string) })
-  return user || null
-}
+import { authPlugin } from '../plugins/auth'
+import { badRequest, forbidden, notFound, unauthorized } from '../lib/apiErrors'
+import { requireAuth, requireProductPageAction } from '../lib/authz'
+import { computeChanges, logActivity } from '../lib/logActivity'
 
 const serverBody = t.Object({
   name: t.String({ minLength: 1 }),
@@ -29,28 +20,47 @@ const serverBody = t.Object({
 })
 
 export const serverRoutes = new Elysia({ prefix: '/api/servers' })
-  .use(jwt({ name: 'jwt', secret: JWT_SECRET }))
+  .use(authPlugin)
 
-  // GET /api/servers?product=X&environment=Y
-  .get('/', async ({ query }) => {
-    const conditions = []
-    if (query.product) conditions.push(eq(servers.productId, query.product))
+  .get('/', async ({ query, jwt, headers, set }) => {
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return unauthorized(set)
+
+    const productId = query.productId
+    if (!productId) {
+      return badRequest(set, 'productId query parameter is required')
+    }
+
+    const access = await requireProductPageAction(jwt.verify, headers, set, {
+      productId,
+      page: 'integrations',
+      action: 'read',
+    })
+    if (!access) return set.status === 401 ? unauthorized(set) : forbidden(set)
+
+    const conditions = [eq(servers.productId, productId)]
     if (query.environment) {
       const env = query.environment as 'dev' | 'stage' | 'prod'
       conditions.push(eq(servers.environment, env))
     }
 
     const results = await db.query.servers.findMany({
-      where: conditions.length > 0 ? and(...conditions) : undefined,
+      where: and(...conditions),
       orderBy: (s, { asc }) => [asc(s.name)],
     })
     return results
   })
 
-  // POST /api/servers
-  .post('/', async ({ body, jwt: jwtInstance, headers }) => {
-    const user = await getUserFromHeader(jwtInstance.verify, headers)
-    if (!user) return { error: 'Unauthorized' }
+  .post('/', async ({ body, jwt, headers, set }) => {
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return unauthorized(set)
+
+    const access = await requireProductPageAction(jwt.verify, headers, set, {
+      productId: body.productId,
+      page: 'integrations',
+      action: 'create',
+    })
+    if (!access) return set.status === 401 ? unauthorized(set) : forbidden(set)
 
     const [server] = await db.insert(servers).values({
       name: body.name,
@@ -64,31 +74,124 @@ export const serverRoutes = new Elysia({ prefix: '/api/servers' })
       productId: body.productId,
     }).returning()
 
+    logActivity({
+      productId: body.productId,
+      userName: user.name,
+      userAvatar: user.avatar,
+      userId: user.id,
+      action: 'created',
+      entityType: 'server',
+      entityId: server!.id,
+      entityTitle: server!.name,
+      changes: [
+        { field: 'environment', from: null, to: server?.environment || null },
+        { field: 'host', from: null, to: server?.host || null },
+        { field: 'provider', from: null, to: server?.provider || null },
+      ],
+      routePathOverride: '/integrations',
+    })
+
     return server
   }, { body: serverBody })
 
-  // PUT /api/servers/:id
-  .put('/:id', async ({ params: { id }, body, set, jwt: jwtInstance, headers }) => {
-    const user = await getUserFromHeader(jwtInstance.verify, headers)
-    if (!user) return { error: 'Unauthorized' }
+  .put('/:id', async ({ params: { id }, body, set, jwt, headers }) => {
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return unauthorized(set)
+
+    const existing = await db.query.servers.findFirst({
+      where: eq(servers.id, id),
+      columns: {
+        id: true,
+        productId: true,
+        name: true,
+        environment: true,
+        host: true,
+        port: true,
+        protocol: true,
+        region: true,
+        provider: true,
+        instanceId: true,
+      },
+    })
+    if (!existing) return notFound(set, 'Server not found')
+
+    const access = await requireProductPageAction(jwt.verify, headers, set, {
+      productId: existing.productId,
+      page: 'integrations',
+      action: 'edit',
+    })
+    if (!access) return set.status === 401 ? unauthorized(set) : forbidden(set)
 
     const [updated] = await db.update(servers)
       .set({ ...body, updatedAt: new Date() })
       .where(eq(servers.id, id))
       .returning()
+    if (!updated) return notFound(set, 'Server not found')
 
-    if (!updated) { set.status = 404; return { error: 'Server not found' } }
+    const changes = computeChanges(existing, body, [
+      'name',
+      'environment',
+      'host',
+      'port',
+      'protocol',
+      'region',
+      'provider',
+      'instanceId',
+    ])
+    if (changes.length > 0) {
+      logActivity({
+        productId: existing.productId,
+        userName: access.user.name,
+        userAvatar: access.user.avatar,
+        userId: access.user.id,
+        action: 'updated',
+        entityType: 'server',
+        entityId: existing.id,
+        entityTitle: updated.name,
+        changes,
+        routePathOverride: '/integrations',
+      })
+    }
+
     return updated
   }, { body: t.Partial(serverBody) })
 
-  // DELETE /api/servers/:id
-  .delete('/:id', async ({ params: { id }, set, jwt: jwtInstance, headers }) => {
-    const user = await getUserFromHeader(jwtInstance.verify, headers)
-    if (!user) return { error: 'Unauthorized' }
+  .delete('/:id', async ({ params: { id }, set, jwt, headers }) => {
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return unauthorized(set)
+
+    const existing = await db.query.servers.findFirst({
+      where: eq(servers.id, id),
+      columns: { id: true, productId: true, name: true, environment: true },
+    })
+    if (!existing) return notFound(set, 'Server not found')
+
+    const access = await requireProductPageAction(jwt.verify, headers, set, {
+      productId: existing.productId,
+      page: 'integrations',
+      action: 'delete',
+    })
+    if (!access) return set.status === 401 ? unauthorized(set) : forbidden(set)
 
     const [deleted] = await db.delete(servers)
       .where(eq(servers.id, id))
       .returning()
-    if (!deleted) { set.status = 404; return { error: 'Server not found' } }
+    if (!deleted) return notFound(set, 'Server not found')
+
+    logActivity({
+      productId: existing.productId,
+      userName: access.user.name,
+      userAvatar: access.user.avatar,
+      userId: access.user.id,
+      action: 'deleted',
+      entityType: 'server',
+      entityId: existing.id,
+      entityTitle: existing.name,
+      changes: [
+        { field: 'environment', from: existing.environment, to: null },
+      ],
+      routePathOverride: '/integrations',
+    })
+
     return { success: true }
   })

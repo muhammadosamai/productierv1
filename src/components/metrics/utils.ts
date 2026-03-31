@@ -1,3 +1,5 @@
+import { enumValueLabel } from '@/composables/useDomainOptions'
+
 // Shared utility functions for metrics dashboard
 
 export function statusColor(status: string): string {
@@ -40,7 +42,7 @@ export function priorityColor(priority: string): string {
 }
 
 export function statusLabel(s: string): string {
-  return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return enumValueLabel(s)
 }
 
 export function getInitials(name: string): string {
@@ -98,4 +100,10 @@ export const STATUS_CHART_COLORS: Record<string, string> = {
   blocked: '#EF4444',
   overdue: '#EF4444',
   archived: '#6B7280',
+}
+
+export const PERCENTILE_COLORS = {
+  p50: '#4857FE',
+  p85: '#F59E0B',
+  p95: '#EF4444',
 }

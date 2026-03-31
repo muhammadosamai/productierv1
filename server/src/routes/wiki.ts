@@ -1,56 +1,116 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
-import { assetTypes, assets, assetRelations_table, users } from '../db/schema'
+import { assetTypes, assets, assetRelations_table } from '../db/schema'
 import { eq, and, ilike, or } from 'drizzle-orm'
-import { jwt } from '@elysiajs/jwt'
-
-const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
-
-async function getUserFromHeader(jwtVerify: any, headers: Record<string, string | undefined>) {
-  const authHeader = headers.authorization
-  if (!authHeader?.startsWith('Bearer ')) return null
-  const token = authHeader.replace('Bearer ', '')
-  const payload = await jwtVerify(token)
-  if (!payload?.userId) return null
-  const user = await db.query.users.findFirst({ where: eq(users.id, payload.userId as string) })
-  return user || null
-}
+import { authPlugin } from '../plugins/auth'
+import { requireAuth, requireProductPageAction, type PageAction } from '../lib/authz'
+import { publicUserColumns } from '../lib/serializers'
 
 function slugify(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
+async function requireAssetAccess(
+  assetId: string,
+  action: PageAction,
+  jwtVerify: (token: string) => Promise<any>,
+  headers: Record<string, string | undefined>,
+  set: { status?: number | string }
+) {
+  const asset = await db.query.assets.findFirst({
+    where: eq(assets.id, assetId),
+    columns: { id: true, productId: true },
+  })
+  if (!asset) {
+    set.status = 404
+    return null
+  }
+
+  const access = await requireProductPageAction(jwtVerify, headers, set, {
+    productId: asset.productId,
+    page: 'wiki',
+    action,
+  })
+  if (!access) return null
+
+  return asset
+}
+
 export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
-  .use(jwt({ name: 'jwt', secret: JWT_SECRET }))
+  .use(authPlugin)
 
   // ============ ASSET TYPES ============
 
-  // GET /api/wiki/types?product=X
-  .get('/types', async ({ query }) => {
-    const product = query.product
+  // GET /api/wiki/types?productId=X
+  .get('/types', async ({ query, jwt, headers, set }) => {
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
+
+    const productId = query.productId
+    if (!productId) {
+      set.status = 400
+      return { error: 'productId query parameter is required' }
+    }
+
+    const access = await requireProductPageAction(jwt.verify, headers, set, {
+      productId,
+      page: 'wiki',
+      action: 'read',
+    })
+    if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
+
     return db.query.assetTypes.findMany({
-      where: product ? eq(assetTypes.productId, product) : undefined,
+      where: eq(assetTypes.productId, productId),
       orderBy: (t, { asc }) => [asc(t.category), asc(t.name)],
     })
   }, {
-    query: t.Object({ product: t.Optional(t.String()) }),
+    query: t.Object({ productId: t.Optional(t.String()) }),
   })
 
   // POST /api/wiki/types
-  .post('/types', async ({ body, jwt: jwtVerify, headers, set }) => {
-    const user = await getUserFromHeader(jwtVerify.verify, headers)
-    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+  .post('/types', async ({ body, jwt, headers, set }) => {
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
 
-    const [created] = await db.insert(assetTypes).values({
-      name: body.name,
-      slug: slugify(body.name),
-      category: body.category || 'business',
-      icon: body.icon || null,
-      color: body.color || null,
+    const access = await requireProductPageAction(jwt.verify, headers, set, {
       productId: body.productId,
-    }).returning()
+      page: 'wiki',
+      action: 'create',
+    })
+    if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
 
-    return created
+    const nextSlug = slugify(body.name)
+    const existingType = await db.query.assetTypes.findFirst({
+      where: and(eq(assetTypes.productId, body.productId), eq(assetTypes.slug, nextSlug)),
+    })
+    if (existingType) {
+      set.status = 409
+      return existingType
+    }
+
+    try {
+      const [created] = await db.insert(assetTypes).values({
+        name: body.name,
+        slug: nextSlug,
+        category: body.category || 'business',
+        icon: body.icon || null,
+        color: body.color || null,
+        productId: body.productId,
+      }).returning()
+
+      return created
+    } catch (error) {
+      if (typeof error === 'object' && error && 'code' in error && (error as { code?: string }).code === '23505') {
+        const conflictType = await db.query.assetTypes.findFirst({
+          where: and(eq(assetTypes.productId, body.productId), eq(assetTypes.slug, nextSlug)),
+        })
+        if (conflictType) {
+          set.status = 409
+          return conflictType
+        }
+      }
+      throw error
+    }
   }, {
     body: t.Object({
       name: t.String({ minLength: 1 }),
@@ -63,24 +123,38 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
 
   // ============ ASSETS ============
 
-  // GET /api/wiki/assets?product=X&type=slug&search=q
-  .get('/assets', async ({ query }) => {
-    const product = query.product
+  // GET /api/wiki/assets?productId=X&type=slug&search=q
+  .get('/assets', async ({ query, jwt, headers, set }) => {
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
+
+    const productId = query.productId
+    if (!productId) {
+      set.status = 400
+      return { error: 'productId query parameter is required' }
+    }
+
+    const access = await requireProductPageAction(jwt.verify, headers, set, {
+      productId,
+      page: 'wiki',
+      action: 'read',
+    })
+    if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
+
     const typeSlug = query.type
     const search = query.search
 
     let typeFilter: any = undefined
-    if (typeSlug && product) {
+    if (typeSlug) {
       const assetType = await db.query.assetTypes.findFirst({
-        where: and(eq(assetTypes.slug, typeSlug), eq(assetTypes.productId, product)),
+        where: and(eq(assetTypes.slug, typeSlug), eq(assetTypes.productId, productId)),
       })
       if (assetType) {
         typeFilter = eq(assets.assetTypeId, assetType.id)
       }
     }
 
-    const conditions = []
-    if (product) conditions.push(eq(assets.productId, product))
+    const conditions = [eq(assets.productId, productId)]
     if (typeFilter) conditions.push(typeFilter)
     if (search) {
       conditions.push(
@@ -92,34 +166,40 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
     }
 
     return db.query.assets.findMany({
-      where: conditions.length > 0 ? and(...conditions) : undefined,
+      where: and(...conditions),
       orderBy: (a, { asc }) => [asc(a.sortOrder), asc(a.title)],
       with: {
         assetType: true,
-        ownerUser: { columns: { id: true, name: true, email: true, avatar: true } },
-        createdByUser: { columns: { id: true, name: true, email: true, avatar: true } },
+        ownerUser: { columns: publicUserColumns },
+        createdByUser: { columns: publicUserColumns },
       },
     })
   }, {
     query: t.Object({
-      product: t.Optional(t.String()),
+      productId: t.Optional(t.String()),
       type: t.Optional(t.String()),
       search: t.Optional(t.String()),
     }),
   })
 
   // GET /api/wiki/assets/:id
-  .get('/assets/:id', async ({ params, set }) => {
+  .get('/assets/:id', async ({ params, jwt, headers, set }) => {
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
+
+    const allowedAsset = await requireAssetAccess(params.id, 'read', jwt.verify, headers, set)
+    if (!allowedAsset) return set.status === 404 ? { error: 'Asset not found' } : { error: 'Forbidden' }
+
     const asset = await db.query.assets.findFirst({
       where: eq(assets.id, params.id),
       with: {
         assetType: true,
-        ownerUser: { columns: { id: true, name: true, email: true, avatar: true } },
-        createdByUser: { columns: { id: true, name: true, email: true, avatar: true } },
+        ownerUser: { columns: publicUserColumns },
+        createdByUser: { columns: publicUserColumns },
         children: {
           with: {
             assetType: true,
-            ownerUser: { columns: { id: true, name: true, avatar: true } },
+            ownerUser: { columns: publicUserColumns },
           },
           orderBy: (a, { asc }) => [asc(a.sortOrder), asc(a.title)],
         },
@@ -149,9 +229,16 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
   })
 
   // POST /api/wiki/assets
-  .post('/assets', async ({ body, jwt: jwtVerify, headers, set }) => {
-    const user = await getUserFromHeader(jwtVerify.verify, headers)
-    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+  .post('/assets', async ({ body, jwt, headers, set }) => {
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
+
+    const access = await requireProductPageAction(jwt.verify, headers, set, {
+      productId: body.productId,
+      page: 'wiki',
+      action: 'create',
+    })
+    if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
 
     const [created] = await db.insert(assets).values({
       productId: body.productId,
@@ -169,13 +256,12 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
       createdByUserId: user.id,
     }).returning()
 
-    // Re-fetch with relations
     const full = await db.query.assets.findFirst({
       where: eq(assets.id, created.id),
       with: {
         assetType: true,
-        ownerUser: { columns: { id: true, name: true, email: true, avatar: true } },
-        createdByUser: { columns: { id: true, name: true, email: true, avatar: true } },
+        ownerUser: { columns: publicUserColumns },
+        createdByUser: { columns: publicUserColumns },
       },
     })
 
@@ -187,8 +273,17 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
       title: t.String({ minLength: 1 }),
       description: t.Optional(t.Nullable(t.String())),
       content: t.Optional(t.Nullable(t.String())),
-      status: t.Optional(t.String()),
-      visibility: t.Optional(t.String()),
+      status: t.Optional(t.Union([
+        t.Literal('draft'),
+        t.Literal('active'),
+        t.Literal('deprecated'),
+        t.Literal('archived'),
+      ])),
+      visibility: t.Optional(t.Union([
+        t.Literal('public'),
+        t.Literal('internal'),
+        t.Literal('private'),
+      ])),
       ownerUserId: t.Optional(t.Nullable(t.String())),
       tags: t.Optional(t.Nullable(t.Array(t.String()))),
       parentId: t.Optional(t.Nullable(t.String())),
@@ -197,9 +292,12 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
   })
 
   // PUT /api/wiki/assets/:id
-  .put('/assets/:id', async ({ params, body, jwt: jwtVerify, headers, set }) => {
-    const user = await getUserFromHeader(jwtVerify.verify, headers)
-    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+  .put('/assets/:id', async ({ params, body, jwt, headers, set }) => {
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
+
+    const allowedAsset = await requireAssetAccess(params.id, 'edit', jwt.verify, headers, set)
+    if (!allowedAsset) return set.status === 404 ? { error: 'Asset not found' } : { error: 'Forbidden' }
 
     const updateData: Record<string, any> = {}
     if (body.title !== undefined) { updateData.title = body.title; updateData.slug = slugify(body.title) }
@@ -215,13 +313,12 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
 
     await db.update(assets).set(updateData).where(eq(assets.id, params.id))
 
-    // Re-fetch with relations
     const updated = await db.query.assets.findFirst({
       where: eq(assets.id, params.id),
       with: {
         assetType: true,
-        ownerUser: { columns: { id: true, name: true, email: true, avatar: true } },
-        createdByUser: { columns: { id: true, name: true, email: true, avatar: true } },
+        ownerUser: { columns: publicUserColumns },
+        createdByUser: { columns: publicUserColumns },
       },
     })
 
@@ -231,8 +328,17 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
       title: t.Optional(t.String()),
       description: t.Optional(t.Nullable(t.String())),
       content: t.Optional(t.Nullable(t.String())),
-      status: t.Optional(t.String()),
-      visibility: t.Optional(t.String()),
+      status: t.Optional(t.Union([
+        t.Literal('draft'),
+        t.Literal('active'),
+        t.Literal('deprecated'),
+        t.Literal('archived'),
+      ])),
+      visibility: t.Optional(t.Union([
+        t.Literal('public'),
+        t.Literal('internal'),
+        t.Literal('private'),
+      ])),
       ownerUserId: t.Optional(t.Nullable(t.String())),
       tags: t.Optional(t.Nullable(t.Array(t.String()))),
       parentId: t.Optional(t.Nullable(t.String())),
@@ -242,9 +348,12 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
   })
 
   // DELETE /api/wiki/assets/:id
-  .delete('/assets/:id', async ({ params, jwt: jwtVerify, headers, set }) => {
-    const user = await getUserFromHeader(jwtVerify.verify, headers)
-    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+  .delete('/assets/:id', async ({ params, jwt, headers, set }) => {
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
+
+    const allowedAsset = await requireAssetAccess(params.id, 'delete', jwt.verify, headers, set)
+    if (!allowedAsset) return set.status === 404 ? { error: 'Asset not found' } : { error: 'Forbidden' }
 
     await db.delete(assets).where(eq(assets.id, params.id))
     return { success: true }
@@ -253,9 +362,15 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
   // ============ RELATIONS ============
 
   // POST /api/wiki/assets/:id/relations
-  .post('/assets/:id/relations', async ({ params, body, jwt: jwtVerify, headers, set }) => {
-    const user = await getUserFromHeader(jwtVerify.verify, headers)
-    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+  .post('/assets/:id/relations', async ({ params, body, jwt, headers, set }) => {
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
+
+    const allowedAsset = await requireAssetAccess(params.id, 'create', jwt.verify, headers, set)
+    if (!allowedAsset) return set.status === 404 ? { error: 'Asset not found' } : { error: 'Forbidden' }
+
+    const targetAsset = await requireAssetAccess(body.targetAssetId, 'read', jwt.verify, headers, set)
+    if (!targetAsset) return set.status === 404 ? { error: 'Target asset not found' } : { error: 'Forbidden' }
 
     const [created] = await db.insert(assetRelations_table).values({
       sourceAssetId: params.id,
@@ -272,9 +387,12 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
   })
 
   // DELETE /api/wiki/assets/:id/relations/:relationId
-  .delete('/assets/:id/relations/:relationId', async ({ params, jwt: jwtVerify, headers, set }) => {
-    const user = await getUserFromHeader(jwtVerify.verify, headers)
-    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+  .delete('/assets/:id/relations/:relationId', async ({ params, jwt, headers, set }) => {
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
+
+    const allowedAsset = await requireAssetAccess(params.id, 'delete', jwt.verify, headers, set)
+    if (!allowedAsset) return set.status === 404 ? { error: 'Asset not found' } : { error: 'Forbidden' }
 
     await db.delete(assetRelations_table).where(eq(assetRelations_table.id, params.relationId))
     return { success: true }

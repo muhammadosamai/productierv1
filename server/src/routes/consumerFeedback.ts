@@ -1,64 +1,296 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { consumerFeedbacks, consumerFeedbackComments, consumerFeedbackAttachments, users } from '../db/schema'
-import { eq, desc, sql } from 'drizzle-orm'
-import { jwt } from '@elysiajs/jwt'
+import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
+import { authPlugin } from '../plugins/auth'
+import { maskEmail } from '../lib/serializers'
+import { requireAuth, requireProductPageAction } from '../lib/authz'
+import { computeChanges, logActivity } from '../lib/logActivity'
+import { badRequest } from '../lib/apiErrors'
+import { isUuid } from '../lib/productResolver'
+import {
+  decodeCursor,
+  encodeCursor,
+  isLegacyListMode,
+  parseListQuery,
+  parseSort,
+  toListEnvelope,
+} from '../lib/listContract'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
+const FEEDBACK_ACKNOWLEDGED_STATUSES = new Set([
+  'acknowledged',
+  'investigating',
+  'resolved',
+  'wont_fix',
+  'duplicate',
+])
 
-async function getUserFromHeader(jwtVerify: any, headers: Record<string, string | undefined>) {
-  const authHeader = headers.authorization
-  if (!authHeader?.startsWith('Bearer ')) return null
-  const token = authHeader.replace('Bearer ', '')
-  const payload = await jwtVerify(token)
-  if (!payload?.userId) return null
-  return await db.query.users.findFirst({ where: eq(users.id, payload.userId as string) }) || null
+const FEEDBACK_RESOLVED_STATUSES = new Set([
+  'resolved',
+  'wont_fix',
+  'duplicate',
+])
+
+function applyFeedbackLifecycleTimestamps(
+  existing: {
+    status: string
+    acknowledgedAt: Date | null
+    resolvedAt: Date | null
+  },
+  nextStatus: unknown,
+  updateData: Record<string, unknown>,
+) {
+  if (typeof nextStatus !== 'string') return
+  const normalizedStatus = nextStatus.trim()
+  if (!normalizedStatus || normalizedStatus === existing.status) return
+  const now = new Date()
+  if (FEEDBACK_ACKNOWLEDGED_STATUSES.has(normalizedStatus) && !existing.acknowledgedAt) {
+    updateData.acknowledgedAt = now
+  }
+  if (FEEDBACK_RESOLVED_STATUSES.has(normalizedStatus) && !existing.resolvedAt) {
+    updateData.resolvedAt = now
+  }
 }
 
 export const consumerFeedbackRoutes = new Elysia({ prefix: '/api/consumer-feedbacks' })
-  .use(jwt({ name: 'jwt', secret: JWT_SECRET }))
+  .use(authPlugin)
 
-  // GET /api/consumer-feedbacks?product=X
-  .get('/', async ({ query }) => {
-    const product = query.product
-    const items = await db.query.consumerFeedbacks.findMany({
-      where: product ? eq(consumerFeedbacks.productId, product) : undefined,
-      orderBy: [desc(consumerFeedbacks.createdAt)],
+  // GET /api/consumer-feedbacks?productId=X
+  .get('/', async ({ query, jwt, headers, set }) => {
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
+
+    const productId = query.productId
+    if (!productId) {
+      set.status = 400
+      return { error: 'productId query parameter is required' }
+    }
+    if (!isUuid(productId)) {
+      return badRequest(set, 'Invalid productId query parameter')
+    }
+
+    const access = await requireProductPageAction(jwt.verify, headers, set, {
+      productId,
+      page: 'feedbacks',
+      action: 'read',
+    })
+    if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
+
+    const parsedList = parseListQuery(query as Record<string, unknown>, {
+      defaultLimit: 30,
+      maxLimit: 100,
+    })
+    const legacyMode = isLegacyListMode(parsedList)
+    const q = typeof query.q === 'string' ? query.q.trim() : ''
+    const qTerm = q.length > 0 ? q : null
+
+    if (legacyMode) {
+      const items = await db.query.consumerFeedbacks.findMany({
+        where: and(
+          eq(consumerFeedbacks.productId, productId),
+          ...(qTerm
+            ? [or(
+              ilike(consumerFeedbacks.title, `%${qTerm}%`),
+              ilike(consumerFeedbacks.description, `%${qTerm}%`),
+            )!]
+            : []),
+        ),
+        orderBy: [desc(consumerFeedbacks.createdAt)],
+        with: {
+          assignedToUser: { columns: { id: true, name: true, avatar: true } },
+          attachments: { columns: { id: true, fileName: true, fileType: true, mimeType: true, filePath: true } },
+          comments: { columns: { id: true } },
+        },
+      })
+      return items.map(i => ({
+        id: i.id,
+        productId: i.productId,
+        title: i.title,
+        description: i.description,
+        type: i.type,
+        status: i.status,
+        priority: i.priority,
+        storyId: i.storyId,
+        assignedToUserId: i.assignedToUserId,
+        tags: i.tags,
+        upvoteCount: i.upvoteCount,
+        acknowledgedAt: i.acknowledgedAt,
+        resolvedAt: i.resolvedAt,
+        createdAt: i.createdAt,
+        updatedAt: i.updatedAt,
+        assignedToUser: i.assignedToUser,
+        commentCount: i.comments.length,
+        attachmentCount: i.attachments.length,
+      }))
+    }
+
+    const sort = parseSort(parsedList.sort, ['createdAt', 'updatedAt'] as const, {
+      field: 'createdAt',
+      direction: 'desc',
+      raw: 'createdAt:desc',
+    })
+    const cursor = decodeCursor(parsedList.cursor)
+    const baseConditions = [eq(consumerFeedbacks.productId, productId)]
+    if (qTerm) {
+      baseConditions.push(or(
+        ilike(consumerFeedbacks.title, `%${qTerm}%`),
+        ilike(consumerFeedbacks.description, `%${qTerm}%`),
+      )!)
+    }
+
+    const conditions = [...baseConditions]
+    if (cursor) {
+      const cursorDate = new Date(cursor.createdAt)
+      if (!Number.isNaN(cursorDate.getTime())) {
+        if (sort.field === 'updatedAt') {
+          if (sort.direction === 'desc') {
+            conditions.push(sql`(${consumerFeedbacks.updatedAt} < ${cursorDate} OR (${consumerFeedbacks.updatedAt} = ${cursorDate} AND ${consumerFeedbacks.id} < ${cursor.id}))`)
+          } else {
+            conditions.push(sql`(${consumerFeedbacks.updatedAt} > ${cursorDate} OR (${consumerFeedbacks.updatedAt} = ${cursorDate} AND ${consumerFeedbacks.id} > ${cursor.id}))`)
+          }
+        } else if (sort.direction === 'desc') {
+          conditions.push(sql`(${consumerFeedbacks.createdAt} < ${cursorDate} OR (${consumerFeedbacks.createdAt} = ${cursorDate} AND ${consumerFeedbacks.id} < ${cursor.id}))`)
+        } else {
+          conditions.push(sql`(${consumerFeedbacks.createdAt} > ${cursorDate} OR (${consumerFeedbacks.createdAt} = ${cursorDate} AND ${consumerFeedbacks.id} > ${cursor.id}))`)
+        }
+      }
+    }
+
+    const orderField = sort.field === 'updatedAt' ? consumerFeedbacks.updatedAt : consumerFeedbacks.createdAt
+    const rows = await db.query.consumerFeedbacks.findMany({
+      where: and(...conditions),
+      orderBy: sort.direction === 'desc'
+        ? [desc(orderField as any), desc(consumerFeedbacks.id)]
+        : [asc(orderField as any), asc(consumerFeedbacks.id)],
+      limit: parsedList.limit + 1,
       with: {
-        assignedToUser: { columns: { id: true, name: true, email: true, avatar: true } },
-        attachments: { columns: { id: true, fileName: true, fileType: true, mimeType: true, filePath: true } },
-        comments: { columns: { id: true } },
+        assignedToUser: { columns: { id: true, name: true, avatar: true } },
       },
     })
-    return items.map(i => ({
-      ...i,
-      commentCount: i.comments.length,
-      attachmentCount: i.attachments.length,
-      comments: undefined,
+
+    const hasMore = rows.length > parsedList.limit
+    const items = hasMore ? rows.slice(0, parsedList.limit) : rows
+    const ids = items.map(item => item.id)
+    const commentCounts = ids.length > 0
+      ? await db.select({
+        feedbackId: consumerFeedbackComments.feedbackId,
+        count: sql<number>`count(*)::int`,
+      }).from(consumerFeedbackComments)
+        .where(inArray(consumerFeedbackComments.feedbackId, ids))
+        .groupBy(consumerFeedbackComments.feedbackId)
+      : []
+    const attachmentCounts = ids.length > 0
+      ? await db.select({
+        feedbackId: consumerFeedbackAttachments.feedbackId,
+        count: sql<number>`count(*)::int`,
+      }).from(consumerFeedbackAttachments)
+        .where(inArray(consumerFeedbackAttachments.feedbackId, ids))
+        .groupBy(consumerFeedbackAttachments.feedbackId)
+      : []
+    const commentsMap = new Map<string, number>()
+    for (const row of commentCounts) commentsMap.set(row.feedbackId, Number(row.count ?? 0))
+    const attachmentsMap = new Map<string, number>()
+    for (const row of attachmentCounts) attachmentsMap.set(row.feedbackId, Number(row.count ?? 0))
+
+    const enrichedItems = items.map(i => ({
+      id: i.id,
+      productId: i.productId,
+      title: i.title,
+      description: i.description,
+      type: i.type,
+      status: i.status,
+      priority: i.priority,
+      storyId: i.storyId,
+      assignedToUserId: i.assignedToUserId,
+      tags: i.tags,
+      upvoteCount: i.upvoteCount,
+      acknowledgedAt: i.acknowledgedAt,
+      resolvedAt: i.resolvedAt,
+      createdAt: i.createdAt,
+      updatedAt: i.updatedAt,
+      assignedToUser: i.assignedToUser,
+      commentCount: commentsMap.get(i.id) || 0,
+      attachmentCount: attachmentsMap.get(i.id) || 0,
     }))
+
+    const nextCursor = hasMore && items.length > 0
+      ? encodeCursor({
+        id: items[items.length - 1]!.id,
+        createdAt: new Date(
+          sort.field === 'updatedAt'
+            ? items[items.length - 1]!.updatedAt
+            : items[items.length - 1]!.createdAt,
+        ).toISOString(),
+      })
+      : null
+
+    let totalApprox: number | undefined
+    if (!parsedList.cursor) {
+      const [countRow] = await db.select({
+        value: sql<number>`count(*)::int`,
+      }).from(consumerFeedbacks).where(and(...baseConditions))
+      totalApprox = Number(countRow?.value ?? 0)
+    }
+
+    return toListEnvelope({
+      items: enrichedItems,
+      hasMore,
+      nextCursor,
+      totalApprox,
+    })
   }, {
-    query: t.Object({ product: t.Optional(t.String()) }),
+    query: t.Object({
+      productId: t.Optional(t.String()),
+      q: t.Optional(t.String()),
+      sort: t.Optional(t.String()),
+      limit: t.Optional(t.String()),
+      cursor: t.Optional(t.String()),
+      paged: t.Optional(t.String()),
+    }),
   })
 
   // GET /api/consumer-feedbacks/:id
-  .get('/:id', async ({ params, set }) => {
+  .get('/:id', async ({ params, jwt, headers, set }) => {
+    if (!isUuid(params.id)) {
+      return badRequest(set, 'Invalid feedback id')
+    }
     const item = await db.query.consumerFeedbacks.findFirst({
       where: eq(consumerFeedbacks.id, params.id),
       with: {
-        assignedToUser: { columns: { id: true, name: true, email: true, avatar: true } },
+        assignedToUser: { columns: { id: true, name: true, avatar: true } },
         attachments: true,
         comments: {
-          with: { user: { columns: { id: true, name: true, email: true, avatar: true } } },
+          with: { user: { columns: { id: true, name: true, avatar: true } } },
           orderBy: [sql`created_at ASC`],
         },
       },
     })
     if (!item) { set.status = 404; return { error: 'Not found' } }
-    return item
+
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
+    const access = await requireProductPageAction(jwt.verify, headers, set, {
+      productId: item.productId,
+      page: 'feedbacks',
+      action: 'read',
+    })
+    if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
+
+    return {
+      ...item,
+      reporterEmail: maskEmail(item.reporterEmail),
+      reporterDevice: null,
+      reporterBrowser: null,
+      reporterOs: null,
+      pageUrl: null,
+    }
   })
 
   // POST /api/consumer-feedbacks (public - no auth required for external users)
-  .post('/', async ({ body }) => {
+  .post('/', async ({ body, set }) => {
+    if (!isUuid(body.productId)) {
+      return badRequest(set, 'Invalid productId')
+    }
     const [created] = await db.insert(consumerFeedbacks).values({
       productId: body.productId,
       title: body.title,
@@ -77,14 +309,43 @@ export const consumerFeedbackRoutes = new Elysia({ prefix: '/api/consumer-feedba
       actualBehavior: body.actualBehavior || null,
       tags: body.tags || null,
     }).returning()
-    return created
+
+    logActivity({
+      productId: created.productId,
+      userName: body.reporterName || 'External Reporter',
+      userAvatar: null,
+      userId: null,
+      action: 'created',
+      entityType: 'consumer_feedback',
+      entityId: created.id,
+      entityTitle: created.title,
+      routePathOverride: '/feedbacks',
+      subjectUserIds: created.assignedToUserId ? [created.assignedToUserId] : [],
+    })
+
+    return {
+      id: created.id,
+      productId: created.productId,
+      status: created.status,
+      createdAt: created.createdAt,
+      message: 'Feedback submitted successfully',
+    }
   }, {
     body: t.Object({
       productId: t.String(),
       title: t.String({ minLength: 1 }),
       description: t.Optional(t.Nullable(t.String())),
-      type: t.Optional(t.String()),
-      priority: t.Optional(t.String()),
+      type: t.Optional(t.Union([
+        t.Literal('bug'),
+        t.Literal('feature'),
+        t.Literal('enhancement'),
+      ])),
+      priority: t.Optional(t.Union([
+        t.Literal('low'),
+        t.Literal('medium'),
+        t.Literal('high'),
+        t.Literal('critical'),
+      ])),
       reporterName: t.Optional(t.Nullable(t.String())),
       reporterEmail: t.Optional(t.Nullable(t.String())),
       reporterDevice: t.Optional(t.Nullable(t.String())),
@@ -100,14 +361,37 @@ export const consumerFeedbackRoutes = new Elysia({ prefix: '/api/consumer-feedba
   })
 
   // PUT /api/consumer-feedbacks/:id (auth required - internal team)
-  .put('/:id', async ({ params, body, jwt: jwtInstance, headers, set }) => {
-    const user = await getUserFromHeader(jwtInstance.verify, headers)
-    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+  .put('/:id', async ({ params, body, jwt, headers, set }) => {
+    if (!isUuid(params.id)) {
+      return badRequest(set, 'Invalid feedback id')
+    }
+    if (body.assignedToUserId !== undefined && body.assignedToUserId !== null && !isUuid(body.assignedToUserId)) {
+      return badRequest(set, 'Invalid assignedToUserId')
+    }
+    if (body.storyId !== undefined && body.storyId !== null && !isUuid(body.storyId)) {
+      return badRequest(set, 'Invalid storyId')
+    }
+
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
+
+    const existing = await db.query.consumerFeedbacks.findFirst({
+      where: eq(consumerFeedbacks.id, params.id),
+    })
+    if (!existing) { set.status = 404; return { error: 'Not found' } }
+
+    const access = await requireProductPageAction(jwt.verify, headers, set, {
+      productId: existing.productId,
+      page: 'feedbacks',
+      action: 'edit',
+    })
+    if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
 
     const updateData: Record<string, any> = {}
     for (const [k, v] of Object.entries(body)) {
       if (v !== undefined) updateData[k] = v
     }
+    applyFeedbackLifecycleTimestamps(existing, body.status, updateData)
 
     const [updated] = await db.update(consumerFeedbacks)
       .set(updateData)
@@ -115,14 +399,59 @@ export const consumerFeedbackRoutes = new Elysia({ prefix: '/api/consumer-feedba
       .returning()
 
     if (!updated) { set.status = 404; return { error: 'Not found' } }
+
+    const changes = computeChanges(existing as Record<string, any>, body as Record<string, any>, [
+      'title',
+      'description',
+      'type',
+      'status',
+      'priority',
+      'assignedToUserId',
+      'tags',
+      'storyId',
+    ])
+    if (changes.length > 0) {
+      const subjectUserIds = [existing.assignedToUserId, updated.assignedToUserId]
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      logActivity({
+        productId: updated.productId,
+        userName: user.name,
+        userAvatar: user.avatar,
+        userId: user.id,
+        action: 'updated',
+        entityType: 'consumer_feedback',
+        entityId: updated.id,
+        entityTitle: updated.title,
+        changes,
+        routePathOverride: '/feedbacks',
+        subjectUserIds,
+      })
+    }
+
     return updated
   }, {
     body: t.Object({
       title: t.Optional(t.String()),
       description: t.Optional(t.Nullable(t.String())),
-      type: t.Optional(t.String()),
-      status: t.Optional(t.String()),
-      priority: t.Optional(t.String()),
+      type: t.Optional(t.Union([
+        t.Literal('bug'),
+        t.Literal('feature'),
+        t.Literal('enhancement'),
+      ])),
+      status: t.Optional(t.Union([
+        t.Literal('new'),
+        t.Literal('acknowledged'),
+        t.Literal('investigating'),
+        t.Literal('resolved'),
+        t.Literal('wont_fix'),
+        t.Literal('duplicate'),
+      ])),
+      priority: t.Optional(t.Union([
+        t.Literal('low'),
+        t.Literal('medium'),
+        t.Literal('high'),
+        t.Literal('critical'),
+      ])),
       assignedToUserId: t.Optional(t.Nullable(t.String())),
       tags: t.Optional(t.Nullable(t.Array(t.String()))),
       storyId: t.Optional(t.Nullable(t.String())),
@@ -130,24 +459,90 @@ export const consumerFeedbackRoutes = new Elysia({ prefix: '/api/consumer-feedba
   })
 
   // DELETE /api/consumer-feedbacks/:id
-  .delete('/:id', async ({ params, jwt: jwtInstance, headers, set }) => {
-    const user = await getUserFromHeader(jwtInstance.verify, headers)
-    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+  .delete('/:id', async ({ params, jwt, headers, set }) => {
+    if (!isUuid(params.id)) {
+      return badRequest(set, 'Invalid feedback id')
+    }
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
+
+    const existing = await db.query.consumerFeedbacks.findFirst({
+      where: eq(consumerFeedbacks.id, params.id),
+    })
+    if (!existing) { set.status = 404; return { error: 'Not found' } }
+
+    const access = await requireProductPageAction(jwt.verify, headers, set, {
+      productId: existing.productId,
+      page: 'feedbacks',
+      action: 'delete',
+    })
+    if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
+
     await db.delete(consumerFeedbacks).where(eq(consumerFeedbacks.id, params.id))
+    const subjectUserIds = existing.assignedToUserId ? [existing.assignedToUserId] : []
+    logActivity({
+      productId: existing.productId,
+      userName: user.name,
+      userAvatar: user.avatar,
+      userId: user.id,
+      action: 'deleted',
+      entityType: 'consumer_feedback',
+      entityId: existing.id,
+      entityTitle: existing.title,
+      routePathOverride: '/feedbacks',
+      subjectUserIds,
+    })
     return { success: true }
   })
 
   // POST /api/consumer-feedbacks/:id/comments (internal team comment)
-  .post('/:id/comments', async ({ params, body, jwt: jwtInstance, headers, set }) => {
-    const user = await getUserFromHeader(jwtInstance.verify, headers)
-    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+  .post('/:id/comments', async ({ params, body, jwt, headers, set }) => {
+    if (!isUuid(params.id)) {
+      return badRequest(set, 'Invalid feedback id')
+    }
+    const user = await requireAuth(jwt.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
+
+    const feedback = await db.query.consumerFeedbacks.findFirst({
+      where: eq(consumerFeedbacks.id, params.id),
+    })
+    if (!feedback) { set.status = 404; return { error: 'Not found' } }
+
+    const access = await requireProductPageAction(jwt.verify, headers, set, {
+      productId: feedback.productId,
+      page: 'feedbacks',
+      action: 'create',
+    })
+    if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
+
     const [comment] = await db.insert(consumerFeedbackComments).values({
       feedbackId: params.id,
       userId: user.id,
       content: body.content,
       isInternal: body.isInternal ? 1 : 0,
     }).returning()
-    return { ...comment, user: { id: user.id, name: user.name, email: user.email, avatar: user.avatar } }
+
+    const subjectUserIds = [feedback.assignedToUserId]
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    logActivity({
+      productId: feedback.productId,
+      userName: user.name,
+      userAvatar: user.avatar,
+      userId: user.id,
+      action: 'updated',
+      entityType: 'consumer_feedback',
+      entityId: feedback.id,
+      entityTitle: feedback.title,
+      changes: [{
+        field: 'comment',
+        from: null,
+        to: body.content.length > 80 ? `${body.content.slice(0, 80)}...` : body.content,
+      }],
+      routePathOverride: '/feedbacks',
+      subjectUserIds,
+    })
+
+    return { ...comment, user: { id: user.id, name: user.name, avatar: user.avatar } }
   }, {
     body: t.Object({
       content: t.String({ minLength: 1 }),

@@ -3,6 +3,7 @@ import { ref, watch, computed } from 'vue'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { useWikiStore } from '@/stores/wiki'
+import { usersApi } from '@/lib/api'
 import {
   Dialog,
   DialogContent,
@@ -36,6 +37,7 @@ const emit = defineEmits<{ created: [] }>()
 const productStore = useProductStore()
 const authStore = useAuthStore()
 const wikiStore = useWikiStore()
+const activeProductRef = computed(() => productStore.activeProduct.id ?? '')
 
 const title = ref('')
 const description = ref('')
@@ -69,7 +71,11 @@ const typeGroups = computed(() => {
       }
       groups[at.category] = { label: labels[at.category] || at.category, types: [] }
     }
-    groups[at.category].types.push(at)
+
+    const categoryGroup = groups[at.category]
+    if (categoryGroup) {
+      categoryGroup.types.push(at)
+    }
   }
   return Object.values(groups)
 })
@@ -77,10 +83,10 @@ const typeGroups = computed(() => {
 async function searchOwners(query: string) {
   ownerSearchLoading.value = true
   try {
-    const res = await fetch(`/api/auth/users?q=${encodeURIComponent(query)}`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    if (res.ok) ownerSearchResults.value = await res.json()
+    const payload = await usersApi.list({ q: query }, authStore.token)
+    ownerSearchResults.value = Array.isArray(payload)
+      ? payload
+      : (Array.isArray(payload?.items) ? payload.items : [])
   } catch {
     ownerSearchResults.value = []
   } finally {
@@ -92,6 +98,17 @@ function onOwnerInput() {
   showOwnerDropdown.value = true
   if (ownerSearchTimeout) clearTimeout(ownerSearchTimeout)
   ownerSearchTimeout = setTimeout(() => searchOwners(ownerSearchQuery.value), 200)
+}
+
+function onOwnerFocus() {
+  showOwnerDropdown.value = true
+  searchOwners(ownerSearchQuery.value)
+}
+
+function onOwnerBlur() {
+  globalThis.setTimeout(() => {
+    showOwnerDropdown.value = false
+  }, 150)
 }
 
 function selectOwner(user: UserResult) {
@@ -140,17 +157,18 @@ watch(open, (val) => {
   } else {
     // Ensure types are loaded
     if (wikiStore.assetTypes.length === 0) {
-      wikiStore.fetchAssetTypes(productStore.activeProduct.name)
+      wikiStore.fetchAssetTypes(activeProductRef.value || undefined)
     }
   }
 })
 
 async function handleSubmit() {
   if (!title.value.trim() || !assetTypeId.value) return
+  if (!activeProductRef.value) return
   submitting.value = true
 
   const created = await wikiStore.createAsset({
-    productId: productStore.activeProduct.name,
+    productId: activeProductRef.value,
     assetTypeId: assetTypeId.value,
     title: title.value.trim(),
     description: description.value.trim() || null,
@@ -256,8 +274,8 @@ async function handleSubmit() {
                   class="text-sm text-gray-900 bg-transparent outline-none w-full placeholder-gray-400"
                   placeholder="Search users..."
                   @input="onOwnerInput"
-                  @focus="showOwnerDropdown = true; searchOwners(ownerSearchQuery)"
-                  @blur="setTimeout(() => showOwnerDropdown = false, 150)"
+                  @focus="onOwnerFocus"
+                  @blur="onOwnerBlur"
                 />
               </div>
               <div

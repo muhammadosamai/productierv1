@@ -1,0 +1,86 @@
+{
+  "products": [
+    {
+      "name": "NovaForge",
+      "description": "NovaForge is a realistic software delivery organization used to demo Productier planning, execution, quality, and release workflows end-to-end.",
+      "logo": "/uploads/logos/novaforge.svg"
+    },
+    {
+      "name": "PulseDesk",
+      "description": "PulseDesk runs high-volume customer operations and showcases intake, triage, and service workflow orchestration.",
+      "logo": "/uploads/logos/pulsedesk.svg"
+    },
+    {
+      "name": "AtlasOps",
+      "description": "AtlasOps demonstrates platform reliability programs including release governance, incident readiness, and runbook quality.",
+      "logo": "/uploads/logos/atlasops.svg"
+    }
+  ],
+  "product": {
+    "name": "NovaForge",
+    "description": "NovaForge is a realistic software delivery organization used to demo Productier planning, execution, quality, and release workflows end-to-end.",
+    "logo": "/uploads/logos/novaforge.svg"
+  },
+  "users": [
+    {
+      "name": "Nora Quinn",
+      "email": "nora@novaforge.io",
+      "role": "admin",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/11.jpg"
+    },
+    {
+      "name": "Miles Carter",
+      "email": "miles@novaforge.io",
+      "role": "admin",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/12.jpg"
+    },
+    {
+      "name": "Amelia Scott",
+      "email": "amelia@novaforge.io",
+      "role": "product_admin",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/13.jpg"
+    },
+    {
+      "name": "Ethan Bell",
+      "email": "ethan@novaforge.io",
+      "role": "product_manager",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/14.jpg"
+    },
+    {
+      "name": "Sophia Reed",
+      "email": "sophia@novaforge.io",
+      "role": "business_analyst",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/15.jpg"
+    },
+    {
+      "name": "Liam Brooks",
+      "email": "liam@novaforge.io",
+      "role": "developer",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/16.jpg"
+    },
+    {
+      "name": "Maya Patel",
+      "email": "maya@novaforge.io",
+      "role": "developer",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/17.jpg"
+    },
+    {
+      "name": "Noah Kim",
+      "email": "noah@novaforge.io",
+      "role": "developer",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/18.jpg"
+    },
+    {
+      "name": "Olivia Hart",
+      "email": "olivia@novaforge.io",
+      "role": "viewer",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/19.jpg"
+    },
+    {
+      "name": "Lucas Price",
+      "email": "lucas@novaforge.io",
+      "role": "viewer",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/20.jpg"
+    }
+  ]
+}

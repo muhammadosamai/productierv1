@@ -5,6 +5,13 @@ on:
     branches: ["stage"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: stage-deploy
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy productierv1 (stage)
@@ -12,19 +19,24 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4  
+        uses: actions/checkout@v4
 
       - name: Setup SSH
+        shell: bash
         run: |
+          set -euo pipefail
           eval "$(ssh-agent -s)"
-          ssh-add <(echo "${{ secrets.SSH_PRIVATE_KEY }}")
+          mkdir -p ~/.ssh
+          ssh-add <(printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}")
           ssh-keyscan -H 216.250.122.193 >> ~/.ssh/known_hosts
+
       - name: Deploy to Stage Server
+        shell: bash
         run: |
+          set -euo pipefail
           ssh scripts@216.250.122.193 << 'EOF'
           set -e
-          echo "🚀 Running deployment script..."
+          echo "Running deployment script..."
           bash /var/www/deploy-scripts/productierv1-stage-deploy.sh
-          
-          echo "Productierv1 Stage deployment completed 🚀"
+          echo "Productierv1 stage deployment completed."
           EOF

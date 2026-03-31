@@ -9,16 +9,21 @@ import {
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { useConsumerFeedbacksStore } from '@/stores/consumerFeedbacks'
+import { usePagePermissions } from '@/lib/pagePermissions'
+import { STORAGE_KEYS } from '@/constants/storageKeys'
 import FavoriteStar from '@/components/shared/FavoriteStar.vue'
 import type { ConsumerFeedbackType, ConsumerFeedbackStatus, ConsumerFeedbackPriority } from '@/types/consumerFeedback'
 
 const productStore = useProductStore()
 const authStore = useAuthStore()
 const store = useConsumerFeedbacksStore()
+const feedbackPermissions = usePagePermissions('feedbacks')
+const canCreateFeedbacks = computed(() => feedbackPermissions.canCreate.value)
+const CONSUMER_FEEDBACK_VIEW_MODE_KEY = STORAGE_KEYS.views.consumerFeedback.viewMode
 
 const searchQuery = ref('')
 const activeTab = ref<'all' | 'new' | 'investigating' | 'resolved' | 'wont_fix'>('all')
-const viewMode = ref<'table' | 'card'>(localStorage.getItem('cf-view-mode') as any || 'table')
+const viewMode = ref<'table' | 'card'>(localStorage.getItem(CONSUMER_FEEDBACK_VIEW_MODE_KEY) as any || 'table')
 const sortField = ref<string>('createdAt')
 const sortDir = ref<'asc' | 'desc'>('desc')
 const typeFilter = ref<string>('')
@@ -40,14 +45,29 @@ const newTags = ref<string[]>([])
 const newTagInput = ref('')
 const submitting = ref(false)
 
-watch(viewMode, (v) => localStorage.setItem('cf-view-mode', v))
+watch(viewMode, (v) => localStorage.setItem(CONSUMER_FEEDBACK_VIEW_MODE_KEY, v))
+
+function activeProductId() {
+  return productStore.activeProduct.id
+}
+
+async function refreshFeedbacks() {
+  await store.fetchAll(activeProductId(), {
+    q: searchQuery.value.trim() || undefined,
+    limit: 60,
+  })
+}
 
 onMounted(() => {
-  store.fetchAll(productStore.activeProduct.name)
+  refreshFeedbacks()
 })
 
-watch(() => productStore.activeProduct.name, (p) => {
-  store.fetchAll(p)
+watch(() => productStore.activeProduct.id, () => {
+  refreshFeedbacks()
+})
+
+watch(searchQuery, () => {
+  refreshFeedbacks()
 })
 
 const filteredItems = computed(() => {
@@ -108,10 +128,13 @@ function addTag() {
 function removeTag(tag: string) { newTags.value = newTags.value.filter(t => t !== tag) }
 
 async function handleCreate() {
+  if (!canCreateFeedbacks.value) return
   if (!newTitle.value.trim()) return
+  const productId = activeProductId()
+  if (!productId) return
   submitting.value = true
   await store.create({
-    productId: productStore.activeProduct.name,
+    productId,
     title: newTitle.value.trim(),
     description: newDescription.value.trim() || null,
     type: newType.value,
@@ -209,7 +232,15 @@ function timeAgo(dateStr: string) {
           </div>
           <h1 class="text-lg font-semibold text-gray-900">Consumer Feedback <span class="text-gray-400 font-normal">({{ store.items.length }})</span></h1>
         </div>
-        <button class="flex items-center gap-1.5 bg-[#4857FE] hover:bg-[#3E4BDE] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer" @click="showCreateDialog = true">
+        <button
+          class="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          :class="canCreateFeedbacks
+            ? 'bg-[#4857FE] hover:bg-[#3E4BDE] text-white cursor-pointer'
+            : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+          :disabled="!canCreateFeedbacks"
+          :title="feedbackPermissions.deniedReason('create', 'consumer feedback') || 'Submit feedback'"
+          @click="showCreateDialog = true"
+        >
           <Plus :size="15" />
           Submit Feedback
         </button>
@@ -271,7 +302,15 @@ function timeAgo(dateStr: string) {
         </div>
         <p class="text-gray-500 text-sm font-medium mb-1">No feedback yet</p>
         <p class="text-gray-400 text-xs mb-4">Consumer feedback will appear here</p>
-        <button class="flex items-center gap-1.5 px-4 py-2 bg-[#4857FE] text-white text-sm font-medium rounded-lg hover:bg-[#3E4BDE] transition-colors cursor-pointer" @click="showCreateDialog = true">
+        <button
+          class="flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors"
+          :class="canCreateFeedbacks
+            ? 'bg-[#4857FE] text-white hover:bg-[#3E4BDE] cursor-pointer'
+            : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+          :disabled="!canCreateFeedbacks"
+          :title="feedbackPermissions.deniedReason('create', 'consumer feedback') || 'Submit feedback'"
+          @click="showCreateDialog = true"
+        >
           <Plus :size="15" /> Submit Feedback
         </button>
       </div>
@@ -303,7 +342,7 @@ function timeAgo(dateStr: string) {
           <tbody>
             <tr v-for="item in filteredItems" :key="item.id" class="border-b border-gray-50 hover:bg-gray-50/50 transition-colors group">
               <td class="px-5 py-3.5">
-                <FavoriteStar entity-type="consumer_feedback" :entity-id="item.id" :product-id="productStore.activeProduct.name" />
+                <FavoriteStar entity-type="consumer_feedback" :entity-id="item.id" :product-id="productStore.activeProduct.id || ''" />
               </td>
               <td class="px-5 py-3.5">
                 <div class="flex items-center gap-2 min-w-0">
@@ -517,7 +556,14 @@ function timeAgo(dateStr: string) {
 
             <div class="flex justify-end gap-2 pt-2">
               <button type="button" class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer" @click="showCreateDialog = false">Cancel</button>
-              <button type="submit" :disabled="!newTitle.trim() || submitting" class="px-4 py-2 text-sm font-medium bg-[#4857FE] hover:bg-[#3E4BDE] text-white rounded-lg transition-colors cursor-pointer disabled:opacity-50">
+              <button
+                type="submit"
+                :disabled="!newTitle.trim() || submitting || !canCreateFeedbacks"
+                class="px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+                :class="canCreateFeedbacks
+                  ? 'bg-[#4857FE] hover:bg-[#3E4BDE] text-white cursor-pointer'
+                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+              >
                 {{ submitting ? 'Submitting...' : 'Submit Feedback' }}
               </button>
             </div>

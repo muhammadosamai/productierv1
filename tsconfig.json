@@ -10,6 +10,7 @@
   ],
   "compilerOptions": {
     "paths": {
+      "@/lib/apiClient": ["./src/lib/apiFacadeClient.ts"],
       "@/*": ["./src/*"]
     }
   }

@@ -13,8 +13,24 @@ import {
 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useBacklogStore } from '@/stores/backlog'
+import { useProductStore } from '@/stores/products'
 import TaskStatusIcon from '@/components/shared/TaskStatusIcon.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useDomainOptions } from '@/composables/useDomainOptions'
+import { useDomainPresentation } from '@/composables/useDomainPresentation'
+import { apiFetch, organizationTeamsApi } from '@/lib/apiClient'
+import { buildProductScopedPath, resolveProductScope } from '@/lib/productScopeApi'
+import {
+  activityActionColor,
+  activityFormatField,
+  activityUserInitials,
+  changeActionType,
+  changeDescription,
+  changeFieldLabel,
+  changeIconColor,
+  formatChangeValue as formatActivityChangeValue,
+  isUserField,
+} from '@/components/delivery/taskActivityFormatting'
 import type { Task, TaskStatus, TaskType, TaskPriority, TaskComment, TaskAttachment } from '@/types/backlog'
 
 interface TeamUser {
@@ -22,6 +38,13 @@ interface TeamUser {
   name: string
   email: string
   avatar: string | null
+}
+
+interface OrganizationTeam {
+  id: string
+  name: string
+  key: string
+  description: string | null
 }
 
 interface Activity {
@@ -49,7 +72,14 @@ const emit = defineEmits<{
 
 const router = useRouter()
 const backlogStore = useBacklogStore()
+const productStore = useProductStore()
 const authStore = useAuthStore()
+const {
+  taskStatusOptions: statusOptions,
+  taskPriorityOptions: priorityOptions,
+  taskTypeOptions: typeOptions,
+} = useDomainOptions()
+const domainPresentation = useDomainPresentation()
 
 function goBackToStory() {
   emit('close')
@@ -57,7 +87,7 @@ function goBackToStory() {
 }
 
 // Active tab
-const activeTab = ref<'comments' | 'activities' | 'dependencies' | 'attachments'>('comments')
+const activeTab = ref<'comments' | 'activities' | 'subtasks' | 'dependencies' | 'attachments'>('comments')
 
 // Comments
 const comments = ref<TaskComment[]>([])
@@ -88,6 +118,7 @@ const assigneeSearch = ref('')
 const ownerSearch = ref('')
 const reviewerSearch = ref('')
 const storySearchQuery = ref('')
+const organizationTeams = ref<OrganizationTeam[]>([])
 
 // Due date editing
 const editDueDate = ref('')
@@ -100,36 +131,6 @@ const editBlockedReason = ref('')
 
 // Description editing
 const editDescription = ref('')
-
-// Options
-const statusOptions: { value: TaskStatus; label: string }[] = [
-  { value: 'created', label: 'Created' },
-  { value: 'assigned', label: 'Assigned' },
-  { value: 'in_progress', label: 'In Progress' },
-  { value: 'in_review', label: 'In Review' },
-  { value: 'done', label: 'Done' },
-  { value: 'overdue', label: 'Overdue' },
-  { value: 'blocked', label: 'Blocked' },
-  { value: 'archived', label: 'Archived' },
-]
-
-const priorityOptions: { value: TaskPriority; label: string }[] = [
-  { value: 'critical', label: 'Critical' },
-  { value: 'high', label: 'High' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'low', label: 'Low' },
-]
-
-const typeOptions: { value: TaskType; label: string }[] = [
-  { value: 'design', label: 'Design' },
-  { value: 'development', label: 'Development' },
-  { value: 'testing', label: 'Testing' },
-  { value: 'review', label: 'Review' },
-  { value: 'research', label: 'Research' },
-  { value: 'fix', label: 'Fix' },
-  { value: 'documentation', label: 'Documentation' },
-  { value: 'deployment', label: 'Deployment' },
-]
 
 // Story search
 const filteredStories = computed(() => {
@@ -169,11 +170,27 @@ const filteredTeamMembers = computed(() => {
   )
 })
 
+const filteredAssigneeTeams = computed(() => {
+  const q = assigneeSearch.value.toLowerCase().trim()
+  if (!q) return organizationTeams.value
+  return organizationTeams.value.filter((team) =>
+    team.name.toLowerCase().includes(q) || team.key.toLowerCase().includes(q),
+  )
+})
+
 const filteredOwnerMembers = computed(() => {
   const q = ownerSearch.value.toLowerCase().trim()
   if (!q) return props.teamMembers
   return props.teamMembers.filter(u =>
     u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+  )
+})
+
+const filteredOwnerTeams = computed(() => {
+  const q = ownerSearch.value.toLowerCase().trim()
+  if (!q) return organizationTeams.value
+  return organizationTeams.value.filter((team) =>
+    team.name.toLowerCase().includes(q) || team.key.toLowerCase().includes(q),
   )
 })
 
@@ -185,7 +202,42 @@ const filteredReviewerMembers = computed(() => {
   )
 })
 
+const filteredReviewerTeams = computed(() => {
+  const q = reviewerSearch.value.toLowerCase().trim()
+  if (!q) return organizationTeams.value
+  return organizationTeams.value.filter((team) =>
+    team.name.toLowerCase().includes(q) || team.key.toLowerCase().includes(q),
+  )
+})
+
 // ============ DATA LOADING ============
+
+async function loadOrganizationTeams() {
+  const organizationId = productStore.activeProduct.organizationId
+  if (!organizationId) {
+    organizationTeams.value = []
+    return
+  }
+  try {
+    const payload = await organizationTeamsApi.list(organizationId, {}, authStore.token)
+    organizationTeams.value = Array.isArray(payload)
+      ? payload.map((team) => ({
+          id: team.id,
+          name: team.name,
+          key: team.key,
+          description: team.description,
+        }))
+      : []
+  } catch {
+    organizationTeams.value = []
+  }
+}
+
+function buildTaskScopedPath(resourcePath: string, explicitProductId?: string | null): string | null {
+  const scope = resolveProductScope(explicitProductId ?? props.task?.productId ?? null)
+  if (!scope) return null
+  return buildProductScopedPath(scope, resourcePath)
+}
 
 // Load comments when task changes
 watch(() => props.task?.id, async (id) => {
@@ -193,13 +245,30 @@ watch(() => props.task?.id, async (id) => {
   activeTab.value = 'comments'
   closeAllDropdowns()
   editingField.value = null
-  await loadComments(id)
+  newSubtaskTitle.value = ''
+  creatingSubtask.value = false
+  await Promise.all([loadComments(id), loadOrganizationTeams()])
 }, { immediate: true })
 
+watch(
+  () => [productStore.activeProduct.id, productStore.activeProduct.organizationId, authStore.token],
+  () => {
+    if (!props.task) return
+    loadOrganizationTeams()
+  },
+)
+
 async function loadComments(taskId: string) {
+  const scopedPath = buildTaskScopedPath(`/tasks/${taskId}/comments`)
+  if (!scopedPath) {
+    comments.value = []
+    return
+  }
   commentsLoading.value = true
   try {
-    const res = await fetch(`/api/tasks/${taskId}/comments`)
+    const res = await apiFetch(scopedPath, {
+      token: authStore.token,
+    })
     if (res.ok) {
       comments.value = await res.json()
     }
@@ -208,9 +277,17 @@ async function loadComments(taskId: string) {
 }
 
 async function loadActivities(taskId: string) {
+  const scopedPath = buildTaskScopedPath('/activities')
+  if (!scopedPath) {
+    activities.value = []
+    return
+  }
   activitiesLoading.value = true
   try {
-    const res = await fetch(`/api/activities?entityId=${taskId}&limit=30`)
+    const res = await apiFetch(scopedPath, {
+      token: authStore.token,
+      query: { entityId: taskId, limit: 30 },
+    })
     if (res.ok) {
       activities.value = await res.json()
     }
@@ -305,7 +382,7 @@ async function selectType(type: TaskType) {
 // Due date
 function startEditDueDate() {
   if (!props.task) return
-  editDueDate.value = props.task.dueAt ? new Date(props.task.dueAt).toISOString().split('T')[0] : ''
+  editDueDate.value = props.task.dueAt ? (new Date(props.task.dueAt).toISOString().split('T')[0] ?? '') : ''
   editingField.value = 'dueAt'
 }
 
@@ -362,8 +439,21 @@ async function toggleAssignee(userId: string) {
   await updateTaskField('assigneeUserIds', newList.length > 0 ? newList : null)
 }
 
+async function toggleAssigneeTeam(teamId: string) {
+  if (!props.task) return
+  const current = props.task.assigneeTeamIds || []
+  const newList = current.includes(teamId)
+    ? current.filter((id) => id !== teamId)
+    : [...current, teamId]
+  await updateTaskField('assigneeTeamIds', newList.length > 0 ? newList : null)
+}
+
 function isAssigned(userId: string): boolean {
   return props.task?.assigneeUserIds?.includes(userId) ?? false
+}
+
+function isTeamAssigned(teamId: string): boolean {
+  return props.task?.assigneeTeamIds?.includes(teamId) ?? false
 }
 
 // Owner
@@ -373,6 +463,14 @@ async function selectOwner(userId: string) {
 
 async function clearOwner() {
   await updateTaskField('ownerUserId', null)
+}
+
+async function selectOwnerTeam(teamId: string) {
+  await updateTaskField('ownerTeamId', teamId)
+}
+
+async function clearOwnerTeam() {
+  await updateTaskField('ownerTeamId', null)
 }
 
 // Reviewers
@@ -385,23 +483,35 @@ async function toggleReviewer(userId: string) {
   await updateTaskField('reviewerUserIds', newList.length > 0 ? newList : null)
 }
 
+async function toggleReviewerTeam(teamId: string) {
+  if (!props.task) return
+  const current = props.task.reviewerTeamIds || []
+  const newList = current.includes(teamId)
+    ? current.filter((id) => id !== teamId)
+    : [...current, teamId]
+  await updateTaskField('reviewerTeamIds', newList.length > 0 ? newList : null)
+}
+
 function isReviewer(userId: string): boolean {
   return props.task?.reviewerUserIds?.includes(userId) ?? false
+}
+
+function isReviewerTeam(teamId: string): boolean {
+  return props.task?.reviewerTeamIds?.includes(teamId) ?? false
 }
 
 // ============ COMMENTS ============
 
 async function submitComment() {
   if (!newComment.value.trim() || !props.task) return
+  const scopedPath = buildTaskScopedPath(`/tasks/${props.task.id}/comments`, props.task.productId)
+  if (!scopedPath) return
   sendingComment.value = true
   try {
-    const res = await fetch(`/api/tasks/${props.task.id}/comments`, {
+    const res = await apiFetch(scopedPath, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${authStore.token}`,
-      },
-      body: JSON.stringify({ content: newComment.value.trim() }),
+      token: authStore.token,
+      json: { content: newComment.value.trim() },
     })
     if (res.ok) {
       newComment.value = ''
@@ -423,6 +533,51 @@ async function deleteComment(commentId: string) {
 
 function getUserById(id: string): TeamUser | undefined {
   return props.teamMembers.find(u => u.id === id)
+}
+
+function getTeamById(id: string): OrganizationTeam | undefined {
+  return organizationTeams.value.find((team) => team.id === id)
+}
+
+// Subtasks
+const newSubtaskTitle = ref('')
+const creatingSubtask = ref(false)
+
+const subtasks = computed(() => {
+  if (!props.task) return []
+  return backlogStore.allTasks
+    .filter((candidate) => candidate.parentTaskId === props.task!.id && candidate.id !== props.task!.id)
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+})
+
+async function createSubtask() {
+  if (!props.task) return
+  const title = newSubtaskTitle.value.trim()
+  if (!title) return
+  creatingSubtask.value = true
+  try {
+    await backlogStore.createTask(props.task.storyId, {
+      title,
+      parentTaskId: props.task.id,
+      priority: props.task.priority,
+      type: props.task.type,
+      ownerUserId: props.task.ownerUserId || authStore.user?.id || null,
+    })
+    newSubtaskTitle.value = ''
+    emit('updated')
+  } finally {
+    creatingSubtask.value = false
+  }
+}
+
+async function unlinkSubtask(subtaskId: string) {
+  await backlogStore.updateTask(subtaskId, { parentTaskId: null })
+  emit('updated')
+}
+
+function openSubtaskInTasks(subtaskId: string) {
+  emit('close')
+  router.push({ path: '/tasks', query: { task: subtaskId } })
 }
 
 // Dependency picker
@@ -472,9 +627,16 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const deletingAttachmentId = ref<string | null>(null)
 
 async function loadAttachments(taskId: string) {
+  const scopedPath = buildTaskScopedPath(`/tasks/${taskId}/attachments`)
+  if (!scopedPath) {
+    attachments.value = []
+    return
+  }
   attachmentsLoading.value = true
   try {
-    const res = await fetch(`/api/tasks/${taskId}/attachments`)
+    const res = await apiFetch(scopedPath, {
+      token: authStore.token,
+    })
     if (res.ok) {
       attachments.value = await res.json()
     }
@@ -484,16 +646,16 @@ async function loadAttachments(taskId: string) {
 
 async function uploadFiles(files: FileList | File[]) {
   if (!props.task || files.length === 0) return
+  const scopedPath = buildTaskScopedPath(`/tasks/${props.task.id}/attachments`, props.task.productId)
+  if (!scopedPath) return
   uploadingFiles.value = true
   try {
     for (const file of Array.from(files)) {
       const formData = new FormData()
       formData.append('file', file)
-      await fetch(`/api/tasks/${props.task.id}/attachments`, {
+      await apiFetch(scopedPath, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${authStore.token}`,
-        },
+        token: authStore.token,
         body: formData,
       })
     }
@@ -504,13 +666,13 @@ async function uploadFiles(files: FileList | File[]) {
 
 async function deleteAttachment(attachmentId: string) {
   if (!props.task) return
+  const scopedPath = buildTaskScopedPath(`/tasks/attachments/${attachmentId}`, props.task.productId)
+  if (!scopedPath) return
   deletingAttachmentId.value = attachmentId
   try {
-    await fetch(`/api/tasks/attachments/${attachmentId}`, {
+    await apiFetch(scopedPath, {
       method: 'DELETE',
-      headers: {
-        Authorization: `Bearer ${authStore.token}`,
-      },
+      token: authStore.token,
     })
     await loadAttachments(props.task.id)
   } catch {}
@@ -561,69 +723,27 @@ function fileIcon(mimeType: string) {
 // ============ STYLING HELPERS ============
 
 function priorityStyle(priority: string) {
-  switch (priority) {
-    case 'critical': return 'bg-red-100 text-red-700 border border-red-200'
-    case 'high': return 'bg-orange-100 text-orange-700 border border-orange-200'
-    case 'medium': return 'bg-green-100 text-green-700 border border-green-200'
-    case 'low': return 'bg-blue-100 text-blue-700 border border-blue-200'
-    default: return 'bg-gray-100 text-gray-600 border border-gray-200'
-  }
+  return domainPresentation.taskPriorityStyle(priority)
 }
 
 function statusStyle(status: string) {
-  switch (status) {
-    case 'created': return 'bg-gray-400 text-white'
-    case 'assigned': return 'bg-[#a25ddc] text-white'
-    case 'in_progress': return 'bg-[#fdab3d] text-white'
-    case 'in_review': return 'bg-[#579bfc] text-white'
-    case 'done': return 'bg-[#00c875] text-white'
-    case 'overdue': return 'bg-red-500 text-white'
-    case 'blocked': return 'bg-[#e2445c] text-white'
-    case 'archived': return 'bg-gray-400 text-white'
-    default: return 'bg-gray-400 text-white'
-  }
+  return domainPresentation.taskStatusStyle(status)
 }
 
 function statusDot(status: string) {
-  switch (status) {
-    case 'created': return 'bg-white/50'
-    case 'assigned': return 'bg-white/50'
-    case 'in_progress': return 'bg-white/50'
-    case 'in_review': return 'bg-white/50'
-    case 'done': return 'bg-white/50'
-    case 'overdue': return 'bg-white/50'
-    case 'blocked': return 'bg-white/50'
-    default: return 'bg-white/50'
-  }
+  return domainPresentation.taskStatusDot(status)
 }
 
 function typeBadgeStyle(type: string) {
-  switch (type) {
-    case 'design': return 'bg-purple-50/80 text-purple-600'
-    case 'development': return 'bg-blue-50/80 text-blue-600'
-    case 'testing': return 'bg-green-50/80 text-green-600'
-    case 'review': return 'bg-cyan-50/80 text-cyan-600'
-    case 'research': return 'bg-yellow-50/80 text-yellow-600'
-    case 'fix': return 'bg-red-50/80 text-red-600'
-    case 'documentation': return 'bg-gray-50/80 text-gray-500'
-    case 'deployment': return 'bg-orange-50/80 text-orange-600'
-    default: return 'bg-gray-50/80 text-gray-500'
-  }
+  return domainPresentation.taskTypeStyle(type)
 }
 
-const typeIcons: Record<string, any> = {
-  design: Palette,
-  development: Code2,
-  testing: TestTube2,
-  review: Eye,
-  research: FlaskConical,
-  fix: Wrench,
-  documentation: FileText,
-  deployment: Rocket,
+function taskTypeIcon(type: string) {
+  return domainPresentation.taskTypeIcon(type)
 }
 
 function label(s: string) {
-  return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return domainPresentation.enumLabel(s)
 }
 
 function formatDate(dateStr: string | null) {
@@ -682,49 +802,6 @@ function changeLabel(field: string, from: string | null, to: string | null) {
   return `Changed ${label(field)} from "${from || '—'}" to "${to || '—'}"`
 }
 
-// Activity helpers (identical to main activity dropdown)
-function activityActionColor(action: string) {
-  switch (action) {
-    case 'created': return 'bg-[#00c875]'
-    case 'deleted': return 'bg-red-500'
-    default: return 'bg-[#579bfc]'
-  }
-}
-
-function activityUserInitials(name: string) {
-  return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
-}
-
-function activityFormatField(field: string) {
-  return field.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
-}
-
-function isUserField(field: string): boolean {
-  return ['ownerUserId', 'reviewerUserIds', 'assigneeUserIds', 'createdBy'].includes(field)
-}
-
-function changeFieldLabel(field: string): string {
-  switch (field) {
-    case 'ownerUserId': return 'Owner'
-    case 'reviewerUserIds': return 'Reviewers'
-    case 'assigneeUserIds': return 'Assignees'
-    case 'createdBy': return 'Created by'
-    case 'blockedReason': return 'Blocked reason'
-    case 'estimateValue': return 'Estimate'
-    case 'dueAt': return 'Due date'
-    case 'dependent': return 'Dependency'
-    case 'comment': return 'Comment'
-    case 'attachment': return 'Attachment'
-    default: return activityFormatField(field)
-  }
-}
-
-function changeActionType(change: { from: string | null; to: string | null }): 'added' | 'removed' | 'updated' {
-  if (!change.from && change.to) return 'added'
-  if (change.from && !change.to) return 'removed'
-  return 'updated'
-}
-
 function changeFieldIcon(field: string) {
   switch (field) {
     case 'status': return Circle
@@ -736,49 +813,16 @@ function changeFieldIcon(field: string) {
     case 'dueAt': return CalendarClock
     case 'dependent': return Link
     case 'ownerUserId': return User
+    case 'ownerTeamId': return Users
     case 'assigneeUserIds': return Users
+    case 'assigneeTeamIds': return Users
     case 'reviewerUserIds': return UserCheck
+    case 'reviewerTeamIds': return UserCheck
     case 'blockedReason': return ShieldAlert
     case 'comment': return MessageSquare
     case 'attachment': return Paperclip
     default: return Circle
   }
-}
-
-function changeIconColor(change: { from: string | null; to: string | null }): string {
-  const type = changeActionType(change)
-  switch (type) {
-    case 'added': return 'text-[#00c875]'
-    case 'removed': return 'text-red-500'
-    case 'updated': return 'text-[#fdab3d]'
-  }
-}
-
-function changeDescription(change: { field: string; from: string | null; to: string | null }): string {
-  const fieldLabel = changeFieldLabel(change.field)
-  const action = changeActionType(change)
-
-  if (change.field === 'comment') {
-    if (action === 'added') return 'Added a comment'
-    if (action === 'removed') return 'Removed a comment'
-    return 'Updated a comment'
-  }
-
-  if (change.field === 'attachment') {
-    if (action === 'added') return 'Added an attachment'
-    if (action === 'removed') return 'Removed an attachment'
-    return 'Updated an attachment'
-  }
-
-  if (isUserField(change.field)) {
-    if (action === 'added') return `Added ${fieldLabel.toLowerCase()}`
-    if (action === 'removed') return `Removed ${fieldLabel.toLowerCase()}`
-    return `Updated ${fieldLabel.toLowerCase()}`
-  }
-
-  if (action === 'added') return `Set ${fieldLabel.toLowerCase()}`
-  if (action === 'removed') return `Cleared ${fieldLabel.toLowerCase()}`
-  return `Updated ${fieldLabel.toLowerCase()}`
 }
 
 function resolveUserValue(value: string | null): string | null {
@@ -791,19 +835,7 @@ function resolveUserValue(value: string | null): string | null {
 }
 
 function formatChangeValue(field: string, value: string | null): string {
-  if (!value) return '—'
-  if (field === 'dueAt') {
-    const d = new Date(value)
-    if (!isNaN(d.getTime())) {
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    }
-  }
-  if (field === 'estimateValue') {
-    const n = parseFloat(value)
-    if (!isNaN(n)) return `${n}h`
-  }
-  if (isUserField(field)) return resolveUserValue(value) || value
-  return activityFormatField(value)
+  return formatActivityChangeValue(field, value, resolveUserValue)
 }
 
 // Group activities by date
@@ -1003,7 +1035,7 @@ function onBackdropClick(e: MouseEvent) {
                     :class="task.type ? typeBadgeStyle(task.type) : 'bg-gray-50/80 text-gray-500'"
                     @click="showTypeDropdown = !showTypeDropdown; showStatusDropdown = false; showPriorityDropdown = false; showAssigneeDropdown = false; showOwnerDropdown = false; showReviewerDropdown = false"
                   >
-                    <component v-if="task.type" :is="typeIcons[task.type] || Circle" :size="12" />
+                    <component v-if="task.type" :is="taskTypeIcon(task.type)" :size="12" />
                     {{ task.type ? label(task.type) : 'Set type' }}
                     <ChevronDown :size="12" />
                   </button>
@@ -1018,7 +1050,7 @@ function onBackdropClick(e: MouseEvent) {
                       :class="task.type === opt.value ? 'text-[#4857FE] font-medium' : 'text-gray-600'"
                       @click="selectType(opt.value)"
                     >
-                      <component :is="typeIcons[opt.value] || Circle" :size="14" />
+                      <component :is="taskTypeIcon(opt.value)" :size="14" />
                       {{ opt.label }}
                       <Check v-if="task.type === opt.value" :size="14" class="ml-auto text-[#4857FE]" />
                     </button>
@@ -1109,7 +1141,22 @@ function onBackdropClick(e: MouseEvent) {
                         </button>
                       </div>
                     </template>
-                    <span v-else class="text-xs text-gray-400">No owner</span>
+                    <template v-if="task.ownerTeamId">
+                      <div
+                        class="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 rounded-full pl-2 pr-2 py-1 group/owner-team"
+                      >
+                        <Users :size="12" class="text-indigo-500 shrink-0" />
+                        <span class="text-xs font-medium text-indigo-700">{{ getTeamById(task.ownerTeamId)?.name || 'Unknown team' }}</span>
+                        <button
+                          class="text-indigo-300 hover:text-red-500 opacity-0 group-hover/owner-team:opacity-100 transition-all ml-0.5"
+                          @click="clearOwnerTeam"
+                          title="Remove owner team"
+                        >
+                          <X :size="10" />
+                        </button>
+                      </div>
+                    </template>
+                    <span v-if="!task.ownerUserId && !task.ownerTeamId" class="text-xs text-gray-400">No owner</span>
                     <button
                       class="w-5 h-5 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
                       @click="showOwnerDropdown = !showOwnerDropdown; showStatusDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReviewerDropdown = false; ownerSearch = ''"
@@ -1128,11 +1175,12 @@ function onBackdropClick(e: MouseEvent) {
                         <input
                           v-model="ownerSearch"
                           class="text-xs bg-transparent outline-none w-full placeholder-gray-400"
-                          placeholder="Search team members..."
+                          placeholder="Search members or teams..."
                         />
                       </div>
                     </div>
                     <div class="max-h-[200px] overflow-auto py-1">
+                      <p class="px-3 pt-1 pb-1 text-[10px] font-semibold tracking-wide text-gray-400 uppercase">Members</p>
                       <button
                         v-for="member in filteredOwnerMembers"
                         :key="member.id"
@@ -1149,7 +1197,24 @@ function onBackdropClick(e: MouseEvent) {
                         </div>
                         <Check v-if="task.ownerUserId === member.id" :size="14" class="text-[#4857FE] shrink-0" />
                       </button>
-                      <p v-if="filteredOwnerMembers.length === 0" class="text-xs text-gray-400 text-center py-3">No members found</p>
+                      <p v-if="filteredOwnerMembers.length === 0" class="text-xs text-gray-400 text-center py-2">No members found</p>
+                      <p class="px-3 pt-2 pb-1 text-[10px] font-semibold tracking-wide text-gray-400 uppercase">Teams</p>
+                      <button
+                        v-for="team in filteredOwnerTeams"
+                        :key="team.id"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
+                        @click="selectOwnerTeam(team.id)"
+                      >
+                        <div class="w-6 h-6 rounded-md bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
+                          <Users :size="12" />
+                        </div>
+                        <div class="flex-1 text-left min-w-0">
+                          <p class="text-sm text-gray-700 truncate">{{ team.name }}</p>
+                          <p class="text-[10px] text-gray-400 truncate uppercase tracking-wide">{{ team.key }}</p>
+                        </div>
+                        <Check v-if="task.ownerTeamId === team.id" :size="14" class="text-[#4857FE] shrink-0" />
+                      </button>
+                      <p v-if="filteredOwnerTeams.length === 0" class="text-xs text-gray-400 text-center py-2">No teams found</p>
                     </div>
                   </div>
                 </div>
@@ -1182,7 +1247,29 @@ function onBackdropClick(e: MouseEvent) {
                         </button>
                       </div>
                     </template>
-                    <span v-else class="text-xs text-gray-400">Unassigned</span>
+                    <template v-if="task.assigneeTeamIds && task.assigneeTeamIds.length > 0">
+                      <div
+                        v-for="teamId in task.assigneeTeamIds"
+                        :key="teamId"
+                        class="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 rounded-full pl-2 pr-2 py-1 group/assignee-team"
+                      >
+                        <Users :size="12" class="text-indigo-500 shrink-0" />
+                        <span class="text-xs font-medium text-indigo-700">{{ getTeamById(teamId)?.name || 'Unknown team' }}</span>
+                        <button
+                          class="text-indigo-300 hover:text-red-500 opacity-0 group-hover/assignee-team:opacity-100 transition-all ml-0.5"
+                          @click="toggleAssigneeTeam(teamId)"
+                          title="Remove assignee team"
+                        >
+                          <X :size="10" />
+                        </button>
+                      </div>
+                    </template>
+                    <span
+                      v-if="(!task.assigneeUserIds || task.assigneeUserIds.length === 0) && (!task.assigneeTeamIds || task.assigneeTeamIds.length === 0)"
+                      class="text-xs text-gray-400"
+                    >
+                      Unassigned
+                    </span>
                     <button
                       class="w-5 h-5 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
                       @click="showAssigneeDropdown = !showAssigneeDropdown; showStatusDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showOwnerDropdown = false; showReviewerDropdown = false; assigneeSearch = ''"
@@ -1201,11 +1288,12 @@ function onBackdropClick(e: MouseEvent) {
                         <input
                           v-model="assigneeSearch"
                           class="text-xs bg-transparent outline-none w-full placeholder-gray-400"
-                          placeholder="Search team members..."
+                          placeholder="Search members or teams..."
                         />
                       </div>
                     </div>
                     <div class="max-h-[200px] overflow-auto py-1">
+                      <p class="px-3 pt-1 pb-1 text-[10px] font-semibold tracking-wide text-gray-400 uppercase">Members</p>
                       <button
                         v-for="member in filteredTeamMembers"
                         :key="member.id"
@@ -1222,7 +1310,24 @@ function onBackdropClick(e: MouseEvent) {
                         </div>
                         <Check v-if="isAssigned(member.id)" :size="14" class="text-[#4857FE] shrink-0" />
                       </button>
-                      <p v-if="filteredTeamMembers.length === 0" class="text-xs text-gray-400 text-center py-3">No members found</p>
+                      <p v-if="filteredTeamMembers.length === 0" class="text-xs text-gray-400 text-center py-2">No members found</p>
+                      <p class="px-3 pt-2 pb-1 text-[10px] font-semibold tracking-wide text-gray-400 uppercase">Teams</p>
+                      <button
+                        v-for="team in filteredAssigneeTeams"
+                        :key="team.id"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
+                        @click="toggleAssigneeTeam(team.id)"
+                      >
+                        <div class="w-6 h-6 rounded-md bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
+                          <Users :size="12" />
+                        </div>
+                        <div class="flex-1 text-left min-w-0">
+                          <p class="text-sm text-gray-700 truncate">{{ team.name }}</p>
+                          <p class="text-[10px] text-gray-400 truncate uppercase tracking-wide">{{ team.key }}</p>
+                        </div>
+                        <Check v-if="isTeamAssigned(team.id)" :size="14" class="text-[#4857FE] shrink-0" />
+                      </button>
+                      <p v-if="filteredAssigneeTeams.length === 0" class="text-xs text-gray-400 text-center py-2">No teams found</p>
                     </div>
                   </div>
                 </div>
@@ -1255,7 +1360,29 @@ function onBackdropClick(e: MouseEvent) {
                         </button>
                       </div>
                     </template>
-                    <span v-else class="text-xs text-gray-400">No reviewers</span>
+                    <template v-if="task.reviewerTeamIds && task.reviewerTeamIds.length > 0">
+                      <div
+                        v-for="teamId in task.reviewerTeamIds"
+                        :key="teamId"
+                        class="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 rounded-full pl-2 pr-2 py-1 group/reviewer-team"
+                      >
+                        <Users :size="12" class="text-indigo-500 shrink-0" />
+                        <span class="text-xs font-medium text-indigo-700">{{ getTeamById(teamId)?.name || 'Unknown team' }}</span>
+                        <button
+                          class="text-indigo-300 hover:text-red-500 opacity-0 group-hover/reviewer-team:opacity-100 transition-all ml-0.5"
+                          @click="toggleReviewerTeam(teamId)"
+                          title="Remove reviewer team"
+                        >
+                          <X :size="10" />
+                        </button>
+                      </div>
+                    </template>
+                    <span
+                      v-if="(!task.reviewerUserIds || task.reviewerUserIds.length === 0) && (!task.reviewerTeamIds || task.reviewerTeamIds.length === 0)"
+                      class="text-xs text-gray-400"
+                    >
+                      No reviewers
+                    </span>
                     <button
                       class="w-5 h-5 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
                       @click="showReviewerDropdown = !showReviewerDropdown; showStatusDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showOwnerDropdown = false; showAssigneeDropdown = false; reviewerSearch = ''"
@@ -1274,11 +1401,12 @@ function onBackdropClick(e: MouseEvent) {
                         <input
                           v-model="reviewerSearch"
                           class="text-xs bg-transparent outline-none w-full placeholder-gray-400"
-                          placeholder="Search team members..."
+                          placeholder="Search members or teams..."
                         />
                       </div>
                     </div>
                     <div class="max-h-[200px] overflow-auto py-1">
+                      <p class="px-3 pt-1 pb-1 text-[10px] font-semibold tracking-wide text-gray-400 uppercase">Members</p>
                       <button
                         v-for="member in filteredReviewerMembers"
                         :key="member.id"
@@ -1295,7 +1423,24 @@ function onBackdropClick(e: MouseEvent) {
                         </div>
                         <Check v-if="isReviewer(member.id)" :size="14" class="text-[#4857FE] shrink-0" />
                       </button>
-                      <p v-if="filteredReviewerMembers.length === 0" class="text-xs text-gray-400 text-center py-3">No members found</p>
+                      <p v-if="filteredReviewerMembers.length === 0" class="text-xs text-gray-400 text-center py-2">No members found</p>
+                      <p class="px-3 pt-2 pb-1 text-[10px] font-semibold tracking-wide text-gray-400 uppercase">Teams</p>
+                      <button
+                        v-for="team in filteredReviewerTeams"
+                        :key="team.id"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
+                        @click="toggleReviewerTeam(team.id)"
+                      >
+                        <div class="w-6 h-6 rounded-md bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
+                          <Users :size="12" />
+                        </div>
+                        <div class="flex-1 text-left min-w-0">
+                          <p class="text-sm text-gray-700 truncate">{{ team.name }}</p>
+                          <p class="text-[10px] text-gray-400 truncate uppercase tracking-wide">{{ team.key }}</p>
+                        </div>
+                        <Check v-if="isReviewerTeam(team.id)" :size="14" class="text-[#4857FE] shrink-0" />
+                      </button>
+                      <p v-if="filteredReviewerTeams.length === 0" class="text-xs text-gray-400 text-center py-2">No teams found</p>
                     </div>
                   </div>
                 </div>
@@ -1438,7 +1583,7 @@ function onBackdropClick(e: MouseEvent) {
           <div class="sticky top-[44px] z-10 bg-white border-t border-b border-gray-100">
             <div class="flex px-6 gap-0">
               <button
-                v-for="tab in (['comments', 'activities', 'dependencies', 'attachments'] as const)"
+                v-for="tab in (['comments', 'activities', 'subtasks', 'dependencies', 'attachments'] as const)"
                 :key="tab"
                 class="px-4 py-3 text-sm font-medium capitalize border-b-2 transition-colors"
                 :class="activeTab === tab
@@ -1447,8 +1592,9 @@ function onBackdropClick(e: MouseEvent) {
                 @click="activeTab = tab"
               >
                 <span class="flex items-center gap-1.5">
-                  {{ tab === 'dependencies' ? 'Dependencies' : label(tab) }}
+                  {{ tab === 'dependencies' ? 'Dependencies' : tab === 'subtasks' ? 'Subtasks' : label(tab) }}
                   <span v-if="tab === 'comments' && comments.length > 0" class="text-[10px] bg-gray-200 text-gray-600 rounded-full px-1.5 py-0.5 font-bold">{{ comments.length }}</span>
+                  <span v-if="tab === 'subtasks' && subtasks.length > 0" class="text-[10px] bg-gray-200 text-gray-600 rounded-full px-1.5 py-0.5 font-bold">{{ subtasks.length }}</span>
                 </span>
               </button>
             </div>
@@ -1597,14 +1743,14 @@ function onBackdropClick(e: MouseEvent) {
                                     <!-- User fields: avatar + name -->
                                     <template v-else-if="isUserField(change.field)">
                                       <span v-if="change.to && getUserById(change.to)" class="inline-flex items-center gap-1 ml-1 align-middle">
-                                        <span class="w-4 h-4 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[7px] font-medium overflow-hidden inline-flex shrink-0">
+                                        <span class="w-4 h-4 rounded-full bg-[#7C5CFC] inline-flex items-center justify-center text-white text-[7px] font-medium overflow-hidden shrink-0">
                                           <img v-if="getUserById(change.to)?.avatar" :src="getUserById(change.to)!.avatar!" class="w-4 h-4 rounded-full object-cover" />
                                           <span v-else>{{ activityUserInitials(getUserById(change.to)!.name) }}</span>
                                         </span>
                                         <span class="font-medium text-gray-700">{{ getUserById(change.to)!.name }}</span>
                                       </span>
                                       <span v-else-if="change.from && getUserById(change.from)" class="inline-flex items-center gap-1 ml-1 align-middle">
-                                        <span class="w-4 h-4 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[7px] font-medium overflow-hidden inline-flex shrink-0">
+                                        <span class="w-4 h-4 rounded-full bg-[#7C5CFC] inline-flex items-center justify-center text-white text-[7px] font-medium overflow-hidden shrink-0">
                                           <img v-if="getUserById(change.from)?.avatar" :src="getUserById(change.from)!.avatar!" class="w-4 h-4 rounded-full object-cover" />
                                           <span v-else>{{ activityUserInitials(getUserById(change.from)!.name) }}</span>
                                         </span>
@@ -1634,6 +1780,75 @@ function onBackdropClick(e: MouseEvent) {
                   </div>
                 </div>
               </template>
+            </template>
+
+            <!-- Subtasks Tab -->
+            <template v-if="activeTab === 'subtasks'">
+              <div>
+                <div class="flex items-center justify-between mb-3">
+                  <p class="text-xs text-gray-500 uppercase font-semibold tracking-wider">
+                    Subtasks
+                    <span v-if="subtasks.length > 0" class="text-gray-400 font-normal">({{ subtasks.length }})</span>
+                  </p>
+                </div>
+
+                <!-- Create input -->
+                <div class="flex items-center gap-2 mb-4">
+                  <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 bg-white focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 flex-1">
+                    <Plus :size="14" class="text-gray-400 shrink-0" />
+                    <input
+                      v-model="newSubtaskTitle"
+                      class="text-sm text-gray-700 bg-transparent outline-none w-full placeholder-gray-400"
+                      placeholder="Create a subtask..."
+                      @keydown.enter.prevent="createSubtask"
+                    />
+                  </div>
+                  <button
+                    class="px-3 py-2 rounded-lg text-xs font-semibold transition-colors"
+                    :class="newSubtaskTitle.trim() && !creatingSubtask
+                      ? 'bg-[#4857FE] text-white hover:bg-[#3E4BDE]'
+                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+                    :disabled="!newSubtaskTitle.trim() || creatingSubtask"
+                    @click="createSubtask"
+                  >
+                    <Loader2 v-if="creatingSubtask" :size="13" class="animate-spin" />
+                    <span v-else>Create</span>
+                  </button>
+                </div>
+
+                <!-- Existing subtasks -->
+                <div v-if="subtasks.length === 0" class="text-center py-6">
+                  <ListTree :size="28" class="mx-auto text-gray-200 mb-2" />
+                  <p class="text-sm text-gray-400">No subtasks yet</p>
+                  <p class="text-xs text-gray-300 mt-1">Create multiple subtasks for this task</p>
+                </div>
+                <div v-else class="space-y-2">
+                  <div
+                    v-for="subtask in subtasks"
+                    :key="subtask.id"
+                    class="bg-gray-50 rounded-lg p-2.5 flex items-center gap-2.5 border border-gray-100 group/subtask"
+                  >
+                    <TaskStatusIcon :status="subtask.status" :size="16" />
+                    <button
+                      class="text-sm font-medium text-gray-800 hover:text-[#4857FE] transition-colors truncate text-left flex-1"
+                      :title="subtask.title"
+                      @click="openSubtaskInTasks(subtask.id)"
+                    >
+                      {{ subtask.title }}
+                    </button>
+                    <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0" :class="statusStyle(subtask.status)">
+                      {{ label(subtask.status) }}
+                    </span>
+                    <button
+                      class="p-1 rounded-md hover:bg-red-50 text-gray-300 hover:text-red-500 opacity-0 group-hover/subtask:opacity-100 transition-all shrink-0"
+                      title="Remove subtask link"
+                      @click="unlinkSubtask(subtask.id)"
+                    >
+                      <X :size="12" />
+                    </button>
+                  </div>
+                </div>
+              </div>
             </template>
 
             <!-- Dependencies Tab -->

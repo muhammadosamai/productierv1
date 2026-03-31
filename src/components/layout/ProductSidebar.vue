@@ -7,9 +7,18 @@ import draggable from 'vuedraggable'
 
 const productStore = useProductStore()
 const showCreateDialog = ref(false)
+const failedLogoIds = ref<Record<string, true>>({})
 
 function onProductCreated(name: string) {
   // Product is already selected in the store after creation
+}
+
+function logoAvailable(productId: string, logo: string | null | undefined): boolean {
+  return Boolean(logo) && !failedLogoIds.value[productId]
+}
+
+function onLogoError(productId: string): void {
+  failedLogoIds.value = { ...failedLogoIds.value, [productId]: true }
 }
 </script>
 
@@ -33,7 +42,7 @@ function onProductCreated(name: string) {
     <!-- Draggable product icons -->
     <draggable
       v-model="productStore.products"
-      item-key="name"
+      item-key="id"
       :animation="200"
       ghost-class="opacity-30"
       drag-class="scale-110"
@@ -43,7 +52,7 @@ function onProductCreated(name: string) {
         <button
           class="relative flex items-center justify-center w-10 h-10 rounded-xl overflow-hidden transition-all shadow-md shadow-black/20 cursor-grab active:cursor-grabbing"
           :class="[
-            productStore.activeProductName === element.name
+            productStore.activeProductId === element.id
               ? 'ring-2 ring-white shadow-lg shadow-black/30'
               : 'opacity-80 hover:opacity-100 hover:shadow-lg hover:shadow-black/30'
           ]"
@@ -51,14 +60,15 @@ function onProductCreated(name: string) {
           @click="productStore.selectProduct(index)"
         >
           <img
-            v-if="element.logo"
+            v-if="logoAvailable(element.id, element.logo)"
             :src="element.logo"
             :alt="element.name"
             class="w-full h-full object-cover pointer-events-none"
+            @error="onLogoError(element.id)"
           />
           <div
             v-else
-            class="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#4857FE] to-[#7C5CFC] text-white text-xs font-bold pointer-events-none"
+            class="w-full h-full flex items-center justify-center bg-linear-to-br from-[#4857FE] to-[#7C5CFC] text-white text-xs font-bold pointer-events-none"
           >
             {{ element.name.slice(0, 2).toUpperCase() }}
           </div>
@@ -76,14 +86,6 @@ function onProductCreated(name: string) {
       <PanelLeftOpen :size="18" />
     </button>
 
-    <!-- Bottom add button -->
-    <button
-      class="flex items-center justify-center w-10 h-10 rounded-full bg-white text-[#3E4BDE] hover:bg-white/90 transition-colors shadow-md"
-      title="Create new product"
-      @click="showCreateDialog = true"
-    >
-      <Plus :size="18" />
-    </button>
   </aside>
 
   <!-- Create Product Dialog -->

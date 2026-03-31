@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { usersApi } from '@/lib/api'
 import {
   X, Maximize2, Copy, Loader2,
   Mail, Shield, CalendarDays,
@@ -56,12 +57,8 @@ watch(() => [props.open, props.member], async ([isOpen, m]) => {
 async function fetchWork(userId: string) {
   loadingWork.value = true
   try {
-    const res = await fetch(`/api/auth/users/${userId}/work`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    if (res.ok) {
-      workData.value = await res.json()
-    }
+    const payload = await usersApi.getWork(userId, authStore.token)
+    workData.value = (payload ?? null) as WorkData | null
   } catch { /* ignore */ } finally {
     loadingWork.value = false
   }

@@ -2,70 +2,214 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { ConsumerFeedback } from '@/types/consumerFeedback'
 import { useAuthStore } from './auth'
+import { assertPageAction, ensureOk } from '@/lib/storeAuthz'
+import { apiFetch } from '@/lib/apiClient'
+import { buildProductScopedPath, resolveProductScope } from '@/lib/productScopeApi'
 
-const API = '/api/consumer-feedbacks'
+const API = '/consumer-feedbacks'
 
 export const useConsumerFeedbacksStore = defineStore('consumerFeedbacks', () => {
   const items = ref<ConsumerFeedback[]>([])
   const loading = ref(false)
+  const error = ref<string | null>(null)
+  const nextCursor = ref<string | null>(null)
+  const hasMore = ref(false)
+  const totalApprox = ref<number | null>(null)
 
-  function authHeaders() {
-    const auth = useAuthStore()
-    return { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' }
+  function authToken() {
+    return useAuthStore().token
   }
 
-  async function fetchAll(product?: string) {
+  function resolveScope(explicitProductId?: string) {
+    return resolveProductScope(explicitProductId)
+  }
+
+  function extractItems(payload: unknown): {
+    items: ConsumerFeedback[]
+    nextCursor: string | null
+    hasMore: boolean
+    totalApprox: number | null
+  } {
+    if (Array.isArray(payload)) {
+      return { items: payload as ConsumerFeedback[], nextCursor: null, hasMore: false, totalApprox: null }
+    }
+    if (payload && typeof payload === 'object') {
+      const envelope = payload as {
+        items?: ConsumerFeedback[]
+        nextCursor?: string | null
+        hasMore?: boolean
+        totalApprox?: number
+      }
+      return {
+        items: Array.isArray(envelope.items) ? envelope.items : [],
+        nextCursor: envelope.nextCursor ?? null,
+        hasMore: Boolean(envelope.hasMore),
+        totalApprox: typeof envelope.totalApprox === 'number' ? envelope.totalApprox : null,
+      }
+    }
+    return { items: [], nextCursor: null, hasMore: false, totalApprox: null }
+  }
+
+  async function fetchAll(
+    productId?: string,
+    options: { q?: string; sort?: string; cursor?: string | null; limit?: number } = {},
+  ) {
+    assertPageAction('feedbacks', 'read', 'feedback')
     loading.value = true
+    error.value = null
     try {
-      const params = product ? `?product=${encodeURIComponent(product)}` : ''
-      const res = await fetch(`${API}${params}`)
-      if (res.ok) items.value = await res.json()
+      const scope = resolveScope(productId)
+      if (!scope) {
+        items.value = []
+        return
+      }
+      const params = new URLSearchParams()
+      params.set('paged', '1')
+      params.set('limit', String(options.limit ?? 30))
+      if (options.q) params.set('q', options.q)
+      if (options.sort) params.set('sort', options.sort)
+      if (options.cursor) params.set('cursor', options.cursor)
+      const res = await apiFetch(buildProductScopedPath(scope, API), {
+        token: authToken(),
+        query: Object.fromEntries(params.entries()),
+      })
+      await ensureOk(res, 'Failed to fetch feedback')
+      const parsed = extractItems(await res.json())
+      items.value = parsed.items
+      nextCursor.value = parsed.nextCursor
+      hasMore.value = parsed.hasMore
+      totalApprox.value = parsed.totalApprox
+    } catch (e) {
+      error.value = (e as Error).message
+      items.value = []
+      nextCursor.value = null
+      hasMore.value = false
+      totalApprox.value = null
     } finally { loading.value = false }
   }
 
   async function fetchOne(id: string): Promise<ConsumerFeedback | null> {
     try {
-      const res = await fetch(`${API}/${id}`)
-      if (!res.ok) return null
+      assertPageAction('feedbacks', 'read', 'feedback')
+      const scope = resolveScope()
+      if (!scope) {
+        error.value = 'No active product selected'
+        return null
+      }
+      const res = await apiFetch(buildProductScopedPath(scope, `${API}/${id}`), { token: authToken() })
+      await ensureOk(res, 'Failed to fetch feedback')
       return await res.json()
-    } catch { return null }
+    } catch (e) {
+      error.value = (e as Error).message
+      return null
+    }
   }
 
   async function create(data: any): Promise<ConsumerFeedback | null> {
     try {
-      const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
-      if (!res.ok) return null
+      if (useAuthStore().token) {
+        assertPageAction('feedbacks', 'create', 'feedback')
+      }
+      const scope = resolveScope(data?.productId)
+      if (!scope) {
+        error.value = 'No active product selected'
+        return null
+      }
+      const res = await apiFetch(buildProductScopedPath(scope, API), {
+        method: 'POST',
+        token: authToken(),
+        json: {
+          ...data,
+          productId: scope.productId,
+        },
+      })
+      await ensureOk(res, 'Failed to create feedback')
       const created = await res.json()
-      await fetchAll(data.productId)
+      if (useAuthStore().token) {
+        await fetchAll(scope.productId)
+      }
       return created
-    } catch { return null }
+    } catch (e) {
+      error.value = (e as Error).message
+      return null
+    }
   }
 
   async function update(id: string, data: any): Promise<boolean> {
     try {
-      const res = await fetch(`${API}/${id}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(data) })
-      return res.ok
-    } catch { return false }
+      assertPageAction('feedbacks', 'edit', 'feedback')
+      const scope = resolveScope()
+      if (!scope) {
+        error.value = 'No active product selected'
+        return false
+      }
+      const res = await apiFetch(buildProductScopedPath(scope, `${API}/${id}`), {
+        method: 'PUT',
+        token: authToken(),
+        json: data,
+      })
+      await ensureOk(res, 'Failed to update feedback')
+      return true
+    } catch (e) {
+      error.value = (e as Error).message
+      return false
+    }
   }
 
   async function remove(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${API}/${id}`, { method: 'DELETE', headers: authHeaders() })
-      if (res.ok) items.value = items.value.filter(i => i.id !== id)
-      return res.ok
-    } catch { return false }
+      assertPageAction('feedbacks', 'delete', 'feedback')
+      const scope = resolveScope()
+      if (!scope) {
+        error.value = 'No active product selected'
+        return false
+      }
+      const res = await apiFetch(buildProductScopedPath(scope, `${API}/${id}`), {
+        method: 'DELETE',
+        token: authToken(),
+      })
+      await ensureOk(res, 'Failed to delete feedback')
+      items.value = items.value.filter(i => i.id !== id)
+      return true
+    } catch (e) {
+      error.value = (e as Error).message
+      return false
+    }
   }
 
   async function addComment(id: string, content: string, isInternal = false) {
     try {
-      const res = await fetch(`${API}/${id}/comments`, {
-        method: 'POST', headers: authHeaders(),
-        body: JSON.stringify({ content, isInternal }),
+      assertPageAction('feedbacks', 'create', 'feedback comments')
+      const scope = resolveScope()
+      if (!scope) {
+        error.value = 'No active product selected'
+        return null
+      }
+      const res = await apiFetch(buildProductScopedPath(scope, `${API}/${id}/comments`), {
+        method: 'POST',
+        token: authToken(),
+        json: { content, isInternal },
       })
-      if (!res.ok) return null
+      await ensureOk(res, 'Failed to add feedback comment')
       return await res.json()
-    } catch { return null }
+    } catch (e) {
+      error.value = (e as Error).message
+      return null
+    }
   }
 
-  return { items, loading, fetchAll, fetchOne, create, update, remove, addComment }
+  return {
+    items,
+    loading,
+    error,
+    nextCursor,
+    hasMore,
+    totalApprox,
+    fetchAll,
+    fetchOne,
+    create,
+    update,
+    remove,
+    addComment,
+  }
 })

@@ -42,7 +42,7 @@ const showAddForm = ref(false)
 // Add new server form
 const newServerName = ref('')
 const newServerHost = ref('')
-const newServerPort = ref<number | null>(null)
+const newServerPort = ref<number | undefined>(undefined)
 const newServerProtocol = ref('https')
 const newServerRegion = ref('')
 const newServerProvider = ref('')
@@ -71,23 +71,25 @@ function toggleServer(id: string) {
 
 async function addNewServer() {
   if (!newServerName.value.trim() || addingServer.value) return
+  const productId = productStore.activeProduct.id
+  if (!productId) return
   addingServer.value = true
   try {
     const result = await serversStore.createServer({
       name: newServerName.value.trim(),
       environment: props.environment,
       host: newServerHost.value || null,
-      port: newServerPort.value,
+      port: newServerPort.value ?? null,
       protocol: newServerProtocol.value || null,
       region: newServerRegion.value || null,
       provider: newServerProvider.value || null,
-      productId: productStore.activeProduct.name,
+      productId,
     })
     if (result) {
       selectedIds.value.push(result.id)
       newServerName.value = ''
       newServerHost.value = ''
-      newServerPort.value = null
+      newServerPort.value = undefined
       newServerRegion.value = ''
       newServerProvider.value = ''
       showAddForm.value = false

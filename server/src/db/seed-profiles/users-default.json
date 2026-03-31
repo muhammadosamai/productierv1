@@ -1,0 +1,46 @@
+{
+  "users": [
+    {
+      "name": "Sarim Alavi",
+      "email": "sarim@productier.com",
+      "role": "admin",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/1.jpg"
+    },
+    {
+      "name": "James Cooper",
+      "email": "james@productier.com",
+      "role": "admin",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/2.jpg"
+    },
+    {
+      "name": "Emily Chen",
+      "email": "emily@productier.com",
+      "role": "product_admin",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/3.jpg"
+    },
+    {
+      "name": "Michael Torres",
+      "email": "michael@productier.com",
+      "role": "product_manager",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/4.jpg"
+    },
+    {
+      "name": "Olivia Park",
+      "email": "olivia@productier.com",
+      "role": "business_analyst",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/5.jpg"
+    },
+    {
+      "name": "Daniel Kim",
+      "email": "daniel@productier.com",
+      "role": "developer",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/6.jpg"
+    },
+    {
+      "name": "Lisa Wang",
+      "email": "lisa@productier.com",
+      "role": "viewer",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/7.jpg"
+    }
+  ]
+}

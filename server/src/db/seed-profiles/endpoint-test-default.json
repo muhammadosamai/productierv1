@@ -1,0 +1,33 @@
+{
+  "product": {
+    "name": "Endpoint Test Workspace",
+    "description": "Dedicated local workspace for automated endpoint harness runs.",
+    "logo": "/uploads/logos/endpoint-test.svg"
+  },
+  "users": [
+    {
+      "name": "Endpoint Admin",
+      "email": "endpoint.admin@productier.test",
+      "role": "admin",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/31.jpg"
+    },
+    {
+      "name": "Endpoint Regular",
+      "email": "endpoint.regular@productier.test",
+      "role": "developer",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/32.jpg"
+    },
+    {
+      "name": "Endpoint Product Admin",
+      "email": "endpoint.productadmin@productier.test",
+      "role": "product_admin",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/33.jpg"
+    },
+    {
+      "name": "Endpoint Viewer",
+      "email": "endpoint.viewer@productier.test",
+      "role": "viewer",
+      "avatar": "https://mockmind-api.uifaces.co/content/human/34.jpg"
+    }
+  ]
+}

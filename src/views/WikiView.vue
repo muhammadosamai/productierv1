@@ -5,15 +5,27 @@ import {
   FileText, Clock, User2, Edit3, X, Tag, Eye,
   Link2, Trash2, Globe, Lock, Shield, Loader2,
 } from 'lucide-vue-next'
+import { useRoute, useRouter } from 'vue-router'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { useWikiStore } from '@/stores/wiki'
+import { usePagePermissions } from '@/lib/pagePermissions'
+import { STORAGE_KEYS } from '@/constants/storageKeys'
+import { storageGetJson, storageSetJson } from '@/lib/browserStorage'
+import { sanitizeHtml } from '@/lib/sanitizeHtml'
 import CreateAssetDialog from '@/components/wiki/CreateAssetDialog.vue'
 import type { Asset, AssetType } from '@/types/wiki'
 
 const productStore = useProductStore()
 const authStore = useAuthStore()
 const wikiStore = useWikiStore()
+const router = useRouter()
+const route = useRoute()
+const wikiPermissions = usePagePermissions('wiki')
+const canCreateWikiAssets = computed(() => wikiPermissions.canCreate.value)
+const canEditWikiAssets = computed(() => wikiPermissions.canEdit.value)
+const canDeleteWikiAssets = computed(() => wikiPermissions.canDelete.value)
+const activeProductRef = computed(() => productStore.activeProduct.id)
 
 const searchQuery = ref('')
 const isEditing = ref(false)
@@ -21,39 +33,74 @@ const editContent = ref('')
 const editTitle = ref('')
 const editDescription = ref('')
 const showCreateDialog = ref(false)
+const showDiffModal = ref(false)
+const selectedRevisionId = ref<string | null>(null)
+const diffLoading = ref(false)
 
 // Category collapse state — persisted to localStorage
-const STORAGE_KEY_CAT = 'wiki-expanded-categories'
-const STORAGE_KEY_TYPE = 'wiki-expanded-types'
+const STORAGE_KEY_CAT = STORAGE_KEYS.wiki.expandedCategories
+const STORAGE_KEY_TYPE = STORAGE_KEYS.wiki.expandedTypes
 
 function loadJson(key: string, fallback: Record<string, boolean>): Record<string, boolean> {
-  try {
-    const stored = localStorage.getItem(key)
-    return stored ? JSON.parse(stored) : fallback
-  } catch { return fallback }
+  return storageGetJson<Record<string, boolean>>(key, fallback)
+}
+
+function routeAssetId(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0]
+  return ''
+}
+
+async function syncAssetQuery(assetId: string | null) {
+  const current = routeAssetId(route.query.asset)
+  const normalized = assetId || ''
+  if (current === normalized) return
+
+  const nextQuery: Record<string, any> = { ...route.query }
+  if (normalized) {
+    nextQuery.asset = normalized
+  } else {
+    delete nextQuery.asset
+  }
+  await router.replace({ path: '/wiki', query: nextQuery })
 }
 
 const expandedCategories = ref<Record<string, boolean>>(loadJson(STORAGE_KEY_CAT, { engineering: true, product: true, business: true, external: true }))
 const expandedTypes = ref<Record<string, boolean>>(loadJson(STORAGE_KEY_TYPE, {}))
 
 onMounted(async () => {
-  const product = productStore.activeProduct.name
+  const product = activeProductRef.value
   await Promise.all([
     wikiStore.fetchAssetTypes(product),
     wikiStore.fetchAssets(product),
   ])
-  // Auto-select first asset
+  const requestedAssetId = routeAssetId(route.query.asset)
+  if (requestedAssetId) {
+    const requestedAsset = wikiStore.assets.find((asset) => asset.id === requestedAssetId)
+    if (requestedAsset) {
+      await selectAsset(requestedAsset, { syncQuery: false })
+      return
+    }
+  }
+
+  // Auto-select first asset when no deep-link target is present.
   if (wikiStore.assets.length > 0 && !wikiStore.selectedAsset) {
-    selectAsset(wikiStore.assets[0])
+    const firstAsset = wikiStore.assets[0]
+    if (firstAsset) {
+      await selectAsset(firstAsset)
+    }
   }
 })
 
-watch(() => productStore.activeProduct.name, async (product) => {
+watch(() => activeProductRef.value, async (product) => {
   await Promise.all([
     wikiStore.fetchAssetTypes(product),
     wikiStore.fetchAssets(product),
   ])
   wikiStore.selectedAsset = null
+  selectedRevisionId.value = null
+  showDiffModal.value = false
+  await syncAssetQuery(null)
 })
 
 // Group types by category
@@ -80,7 +127,7 @@ const categoryGroups = computed(() => {
       )
     }
 
-    if (filtered.length > 0) {
+    if (cat && filtered.length > 0) {
       cat.types.push({ ...at, assets: filtered })
     }
   }
@@ -92,27 +139,48 @@ const categoryGroups = computed(() => {
 })
 
 const totalAssets = computed(() => wikiStore.assets.length)
+const selected = computed(() => wikiStore.selectedAsset)
+const assetRevisions = computed(() => {
+  if (!selected.value) return []
+  return wikiStore.revisionsByAsset[selected.value.id] || []
+})
+
+const selectedRevision = computed(() =>
+  assetRevisions.value.find((revision) => revision.id === selectedRevisionId.value) || null,
+)
+
+const revisionDiff = computed(() => {
+  if (!selected.value) return null
+  return wikiStore.revisionDiffByAsset[selected.value.id] || null
+})
 
 function toggleCategory(key: string) {
   expandedCategories.value[key] = !expandedCategories.value[key]
-  localStorage.setItem(STORAGE_KEY_CAT, JSON.stringify(expandedCategories.value))
+  storageSetJson(STORAGE_KEY_CAT, expandedCategories.value)
 }
 
 function toggleType(typeId: string) {
   expandedTypes.value[typeId] = !expandedTypes.value[typeId]
-  localStorage.setItem(STORAGE_KEY_TYPE, JSON.stringify(expandedTypes.value))
+  storageSetJson(STORAGE_KEY_TYPE, expandedTypes.value)
 }
 
 function isTypeExpanded(typeId: string) {
   return expandedTypes.value[typeId] !== false // default expanded
 }
 
-async function selectAsset(asset: Asset) {
+async function selectAsset(asset: Asset, options: { syncQuery?: boolean } = {}) {
   await wikiStore.fetchAsset(asset.id)
+  await wikiStore.fetchRevisions(asset.id)
+  selectedRevisionId.value = (wikiStore.revisionsByAsset[asset.id] || [])[0]?.id || null
   isEditing.value = false
+  showDiffModal.value = false
+  if (options.syncQuery !== false) {
+    await syncAssetQuery(asset.id)
+  }
 }
 
 function startEditing() {
+  if (!canEditWikiAssets.value) return
   if (wikiStore.selectedAsset) {
     editTitle.value = wikiStore.selectedAsset.title
     editDescription.value = wikiStore.selectedAsset.description || ''
@@ -122,14 +190,18 @@ function startEditing() {
 }
 
 async function saveEditing() {
+  if (!canEditWikiAssets.value) return
   if (wikiStore.selectedAsset) {
     await wikiStore.updateAsset(wikiStore.selectedAsset.id, {
       title: editTitle.value,
       description: editDescription.value || null,
       content: editContent.value || null,
+      changeSummary: 'Updated from wiki editor',
     })
-    await wikiStore.fetchAssets(productStore.activeProduct.name)
+    await wikiStore.fetchAssets(activeProductRef.value)
     await wikiStore.fetchAsset(wikiStore.selectedAsset.id)
+    await wikiStore.fetchRevisions(wikiStore.selectedAsset.id)
+    selectedRevisionId.value = (wikiStore.revisionsByAsset[wikiStore.selectedAsset.id] || [])[0]?.id || null
     isEditing.value = false
   }
 }
@@ -139,20 +211,53 @@ function cancelEditing() {
 }
 
 async function deleteAsset() {
+  if (!canDeleteWikiAssets.value) return
   if (wikiStore.selectedAsset && confirm('Delete this asset? This cannot be undone.')) {
     await wikiStore.deleteAsset(wikiStore.selectedAsset.id)
-    await wikiStore.fetchAssets(productStore.activeProduct.name)
+    await wikiStore.fetchAssets(activeProductRef.value)
+    if (wikiStore.assets.length > 0) {
+      const firstAsset = wikiStore.assets[0]
+      if (firstAsset) {
+        await selectAsset(firstAsset)
+      }
+    } else {
+      selectedRevisionId.value = null
+      showDiffModal.value = false
+      await syncAssetQuery(null)
+    }
   }
 }
 
 async function onAssetCreated() {
   showCreateDialog.value = false
-  await wikiStore.fetchAssets(productStore.activeProduct.name)
+  await wikiStore.fetchAssets(activeProductRef.value)
   // Select the newly created asset
   if (wikiStore.assets.length > 0) {
-    await selectAsset(wikiStore.assets[0])
+    const firstAsset = wikiStore.assets[0]
+    if (firstAsset) {
+      await selectAsset(firstAsset)
+    }
   }
 }
+
+watch(() => route.query.asset, async (queryAssetValue) => {
+  const assetId = routeAssetId(queryAssetValue)
+  if (!assetId) return
+  if (wikiStore.selectedAsset?.id === assetId) return
+
+  const existing = wikiStore.assets.find((asset) => asset.id === assetId)
+  if (existing) {
+    await selectAsset(existing, { syncQuery: false })
+    return
+  }
+
+  const fetched = await wikiStore.fetchAsset(assetId)
+  if (!fetched) return
+  await wikiStore.fetchRevisions(assetId)
+  selectedRevisionId.value = (wikiStore.revisionsByAsset[assetId] || [])[0]?.id || null
+  isEditing.value = false
+  showDiffModal.value = false
+})
 
 function statusStyle(status: string) {
   switch (status) {
@@ -203,19 +308,60 @@ function formatRelative(dateStr: string) {
 }
 
 function renderContent(content: string): string {
-  return content
-    .replace(/^### (.+)$/gm, '<h3 class="text-[15px] font-semibold text-gray-900 mt-6 mb-2">$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2 class="text-base font-semibold text-gray-900 mt-8 mb-3">$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1 class="text-lg font-bold text-gray-900 mt-8 mb-4">$1</h1>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-gray-900">$1</strong>')
-    .replace(/`([^`]+)`/g, '<code class="text-[13px] bg-gray-100 text-[#4857FE] px-1.5 py-0.5 rounded font-mono">$1</code>')
-    .replace(/^- (.+)$/gm, '<li class="text-sm text-gray-600 ml-4 list-disc mb-1">$1</li>')
-    .replace(/^\d+\. (.+)$/gm, '<li class="text-sm text-gray-600 ml-4 list-decimal mb-1">$1</li>')
-    .replace(/\n\n/g, '</p><p class="text-sm text-gray-600 leading-relaxed mb-3">')
-    .replace(/\n/g, '<br/>')
+  return sanitizeHtml(content)
 }
 
-const selected = computed(() => wikiStore.selectedAsset)
+function diffLineClass(type: 'context' | 'add' | 'remove') {
+  if (type === 'add') return 'bg-green-50 text-green-800'
+  if (type === 'remove') return 'bg-red-50 text-red-800'
+  return 'text-gray-600'
+}
+
+async function openRevisionDiff(revisionId: string) {
+  if (!selected.value) return
+  selectedRevisionId.value = revisionId
+  showDiffModal.value = true
+  diffLoading.value = true
+
+  const targetRevision = assetRevisions.value.find((revision) => revision.id === revisionId)
+  const baseRevision = targetRevision
+    ? assetRevisions.value
+      .filter((revision) => revision.revisionNumber < targetRevision.revisionNumber)
+      .sort((a, b) => b.revisionNumber - a.revisionNumber)[0]
+    : undefined
+
+  await wikiStore.fetchRevisionDiff(selected.value.id, revisionId, baseRevision?.id)
+  diffLoading.value = false
+}
+
+async function restoreFromRevision(revisionId: string) {
+  if (!selected.value) return
+  const revision = assetRevisions.value.find((item) => item.id === revisionId)
+  if (!revision) return
+
+  const summaryInput = prompt(
+    'Restore summary (optional)',
+    `Restored from revision #${revision.revisionNumber}`,
+  )
+  if (summaryInput === null) return
+
+  const restored = await wikiStore.restoreRevision(
+    selected.value.id,
+    revisionId,
+    summaryInput.trim() || undefined,
+  )
+  if (!restored) return
+
+  await Promise.all([
+    wikiStore.fetchAsset(selected.value.id),
+    wikiStore.fetchAssets(activeProductRef.value),
+    wikiStore.fetchRevisions(selected.value.id),
+  ])
+  selectedRevisionId.value = (wikiStore.revisionsByAsset[selected.value.id] || [])[0]?.id || null
+  showDiffModal.value = false
+  isEditing.value = false
+}
+
 </script>
 
 <template>
@@ -242,7 +388,12 @@ const selected = computed(() => wikiStore.selectedAsset)
             />
           </div>
           <button
-            class="flex items-center gap-1.5 bg-[#4857FE] hover:bg-[#3E4BDE] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer"
+            class="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            :class="canCreateWikiAssets
+              ? 'bg-[#4857FE] hover:bg-[#3E4BDE] text-white cursor-pointer'
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+            :disabled="!canCreateWikiAssets"
+            :title="wikiPermissions.deniedReason('create', 'wiki assets') || 'New asset'"
             @click="showCreateDialog = true"
           >
             <Plus :size="15" />
@@ -397,14 +548,24 @@ const selected = computed(() => wikiStore.selectedAsset)
               </template>
               <template v-else>
                 <button
-                  class="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-500 hover:text-[#4857FE] hover:bg-[#4857FE]/5 rounded-lg transition-colors cursor-pointer"
+                  class="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors"
+                  :class="canEditWikiAssets
+                    ? 'text-gray-500 hover:text-[#4857FE] hover:bg-[#4857FE]/5 cursor-pointer'
+                    : 'text-gray-300 cursor-not-allowed'"
+                  :disabled="!canEditWikiAssets"
+                  :title="wikiPermissions.deniedReason('edit', 'wiki assets') || 'Edit asset'"
                   @click="startEditing"
                 >
                   <Edit3 :size="14" />
                   Edit
                 </button>
                 <button
-                  class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                  class="p-1.5 rounded-lg transition-colors"
+                  :class="canDeleteWikiAssets
+                    ? 'text-gray-400 hover:text-red-500 hover:bg-red-50 cursor-pointer'
+                    : 'text-gray-300 cursor-not-allowed'"
+                  :disabled="!canDeleteWikiAssets"
+                  :title="wikiPermissions.deniedReason('delete', 'wiki assets') || 'Delete asset'"
                   @click="deleteAsset"
                 >
                   <Trash2 :size="14" />
@@ -427,9 +588,62 @@ const selected = computed(() => wikiStore.selectedAsset)
           <div v-else class="mt-6 border-t border-gray-100 pt-6 text-center py-12">
             <p class="text-sm text-gray-400">No content yet.</p>
             <button
-              class="mt-2 text-sm text-[#4857FE] hover:underline cursor-pointer"
+              class="mt-2 text-sm transition-colors"
+              :class="canEditWikiAssets ? 'text-[#4857FE] hover:underline cursor-pointer' : 'text-gray-300 cursor-not-allowed'"
+              :disabled="!canEditWikiAssets"
+              :title="wikiPermissions.deniedReason('edit', 'wiki assets') || 'Add content'"
               @click="startEditing"
             >Add content</button>
+          </div>
+
+          <!-- Revision History -->
+          <div class="mt-8 border-t border-gray-100 pt-6">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-semibold text-gray-700">Revision History</h3>
+              <span class="text-xs text-gray-400">{{ assetRevisions.length }} revisions</span>
+            </div>
+
+            <div v-if="assetRevisions.length === 0" class="text-sm text-gray-400 py-2">
+              No revisions available.
+            </div>
+
+            <div v-else class="space-y-2">
+              <div
+                v-for="revision in assetRevisions"
+                :key="revision.id"
+                class="border border-gray-200 rounded-lg px-3 py-2.5"
+              >
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium text-gray-800 truncate">
+                      Revision #{{ revision.revisionNumber }}
+                    </p>
+                    <p class="text-xs text-gray-500 mt-0.5">
+                      {{ revision.changeSummary || 'No summary provided' }}
+                    </p>
+                    <p class="text-[11px] text-gray-400 mt-1">
+                      {{ revision.changedByUser?.name || 'Unknown user' }} • {{ formatRelative(revision.createdAt) }}
+                    </p>
+                  </div>
+                  <div class="flex items-center gap-1 shrink-0">
+                    <button
+                      class="px-2.5 py-1 text-xs rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50"
+                      @click="openRevisionDiff(revision.id)"
+                    >
+                      Diff
+                    </button>
+                    <button
+                      class="px-2.5 py-1 text-xs rounded-md border border-[#4857FE]/30 text-[#4857FE] hover:bg-[#4857FE]/5 disabled:opacity-40"
+                      :disabled="!canEditWikiAssets"
+                      :title="wikiPermissions.deniedReason('edit', 'wiki assets') || 'Restore this revision'"
+                      @click="restoreFromRevision(revision.id)"
+                    >
+                      Restore
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Relations -->
@@ -487,7 +701,12 @@ const selected = computed(() => wikiStore.selectedAsset)
           <p class="text-gray-500 text-sm font-medium mb-1">Select an asset</p>
           <p class="text-gray-400 text-xs mb-4">Choose an asset from the sidebar to view its details</p>
           <button
-            class="flex items-center gap-1.5 px-4 py-2 bg-[#4857FE] text-white text-sm font-medium rounded-lg hover:bg-[#3E4BDE] transition-colors cursor-pointer"
+            class="flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors"
+            :class="canCreateWikiAssets
+              ? 'bg-[#4857FE] text-white hover:bg-[#3E4BDE] cursor-pointer'
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+            :disabled="!canCreateWikiAssets"
+            :title="wikiPermissions.deniedReason('create', 'wiki assets') || 'Create first asset'"
             @click="showCreateDialog = true"
           >
             <Plus :size="15" />
@@ -495,6 +714,73 @@ const selected = computed(() => wikiStore.selectedAsset)
           </button>
         </div>
       </main>
+    </div>
+
+    <!-- Revision Diff Modal -->
+    <div
+      v-if="showDiffModal"
+      class="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4"
+      @click.self="showDiffModal = false"
+    >
+      <div class="w-full max-w-[900px] max-h-[85vh] bg-white rounded-xl border border-gray-200 shadow-xl overflow-hidden flex flex-col">
+        <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h3 class="text-sm font-semibold text-gray-900">
+              Revision Diff
+              <span v-if="selectedRevision" class="text-gray-500 font-normal ml-1">#{{ selectedRevision.revisionNumber }}</span>
+            </h3>
+            <p class="text-xs text-gray-400 mt-1">
+              Compare revision metadata and content changes.
+            </p>
+          </div>
+          <button class="p-1.5 rounded hover:bg-gray-100 text-gray-500" @click="showDiffModal = false">
+            <X :size="14" />
+          </button>
+        </div>
+
+        <div v-if="diffLoading" class="flex-1 flex items-center justify-center">
+          <Loader2 :size="20" class="animate-spin text-[#4857FE]" />
+        </div>
+        <div v-else-if="!revisionDiff" class="flex-1 flex items-center justify-center text-sm text-gray-400">
+          No diff data available.
+        </div>
+        <div v-else class="flex-1 overflow-auto p-5 space-y-4">
+          <div>
+            <h4 class="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Field Changes</h4>
+            <div v-if="revisionDiff.fields.length === 0" class="text-sm text-gray-400">No metadata field changes.</div>
+            <div v-else class="space-y-2">
+              <div
+                v-for="field in revisionDiff.fields"
+                :key="field.field"
+                class="border border-gray-200 rounded-md px-3 py-2"
+              >
+                <p class="text-xs font-medium text-gray-700">{{ field.field }}</p>
+                <p class="text-[11px] text-gray-500 mt-1">
+                  <span class="text-red-600">From:</span> {{ field.from || 'Empty' }}
+                </p>
+                <p class="text-[11px] text-gray-500 mt-0.5">
+                  <span class="text-green-600">To:</span> {{ field.to || 'Empty' }}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h4 class="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Content Diff</h4>
+            <div v-if="revisionDiff.contentDiff.length === 0" class="text-sm text-gray-400">No content differences.</div>
+            <div v-else class="border border-gray-200 rounded-md overflow-hidden">
+              <div
+                v-for="(line, index) in revisionDiff.contentDiff"
+                :key="`${index}-${line.type}-${line.line}`"
+                class="px-3 py-1.5 font-mono text-[12px]"
+                :class="diffLineClass(line.type)"
+              >
+                {{ line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' ' }} {{ line.line }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Create Asset Dialog -->

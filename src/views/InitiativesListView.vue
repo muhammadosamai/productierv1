@@ -10,6 +10,9 @@ import { useInitiativesStore } from '@/stores/initiatives'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { useRolesStore } from '@/stores/roles'
+import { usePagePermissions } from '@/lib/pagePermissions'
+import { STORAGE_KEYS } from '@/constants/storageKeys'
+import { usersApi } from '@/lib/api'
 import CreateInitiativeDialog from '@/components/initiative/CreateInitiativeDialog.vue'
 import InitiativeDetailPanel from '@/components/initiative/InitiativeDetailPanel.vue'
 import FavoriteStar from '@/components/shared/FavoriteStar.vue'
@@ -27,16 +30,20 @@ const initiativesStore = useInitiativesStore()
 const productStore = useProductStore()
 const authStore = useAuthStore()
 const rolesStore = useRolesStore()
+const initiativesPermissions = usePagePermissions('initiatives')
+const canCreateInitiatives = computed(() => initiativesPermissions.canCreate.value)
+const canEditInitiatives = computed(() => initiativesPermissions.canEdit.value)
+const INITIATIVES_VIEW_MODE_KEY = STORAGE_KEYS.views.initiatives.viewMode
 
 const showCreateDialog = ref(false)
 const searchQuery = ref('')
 const activeTab = ref<'active' | 'inactive' | 'archived'>('active')
-const viewMode = ref<'table' | 'card'>(localStorage.getItem('initiatives-view-mode') as 'table' | 'card' || 'table')
+const viewMode = ref<'table' | 'card'>(localStorage.getItem(INITIATIVES_VIEW_MODE_KEY) as 'table' | 'card' || 'table')
 const sortField = ref<string>('createdAt')
 const sortDir = ref<'asc' | 'desc'>('desc')
 
 watch(viewMode, (v) => {
-  localStorage.setItem('initiatives-view-mode', v)
+  localStorage.setItem(INITIATIVES_VIEW_MODE_KEY, v)
 })
 
 // Detail panel state
@@ -44,14 +51,16 @@ const selectedInitiative = ref<Initiative | null>(null)
 const showDetailPanel = ref(false)
 const teamMembers = ref<TeamUser[]>([])
 
+function activeProductId(): string {
+  return productStore.activeProduct.id || ''
+}
+
 async function fetchTeamMembers() {
   try {
-    const res = await fetch(`/api/auth/users?q=`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    if (res.ok) {
-      teamMembers.value = await res.json()
-    }
+    const payload = await usersApi.list({ q: '' }, authStore.token)
+    teamMembers.value = Array.isArray(payload)
+      ? payload
+      : (Array.isArray(payload?.items) ? payload.items : [])
   } catch {
     teamMembers.value = []
   }
@@ -83,7 +92,7 @@ onMounted(() => {
   fetchTeamMembers()
 })
 
-watch(() => productStore.activeProduct.name, () => {
+watch(() => productStore.activeProduct.id, () => {
   initiativesStore.fetchInitiatives()
   fetchTeamMembers()
 })
@@ -104,6 +113,7 @@ const archivedInitiatives = computed(() => {
 })
 
 async function archiveInitiative(initiative: Initiative, event: Event) {
+  if (!canEditInitiatives.value) return
   event.stopPropagation()
   await initiativesStore.updateInitiative(initiative.id, { status: 'archived' })
 }
@@ -224,7 +234,12 @@ const sortableColumns = ['title', 'status', 'priority', 'leader', 'createdAt']
         </div>
         <div class="flex items-center gap-3">
           <button
-            class="flex items-center gap-1.5 bg-[#4857FE] hover:bg-[#3E4BDE] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer"
+            class="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            :class="canCreateInitiatives
+              ? 'bg-[#4857FE] hover:bg-[#3E4BDE] text-white cursor-pointer'
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+            :disabled="!canCreateInitiatives"
+            :title="initiativesPermissions.deniedReason('create', 'initiatives') || 'Add initiative'"
             @click="showCreateDialog = true"
           >
             <Plus :size="15" />
@@ -322,7 +337,12 @@ const sortableColumns = ['title', 'status', 'priority', 'leader', 'createdAt']
         </p>
         <button
           v-if="activeTab === 'active'"
-          class="flex items-center gap-1.5 px-4 py-2 bg-[#4857FE] text-white text-sm font-medium rounded-lg hover:bg-[#3a46d9] transition-colors cursor-pointer"
+          class="flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors"
+          :class="canCreateInitiatives
+            ? 'bg-[#4857FE] text-white hover:bg-[#3a46d9] cursor-pointer'
+            : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+          :disabled="!canCreateInitiatives"
+          :title="initiativesPermissions.deniedReason('create', 'initiatives') || 'Add initiative'"
           @click="showCreateDialog = true"
         >
           <Plus :size="15" />
@@ -409,7 +429,7 @@ const sortableColumns = ['title', 'status', 'priority', 'leader', 'createdAt']
               <!-- Title -->
               <td class="px-5 py-3.5">
                 <div class="flex items-center gap-2 min-w-0">
-                  <FavoriteStar entity-type="initiative" :entity-id="initiative.id" :product-id="productStore.activeProduct.name" />
+                  <FavoriteStar entity-type="initiative" :entity-id="initiative.id" :product-id="activeProductId()" />
                   <span class="w-1 h-7 rounded-full flex-shrink-0" :class="statusDotColor(initiative.status)"></span>
                   <span class="text-sm font-medium text-gray-900 truncate">{{ initiative.title }}</span>
                 </div>
@@ -459,7 +479,8 @@ const sortableColumns = ['title', 'status', 'priority', 'leader', 'createdAt']
                 <button
                   v-if="initiative.status !== 'archived'"
                   class="p-1.5 rounded-md text-gray-300 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
-                  title="Archive initiative"
+                  :disabled="!canEditInitiatives"
+                  :title="initiativesPermissions.deniedReason('edit', 'initiatives') || 'Archive initiative'"
                   @click="archiveInitiative(initiative, $event)"
                 >
                   <Archive :size="14" />
@@ -481,7 +502,7 @@ const sortableColumns = ['title', 'status', 'priority', 'leader', 'createdAt']
           <!-- Header: title + status badge -->
           <div class="flex items-start justify-between gap-3 mb-3">
             <div class="flex items-center gap-2 min-w-0">
-              <FavoriteStar entity-type="initiative" :entity-id="initiative.id" :product-id="productStore.activeProduct.name" />
+              <FavoriteStar entity-type="initiative" :entity-id="initiative.id" :product-id="activeProductId()" />
               <span class="w-1 h-5 rounded-full flex-shrink-0" :class="statusDotColor(initiative.status)"></span>
               <h3 class="text-sm font-semibold text-gray-900 truncate group-hover:text-[#4857FE] transition-colors">{{ initiative.title }}</h3>
             </div>

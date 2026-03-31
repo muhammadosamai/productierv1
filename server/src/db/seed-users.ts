@@ -1,62 +1,24 @@
 import bcrypt from 'bcryptjs'
 import { db } from './index'
 import { users } from './schema'
-import { eq } from 'drizzle-orm'
+import { loadSeedProfilePack, parseSeedArgs, resolveRequiredSeedPassword } from './seed-config'
 
-const PASSWORD = 'password123'
+const DEFAULT_USERS_PROFILE_PATH = 'src/db/seed-profiles/users-default.json'
 
-const seedUsers = [
-  {
-    name: 'Sarim Alavi',
-    email: 'sarim@productier.com',
-    role: 'super_admin' as const,
-    avatar: 'https://mockmind-api.uifaces.co/content/human/1.jpg',
-  },
-  {
-    name: 'James Cooper',
-    email: 'james@productier.com',
-    role: 'admin' as const,
-    avatar: 'https://mockmind-api.uifaces.co/content/human/2.jpg',
-  },
-  {
-    name: 'Emily Chen',
-    email: 'emily@productier.com',
-    role: 'product_admin' as const,
-    avatar: 'https://mockmind-api.uifaces.co/content/human/3.jpg',
-  },
-  {
-    name: 'Michael Torres',
-    email: 'michael@productier.com',
-    role: 'product_manager' as const,
-    avatar: 'https://mockmind-api.uifaces.co/content/human/4.jpg',
-  },
-  {
-    name: 'Olivia Park',
-    email: 'olivia@productier.com',
-    role: 'business_analyst' as const,
-    avatar: 'https://mockmind-api.uifaces.co/content/human/5.jpg',
-  },
-  {
-    name: 'Daniel Kim',
-    email: 'daniel@productier.com',
-    role: 'developer' as const,
-    avatar: 'https://mockmind-api.uifaces.co/content/human/6.jpg',
-  },
-  {
-    name: 'Lisa Wang',
-    email: 'lisa@productier.com',
-    role: 'viewer' as const,
-    avatar: 'https://mockmind-api.uifaces.co/content/human/7.jpg',
-  },
-]
-
-async function seed() {
+export async function seedUsers(args = parseSeedArgs()) {
   console.log('Seeding users...')
 
-  const hashedPassword = await bcrypt.hash(PASSWORD, 10)
+  const password = resolveRequiredSeedPassword()
+  const loadedProfile = await loadSeedProfilePack({
+    defaultPath: DEFAULT_USERS_PROFILE_PATH,
+    args,
+    envNames: ['SEED_USERS_PACK_PATH', 'SEED_PROFILE_PATH'],
+    requiredSections: ['users'],
+  })
+  const seedUsers = loadedProfile.profile.users ?? []
+  const hashedPassword = await bcrypt.hash(password, 10)
 
-  // Remove old super admin if email changed
-  await db.delete(users).where(eq(users.email, 'sarah@productier.com'))
+  console.log(`Loaded ${seedUsers.length} users from ${loadedProfile.source} profile: ${loadedProfile.resolvedPath}`)
 
   for (const user of seedUsers) {
     try {
@@ -65,17 +27,28 @@ async function seed() {
         password: hashedPassword,
       }).onConflictDoUpdate({
         target: users.email,
-        set: { name: user.name, role: user.role, avatar: user.avatar },
+        set: {
+          name: user.name,
+          role: user.role,
+          avatar: user.avatar,
+          password: hashedPassword,
+        },
       })
 
-      console.log(`  ✓ ${user.name} (${user.role}) — ${user.email}`)
-    } catch (e) {
-      console.log(`  ✗ ${user.name} — error: ${(e as Error).message}`)
+      console.log(`  [OK] ${user.name} (${user.role}) - ${user.email}`)
+    } catch (error) {
+      console.log(`  [ERR] ${user.name} - error: ${(error as Error).message}`)
     }
   }
 
-  console.log('\nDone! All users have password: password123')
-  process.exit(0)
+  console.log('\nDone. Users seeded with password from SEED_DEMO_PASSWORD.')
 }
 
-seed()
+if (import.meta.main) {
+  seedUsers()
+    .then(() => process.exit(0))
+    .catch((error) => {
+      console.error('User seed failed:', error)
+      process.exit(1)
+    })
+}

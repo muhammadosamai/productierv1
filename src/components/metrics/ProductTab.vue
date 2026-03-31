@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useProductStore } from '@/stores/products'
 import { useBacklogStore } from '@/stores/backlog'
 import { useInitiativesStore } from '@/stores/initiatives'
 import { useActivitiesStore } from '@/stores/activities'
 import { useProductMembersStore } from '@/stores/productMembers'
 import { useAuthStore } from '@/stores/auth'
+import { usePagePermissions } from '@/lib/pagePermissions'
+import { usersApi } from '@/lib/api'
 import {
   Loader2, Plus, X, Search, Clock, UserPlus, Users,
   Signal, FileText, Type, Tag, CalendarClock, Hourglass, User,
 } from 'lucide-vue-next'
 import type { Activity } from '@/stores/activities'
+import { buildHomeActivityEntityRoute } from '@/lib/homeEntityRouting'
 
 const productStore = useProductStore()
 const backlogStore = useBacklogStore()
@@ -18,6 +22,14 @@ const initiativesStore = useInitiativesStore()
 const activitiesStore = useActivitiesStore()
 const membersStore = useProductMembersStore()
 const authStore = useAuthStore()
+const router = useRouter()
+const teamPermissions = usePagePermissions('team')
+const canCreateTeamMembers = computed(() => teamPermissions.canCreate.value)
+const canDeleteTeamMembers = computed(() => teamPermissions.canDelete.value)
+const activeProductLogoFailed = ref(false)
+const activeProductLogoVisible = computed(
+  () => Boolean(productStore.activeProduct.logo) && !activeProductLogoFailed.value,
+)
 
 // Team member search
 const showAddMember = ref(false)
@@ -32,23 +44,63 @@ onMounted(() => {
   loadData()
 })
 
-watch(() => productStore.activeProduct.name, () => {
+watch(() => productStore.activeProduct.id, () => {
   loadData()
 })
 
-function loadData() {
-  const product = productStore.activeProduct.name
-  backlogStore.fetchStories(product)
-  initiativesStore.fetchInitiatives()
-  activitiesStore.fetchActivities(product)
-  membersStore.fetchMembers(product)
+function activeProductId(): string {
+  return productStore.activeProduct.id || ''
 }
+
+async function loadStoriesForFeed(productId: string) {
+  await backlogStore.fetchStories(productId, { limit: 80 })
+  let safetyCounter = 0
+  while (backlogStore.hasMore && backlogStore.nextCursor && safetyCounter < 10) {
+    await backlogStore.fetchStories(productId, {
+      limit: 80,
+      cursor: backlogStore.nextCursor,
+      append: true,
+    })
+    safetyCounter += 1
+  }
+}
+
+async function loadData() {
+  const product = activeProductId()
+  if (!product) return
+  await Promise.all([
+    loadStoriesForFeed(product),
+    initiativesStore.fetchInitiatives(),
+    activitiesStore.fetchActivities(product),
+    membersStore.fetchMembers(product),
+  ])
+}
+
+function onActiveProductLogoError(): void {
+  activeProductLogoFailed.value = true
+}
+
+watch(() => productStore.activeProduct.id, () => {
+  activeProductLogoFailed.value = false
+})
+
+watch(() => productStore.activeProduct.logo, () => {
+  activeProductLogoFailed.value = false
+})
 
 // Stats
 const totalStories = computed(() => backlogStore.stories.length)
 const totalInitiatives = computed(() => initiativesStore.initiatives.length)
 const inProgressStories = computed(() => backlogStore.stories.filter(i => i.status === 'in_progress').length)
-const completedStories = computed(() => backlogStore.stories.filter(i => i.status === 'done').length)
+const completedStories = computed(() => backlogStore.stories.filter(i => i.status === 'completed').length)
+const productFeedErrors = computed(() => (
+  [
+    backlogStore.error,
+    initiativesStore.error,
+    activitiesStore.error,
+    membersStore.error,
+  ].filter((value): value is string => Boolean(value))
+))
 
 // Group activities by date
 const groupedActivities = computed(() => {
@@ -178,15 +230,13 @@ function changeDescription(change: { field: string; from: string | null; to: str
 async function searchUsers(query: string) {
   memberSearchLoading.value = true
   try {
-    const res = await fetch(`/api/auth/users?q=${encodeURIComponent(query)}`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    if (res.ok) {
-      const all = await res.json()
-      // Filter out existing members
-      const existingIds = new Set(membersStore.members.map(m => m.userId))
-      memberSearchResults.value = all.filter((u: any) => !existingIds.has(u.id))
-    }
+    const payload = await usersApi.list({ q: query }, authStore.token)
+    const all = Array.isArray(payload)
+      ? payload
+      : (Array.isArray(payload?.items) ? payload.items : [])
+    // Filter out existing members
+    const existingIds = new Set(membersStore.members.map(m => m.userId))
+    memberSearchResults.value = all.filter((u: any) => !existingIds.has(u.id))
   } catch {
     memberSearchResults.value = []
   } finally {
@@ -202,17 +252,24 @@ function onMemberSearchInput() {
 }
 
 async function addMember(user: { id: string; name: string }) {
-  await membersStore.addMember(productStore.activeProduct.name, user.id)
+  if (!canCreateTeamMembers.value) return
+  const productId = activeProductId()
+  if (!productId) return
+  await membersStore.addMember(productId, user.id)
   memberSearch.value = ''
   memberSearchResults.value = []
   showAddMember.value = false
 }
 
 async function removeMember(userId: string) {
-  await membersStore.removeMember(productStore.activeProduct.name, userId)
+  if (!canDeleteTeamMembers.value) return
+  const productId = activeProductId()
+  if (!productId) return
+  await membersStore.removeMember(productId, userId)
 }
 
 function openAddMember() {
+  if (!canCreateTeamMembers.value) return
   showAddMember.value = true
   memberSearch.value = ''
   memberSearchResults.value = []
@@ -222,13 +279,31 @@ function openAddMember() {
 function userInitials(name: string) {
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
 }
+
+function activityRoute(activity: Activity) {
+  return buildHomeActivityEntityRoute(activity.entityType, activity.entityId)
+}
+
+function openActivityEntity(activity: Activity) {
+  const targetRoute = activityRoute(activity)
+  if (!targetRoute) return
+  router.push(targetRoute)
+}
 </script>
 
 <template>
-  <div class="p-8" style="background-color: #F8FAFF">
+  <div class="p-4 sm:p-6 lg:p-8" style="background-color: #F8FAFF">
     <div class="max-w-[1200px] mx-auto w-full">
+      <div
+        v-if="productFeedErrors.length > 0"
+        class="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+      >
+        <p class="font-semibold">Some product feed sections failed to load.</p>
+        <p class="mt-1 text-xs text-red-600">{{ productFeedErrors[0] }}</p>
+      </div>
+
       <!-- Stats Cards -->
-      <div class="grid grid-cols-4 gap-4 mb-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         <div class="bg-white rounded-xl border border-gray-100 p-5">
           <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Total Stories</p>
           <p class="text-2xl font-semibold text-gray-900 mt-2">{{ totalStories }}</p>
@@ -248,7 +323,7 @@ function userInitials(name: string) {
       </div>
 
       <!-- Two-column layout -->
-      <div class="grid grid-cols-[1fr_320px] gap-6">
+      <div class="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6">
         <!-- Left: Activity Timeline -->
         <div class="bg-white rounded-xl border border-gray-100 overflow-hidden">
           <!-- Header -->
@@ -316,7 +391,16 @@ function userInitials(name: string) {
                       <div class="flex items-center justify-between">
                         <div class="flex items-center gap-1.5 min-w-0">
                           <span class="text-sm font-semibold text-gray-900">{{ activity.userName }}</span>
+                          <button
+                            v-if="activityRoute(activity)"
+                            type="button"
+                            class="text-[9px] font-medium rounded px-1.5 py-0.5 truncate max-w-[160px]"
+                            :class="activity.entityType === 'story' ? 'text-orange-600 bg-orange-50' : activity.entityType === 'task' ? 'text-[#4857FE] bg-[#4857FE]/8' : 'text-purple-600 bg-purple-50'"
+                            :title="activity.entityTitle"
+                            @click.stop="openActivityEntity(activity)"
+                          >{{ entityTypeLabel(activity.entityType) }}: {{ activity.entityTitle }}</button>
                           <span
+                            v-else
                             class="text-[9px] font-medium rounded px-1.5 py-0.5 truncate max-w-[160px]"
                             :class="activity.entityType === 'story' ? 'text-orange-600 bg-orange-50' : activity.entityType === 'task' ? 'text-[#4857FE] bg-[#4857FE]/8' : 'text-purple-600 bg-purple-50'"
                             :title="activity.entityTitle"
@@ -388,10 +472,11 @@ function userInitials(name: string) {
           <div class="p-5">
             <div class="flex items-center gap-3.5 mb-4">
               <img
-                v-if="productStore.activeProduct.logo"
+                v-if="activeProductLogoVisible"
                 :src="productStore.activeProduct.logo"
                 :alt="productStore.activeProduct.name"
                 class="w-12 h-12 rounded-xl object-cover border border-gray-100"
+                @error="onActiveProductLogoError"
               />
               <div v-else class="w-12 h-12 rounded-xl bg-[#4857FE]/10 flex items-center justify-center text-lg font-bold text-[#4857FE]">
                 {{ productStore.activeProduct.name?.[0] }}
@@ -416,7 +501,10 @@ function userInitials(name: string) {
               <span class="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{{ membersStore.members.length }}</span>
             </div>
             <button
-              class="flex items-center gap-1 text-xs text-[#4857FE] font-medium hover:text-[#3E4BDE]"
+              class="flex items-center gap-1 text-xs font-medium transition-colors"
+              :class="canCreateTeamMembers ? 'text-[#4857FE] hover:text-[#3E4BDE]' : 'text-gray-400 cursor-not-allowed'"
+              :disabled="!canCreateTeamMembers"
+              :title="teamPermissions.deniedReason('create', 'team members') || 'Add team member'"
               @click="openAddMember"
             >
               <UserPlus :size="14" />
@@ -501,6 +589,8 @@ function userInitials(name: string) {
               <span class="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded capitalize">{{ member.role }}</span>
               <button
                 class="text-gray-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                :disabled="!canDeleteTeamMembers"
+                :title="teamPermissions.deniedReason('delete', 'team members') || 'Remove team member'"
                 @click="removeMember(member.userId)"
               >
                 <X :size="14" />

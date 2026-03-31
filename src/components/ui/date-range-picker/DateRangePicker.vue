@@ -11,6 +11,8 @@ interface DateRange {
   end: string | null
 }
 
+type CalendarRangeValue = { start: DateValue | undefined; end: DateValue | undefined }
+
 const props = withDefaults(defineProps<{
   modelValue?: DateRange
   placeholder?: string
@@ -39,7 +41,7 @@ function calendarDateToIso(date: DateValue): string {
 }
 
 // Internal range value for the calendar
-const internalValue = ref<{ start: DateValue; end: DateValue } | undefined>()
+const internalValue = ref<CalendarRangeValue | undefined>()
 
 // Sync modelValue → internal
 watch(() => props.modelValue, (val) => {
@@ -55,7 +57,7 @@ watch(() => props.modelValue, (val) => {
 }, { immediate: true })
 
 // Sync internal → modelValue
-function onUpdate(val: { start: DateValue; end: DateValue } | undefined) {
+function onUpdate(val: CalendarRangeValue) {
   internalValue.value = val
   if (val?.start && val?.end) {
     emit('update:modelValue', {

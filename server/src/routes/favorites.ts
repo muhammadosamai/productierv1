@@ -1,31 +1,72 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
-import { favorites, users } from '../db/schema'
+import { favorites } from '../db/schema'
 import { eq, and } from 'drizzle-orm'
-import { jwt } from '@elysiajs/jwt'
+import { authPlugin } from '../plugins/auth'
+import { requireAuth, requireProductPageAction } from '../lib/authz'
+import { logActivity, type ActivityEntityType } from '../lib/logActivity'
+import { badRequest } from '../lib/apiErrors'
+import { isUuid } from '../lib/productResolver'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
+const FAVORITE_ACTIVITY_ENTITY_TYPES = new Set<ActivityEntityType>([
+  'task',
+  'story',
+  'initiative',
+  'delivery',
+  'release',
+  'issue',
+  'test_cycle',
+  'test_cycle_issue',
+  'feature_request',
+  'consumer_feedback',
+  'wiki_asset',
+  'wiki_revision',
+])
 
-async function getUserFromHeader(jwtVerify: any, headers: Record<string, string | undefined>) {
-  const authHeader = headers.authorization
-  if (!authHeader?.startsWith('Bearer ')) return null
-  const token = authHeader.replace('Bearer ', '')
-  const payload = await jwtVerify(token)
-  if (!payload?.userId) return null
-  const user = await db.query.users.findFirst({ where: eq(users.id, payload.userId as string) })
-  return user || null
+function resolveFavoriteEntityType(rawEntityType: string): ActivityEntityType | null {
+  const normalized = rawEntityType.trim().toLowerCase()
+  return FAVORITE_ACTIVITY_ENTITY_TYPES.has(normalized as ActivityEntityType)
+    ? normalized as ActivityEntityType
+    : null
+}
+
+function resolveFavoriteRoutePath(entityType: string, entityId: string): string | null {
+  const routes: Partial<Record<ActivityEntityType, string>> = {
+    task: '/tasks',
+    story: '/stories',
+    initiative: '/initiatives',
+    delivery: '/deliveries',
+    release: '/releases',
+    issue: '/issues',
+    test_cycle: '/test-cycles',
+    test_cycle_issue: '/issues',
+    feature_request: '/feedback/feature-requests',
+    consumer_feedback: '/feedback/consumer-feedback',
+    wiki_asset: '/wiki',
+    wiki_revision: '/wiki',
+  }
+  const prefix = routes[entityType as ActivityEntityType]
+  if (!prefix) return null
+  return `${prefix}/${entityId}`
 }
 
 export const favoriteRoutes = new Elysia({ prefix: '/api/favorites' })
-  .use(jwt({ name: 'jwt', secret: JWT_SECRET }))
+  .use(authPlugin)
 
   // GET /api/favorites?productId=X
   .get('/', async ({ query, jwt: jwtInstance, headers, set }) => {
-    const user = await getUserFromHeader(jwtInstance.verify, headers)
-    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+    const user = await requireAuth(jwtInstance.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
 
     const productId = query.productId
     if (!productId) { set.status = 400; return { error: 'productId is required' } }
+    if (!isUuid(productId)) return badRequest(set, 'Invalid productId')
+    const access = await requireProductPageAction(jwtInstance.verify, headers, set, {
+      productId,
+      page: 'home',
+      action: 'read',
+    })
+    if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
 
     return db.select().from(favorites).where(
       and(
@@ -41,8 +82,16 @@ export const favoriteRoutes = new Elysia({ prefix: '/api/favorites' })
 
   // POST /api/favorites
   .post('/', async ({ body, jwt: jwtInstance, headers, set }) => {
-    const user = await getUserFromHeader(jwtInstance.verify, headers)
-    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+    const user = await requireAuth(jwtInstance.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
+    if (!isUuid(body.entityId)) return badRequest(set, 'Invalid entityId')
+    if (!isUuid(body.productId)) return badRequest(set, 'Invalid productId')
+    const access = await requireProductPageAction(jwtInstance.verify, headers, set, {
+      productId: body.productId,
+      page: 'home',
+      action: 'create',
+    })
+    if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
 
     // Check if already exists
     const existing = await db.select().from(favorites).where(
@@ -64,6 +113,23 @@ export const favoriteRoutes = new Elysia({ prefix: '/api/favorites' })
       productId: body.productId,
     }).returning()
 
+    const activityEntityType = resolveFavoriteEntityType(body.entityType)
+    if (activityEntityType) {
+      logActivity({
+        productId: body.productId,
+        userName: user.name,
+        userAvatar: user.avatar,
+        userId: user.id,
+        action: 'updated',
+        entityType: activityEntityType,
+        entityId: body.entityId,
+        entityTitle: `${body.entityType} ${body.entityId}`,
+        changes: [{ field: 'favoriteState', from: null, to: 'starred' }],
+        routePathOverride: resolveFavoriteRoutePath(activityEntityType, body.entityId),
+        subjectUserIds: [user.id],
+      })
+    }
+
     return created
   }, {
     body: t.Object({
@@ -75,8 +141,25 @@ export const favoriteRoutes = new Elysia({ prefix: '/api/favorites' })
 
   // DELETE /api/favorites/:entityType/:entityId
   .delete('/:entityType/:entityId', async ({ params, jwt: jwtInstance, headers, set }) => {
-    const user = await getUserFromHeader(jwtInstance.verify, headers)
-    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+    const user = await requireAuth(jwtInstance.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
+    if (!isUuid(params.entityId)) return badRequest(set, 'Invalid entityId')
+    const existing = await db.query.favorites.findFirst({
+      where: and(
+        eq(favorites.userId, user.id),
+        eq(favorites.entityType, params.entityType),
+        eq(favorites.entityId, params.entityId),
+      ),
+      columns: { id: true, productId: true, entityType: true, entityId: true },
+    })
+    if (!existing) return { success: true }
+
+    const access = await requireProductPageAction(jwtInstance.verify, headers, set, {
+      productId: existing.productId,
+      page: 'home',
+      action: 'delete',
+    })
+    if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
 
     await db.delete(favorites).where(
       and(
@@ -85,6 +168,23 @@ export const favoriteRoutes = new Elysia({ prefix: '/api/favorites' })
         eq(favorites.entityId, params.entityId),
       )
     )
+
+    const activityEntityType = resolveFavoriteEntityType(existing.entityType)
+    if (activityEntityType) {
+      logActivity({
+        productId: existing.productId,
+        userName: user.name,
+        userAvatar: user.avatar,
+        userId: user.id,
+        action: 'updated',
+        entityType: activityEntityType,
+        entityId: existing.entityId,
+        entityTitle: `${existing.entityType} ${existing.entityId}`,
+        changes: [{ field: 'favoriteState', from: 'starred', to: null }],
+        routePathOverride: resolveFavoriteRoutePath(activityEntityType, existing.entityId),
+        subjectUserIds: [user.id],
+      })
+    }
 
     return { success: true }
   })

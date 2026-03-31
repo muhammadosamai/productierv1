@@ -60,6 +60,7 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem(TOKEN_KEY, data.token)
       return true
     } catch (e) {
+      console.error('Error:', JSON.stringify(e))
       error.value = 'Network error. Please try again.'
       return false
     } finally {

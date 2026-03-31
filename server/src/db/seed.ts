@@ -1,5 +1,5 @@
 import { db } from './index'
-import { stories, tasks } from './schema'
+import { stories, tasks, users } from './schema'
 
 async function seed() {
   console.log('Seeding database...')
@@ -7,6 +7,14 @@ async function seed() {
   // Clear existing data
   await db.delete(tasks)
   await db.delete(stories)
+
+  // Create a seed user to satisfy createdByUserId FK
+  const [seedUser] = await db.insert(users).values({
+    name: 'Seed User',
+    email: 'seed@example.com',
+    password: 'placeholder',
+    role: 'admin',
+  }).onConflictDoNothing().returning()
 
   // Insert stories matching existing hardcoded data
   const [darkMode] = await db.insert(stories).values({
@@ -45,18 +53,20 @@ async function seed() {
     product: 'Product',
   }).returning()
 
+  const userId = seedUser!.id
+
   // Add sample tasks
   await db.insert(tasks).values([
-    { title: 'Research CSS custom properties approach', status: 'done', storyId: darkMode!.id },
-    { title: 'Implement theme toggle component', status: 'todo', storyId: darkMode!.id },
-    { title: 'Update color palette for dark theme', status: 'todo', storyId: darkMode!.id },
-    { title: 'Design CSV export format', status: 'todo', storyId: exportCsv!.id },
-    { title: 'Build export API endpoint', status: 'todo', storyId: exportCsv!.id },
-    { title: 'Set up webhook endpoint handler', status: 'in_progress', storyId: webhooks!.id },
-    { title: 'Add webhook retry logic', status: 'todo', storyId: webhooks!.id },
-    { title: 'Write webhook documentation', status: 'todo', storyId: webhooks!.id },
-    { title: 'Evaluate i18n libraries', status: 'todo', storyId: i18n!.id },
-    { title: 'Extract all hardcoded strings', status: 'todo', storyId: i18n!.id },
+    { title: 'Research CSS custom properties approach', status: 'done', storyId: darkMode!.id, productId: 'Product', createdByUserId: userId },
+    { title: 'Implement theme toggle component', status: 'created', storyId: darkMode!.id, productId: 'Product', createdByUserId: userId },
+    { title: 'Update color palette for dark theme', status: 'created', storyId: darkMode!.id, productId: 'Product', createdByUserId: userId },
+    { title: 'Design CSV export format', status: 'created', storyId: exportCsv!.id, productId: 'Product', createdByUserId: userId },
+    { title: 'Build export API endpoint', status: 'created', storyId: exportCsv!.id, productId: 'Product', createdByUserId: userId },
+    { title: 'Set up webhook endpoint handler', status: 'in_progress', storyId: webhooks!.id, productId: 'Product', createdByUserId: userId },
+    { title: 'Add webhook retry logic', status: 'created', storyId: webhooks!.id, productId: 'Product', createdByUserId: userId },
+    { title: 'Write webhook documentation', status: 'created', storyId: webhooks!.id, productId: 'Product', createdByUserId: userId },
+    { title: 'Evaluate i18n libraries', status: 'created', storyId: i18n!.id, productId: 'Product', createdByUserId: userId },
+    { title: 'Extract all hardcoded strings', status: 'created', storyId: i18n!.id, productId: 'Product', createdByUserId: userId },
   ])
 
   console.log('Seed complete - 4 stories with 10 tasks created')

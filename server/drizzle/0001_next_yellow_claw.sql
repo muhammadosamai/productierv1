@@ -227,6 +227,8 @@ ALTER TABLE "test_cycles" ADD CONSTRAINT "test_cycles_release_id_releases_id_fk"
 ALTER TABLE "test_cycles" ADD CONSTRAINT "test_cycles_created_by_user_id_users_id_fk" FOREIGN KEY ("created_by_user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "public"."backlog_items" ALTER COLUMN "status" DROP DEFAULT;--> statement-breakpoint
 ALTER TABLE "public"."backlog_items" ALTER COLUMN "status" SET DATA TYPE text USING "status"::text;--> statement-breakpoint
+UPDATE "public"."backlog_items" SET "status" = 'initialized' WHERE "status" = 'ready';--> statement-breakpoint
+UPDATE "public"."backlog_items" SET "status" = 'completed' WHERE "status" = 'done';--> statement-breakpoint
 DROP TYPE "public"."item_status";--> statement-breakpoint
 CREATE TYPE "public"."item_status" AS ENUM('backlog', 'drafted', 'initialized', 'in_progress', 'completed', 'archived');--> statement-breakpoint
 ALTER TABLE "public"."backlog_items" ALTER COLUMN "status" SET DATA TYPE "public"."item_status" USING "status"::"public"."item_status";

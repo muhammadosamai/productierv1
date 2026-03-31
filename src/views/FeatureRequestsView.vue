@@ -8,16 +8,22 @@ import {
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { useFeatureRequestsStore } from '@/stores/featureRequests'
+import { usePagePermissions } from '@/lib/pagePermissions'
+import { STORAGE_KEYS } from '@/constants/storageKeys'
 import FavoriteStar from '@/components/shared/FavoriteStar.vue'
 import type { FeatureRequestStatus, FeatureRequestCategory } from '@/types/featureRequest'
 
 const productStore = useProductStore()
 const authStore = useAuthStore()
 const store = useFeatureRequestsStore()
+const featureRequestPermissions = usePagePermissions('feature-requests')
+const canCreateFeatureRequests = computed(() => featureRequestPermissions.canCreate.value)
+const canEditFeatureRequests = computed(() => featureRequestPermissions.canEdit.value)
+const FEATURE_REQUESTS_VIEW_MODE_KEY = STORAGE_KEYS.views.featureRequests.viewMode
 
 const searchQuery = ref('')
 const activeTab = ref<'all' | 'open' | 'planned' | 'completed' | 'declined'>('all')
-const viewMode = ref<'table' | 'card'>(localStorage.getItem('fr-view-mode') as any || 'card')
+const viewMode = ref<'table' | 'card'>(localStorage.getItem(FEATURE_REQUESTS_VIEW_MODE_KEY) as any || 'card')
 const sortField = ref<string>('upvoteCount')
 const sortDir = ref<'asc' | 'desc'>('desc')
 const showCreateDialog = ref(false)
@@ -30,14 +36,31 @@ const newTags = ref<string[]>([])
 const newTagInput = ref('')
 const submitting = ref(false)
 
-watch(viewMode, (v) => localStorage.setItem('fr-view-mode', v))
+watch(viewMode, (v) => localStorage.setItem(FEATURE_REQUESTS_VIEW_MODE_KEY, v))
+
+function activeProductId(): string {
+  return productStore.activeProduct.id || ''
+}
+
+async function refreshFeatureRequests() {
+  const productId = activeProductId()
+  if (!productId) return
+  await store.fetchAll(productId, 'votes', {
+    q: searchQuery.value.trim() || undefined,
+    limit: 60,
+  })
+}
 
 onMounted(() => {
-  store.fetchAll(productStore.activeProduct.name, 'votes')
+  refreshFeatureRequests()
 })
 
-watch(() => productStore.activeProduct.name, (p) => {
-  store.fetchAll(p, 'votes')
+watch(() => productStore.activeProduct.id, () => {
+  refreshFeatureRequests()
+})
+
+watch(searchQuery, () => {
+  refreshFeatureRequests()
 })
 
 const filteredItems = computed(() => {
@@ -83,9 +106,10 @@ const tabCounts = computed(() => ({
 
 // Upvote
 async function handleUpvote(id: string, e: Event) {
+  if (!canEditFeatureRequests.value) return
   e.stopPropagation()
   await store.toggleUpvote(id)
-  await store.fetchAll(productStore.activeProduct.name, 'votes')
+  await refreshFeatureRequests()
 }
 
 function isUpvotedByMe(item: any): boolean {
@@ -106,10 +130,13 @@ function removeTag(tag: string) {
 }
 
 async function handleCreate() {
+  if (!canCreateFeatureRequests.value) return
   if (!newTitle.value.trim()) return
+  const productId = activeProductId()
+  if (!productId) return
   submitting.value = true
   await store.create({
-    productId: productStore.activeProduct.name,
+    productId,
     title: newTitle.value.trim(),
     description: newDescription.value.trim() || null,
     category: newCategory.value,
@@ -177,7 +204,12 @@ function timeAgo(dateStr: string) {
           <h1 class="text-lg font-semibold text-gray-900">Feature Requests <span class="text-gray-400 font-normal">({{ store.items.length }})</span></h1>
         </div>
         <button
-          class="flex items-center gap-1.5 bg-[#4857FE] hover:bg-[#3E4BDE] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer"
+          class="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          :class="canCreateFeatureRequests
+            ? 'bg-[#4857FE] hover:bg-[#3E4BDE] text-white cursor-pointer'
+            : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+          :disabled="!canCreateFeatureRequests"
+          :title="featureRequestPermissions.deniedReason('create', 'feature requests') || 'New request'"
           @click="showCreateDialog = true"
         >
           <Plus :size="15" />
@@ -236,7 +268,15 @@ function timeAgo(dateStr: string) {
         </div>
         <p class="text-gray-500 text-sm font-medium mb-1">No feature requests yet</p>
         <p class="text-gray-400 text-xs mb-4">Submit a request to get started</p>
-        <button class="flex items-center gap-1.5 px-4 py-2 bg-[#4857FE] text-white text-sm font-medium rounded-lg hover:bg-[#3E4BDE] transition-colors cursor-pointer" @click="showCreateDialog = true">
+        <button
+          class="flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors"
+          :class="canCreateFeatureRequests
+            ? 'bg-[#4857FE] text-white hover:bg-[#3E4BDE] cursor-pointer'
+            : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+          :disabled="!canCreateFeatureRequests"
+          :title="featureRequestPermissions.deniedReason('create', 'feature requests') || 'New request'"
+          @click="showCreateDialog = true"
+        >
           <Plus :size="15" />
           New Request
         </button>
@@ -255,6 +295,8 @@ function timeAgo(dateStr: string) {
             :class="isUpvotedByMe(item)
               ? 'bg-[#4857FE]/10 border-[#4857FE]/20 text-[#4857FE]'
               : 'bg-gray-100 border-gray-200 text-gray-400 hover:bg-[#4857FE]/10 hover:text-[#4857FE]'"
+            :disabled="!canEditFeatureRequests"
+            :title="featureRequestPermissions.deniedReason('edit', 'feature request votes') || 'Upvote'"
             @click="handleUpvote(item.id, $event)"
           >
             <ThumbsUp v-if="isUpvotedByMe(item)" :size="18" class="text-[#4857FE]" />
@@ -278,7 +320,7 @@ function timeAgo(dateStr: string) {
 
             <!-- Title -->
             <div class="flex items-start gap-2 mb-1.5">
-              <FavoriteStar entity-type="feature_request" :entity-id="item.id" :product-id="productStore.activeProduct.name" />
+              <FavoriteStar entity-type="feature_request" :entity-id="item.id" :product-id="activeProductId()" />
               <h3 class="text-sm font-semibold text-gray-900 group-hover:text-[#4857FE] transition-colors line-clamp-2">{{ item.title }}</h3>
             </div>
 
@@ -351,6 +393,8 @@ function timeAgo(dateStr: string) {
                   :class="isUpvotedByMe(item)
                     ? 'border-[#4857FE] bg-[#4857FE]/5 text-[#4857FE]'
                     : 'border-gray-200 hover:border-[#4857FE] text-gray-400 hover:text-[#4857FE]'"
+                  :disabled="!canEditFeatureRequests"
+                  :title="featureRequestPermissions.deniedReason('edit', 'feature request votes') || 'Upvote'"
                   @click="handleUpvote(item.id, $event)"
                 >
                   <ChevronUp :size="14" />
@@ -360,7 +404,7 @@ function timeAgo(dateStr: string) {
               <!-- Title -->
               <td class="px-5 py-3.5">
                 <div class="flex items-center gap-2 min-w-0">
-                  <FavoriteStar entity-type="feature_request" :entity-id="item.id" :product-id="productStore.activeProduct.name" />
+                  <FavoriteStar entity-type="feature_request" :entity-id="item.id" :product-id="activeProductId()" />
                   <span class="text-sm font-medium text-gray-900 truncate">{{ item.title }}</span>
                 </div>
               </td>
@@ -444,7 +488,14 @@ function timeAgo(dateStr: string) {
 
             <div class="flex justify-end gap-2 pt-2">
               <button type="button" class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer" @click="showCreateDialog = false">Cancel</button>
-              <button type="submit" :disabled="!newTitle.trim() || submitting" class="px-4 py-2 text-sm font-medium bg-[#4857FE] hover:bg-[#3E4BDE] text-white rounded-lg transition-colors cursor-pointer disabled:opacity-50">
+              <button
+                type="submit"
+                :disabled="!newTitle.trim() || submitting || !canCreateFeatureRequests"
+                class="px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+                :class="canCreateFeatureRequests
+                  ? 'bg-[#4857FE] hover:bg-[#3E4BDE] text-white cursor-pointer'
+                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+              >
                 {{ submitting ? 'Submitting...' : 'Submit Request' }}
               </button>
             </div>

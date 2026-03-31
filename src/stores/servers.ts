@@ -1,18 +1,10 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { Server, CreateServerPayload, Environment } from '@/types/release'
-import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
-
-const API_BASE = '/api'
-
-function authHeaders() {
-  const authStore = useAuthStore()
-  return {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${authStore.token}`,
-  }
-}
+import { assertPageAction, ensureOk } from '@/lib/storeAuthz'
+import { apiFetch } from '@/lib/apiClient'
+import { buildProductScopedPath, resolveProductScope } from '@/lib/productScopeApi'
 
 export const useServersStore = defineStore('servers', () => {
   const servers = ref<Server[]>([])
@@ -20,14 +12,22 @@ export const useServersStore = defineStore('servers', () => {
   const error = ref<string | null>(null)
 
   async function fetchServers(environment?: Environment) {
-    const product = useProductStore().activeProduct.name
+    assertPageAction('integrations', 'read', 'servers')
+    const scope = resolveProductScope()
     loading.value = true
     error.value = null
     try {
-      let url = `${API_BASE}/servers?product=${encodeURIComponent(product)}`
-      if (environment) url += `&environment=${environment}`
-      const res = await fetch(url)
-      if (!res.ok) throw new Error('Failed to fetch servers')
+      if (!scope) {
+        servers.value = []
+        return
+      }
+      const res = await apiFetch(buildProductScopedPath(scope, '/servers'), {
+        token: useAuthStore().token,
+        query: {
+          environment,
+        },
+      })
+      await ensureOk(res, 'Failed to fetch servers')
       servers.value = await res.json()
     } catch (e) {
       error.value = (e as Error).message
@@ -38,12 +38,21 @@ export const useServersStore = defineStore('servers', () => {
 
   async function createServer(payload: CreateServerPayload): Promise<Server | null> {
     try {
-      const res = await fetch(`${API_BASE}/servers`, {
+      assertPageAction('integrations', 'create', 'servers')
+      const scope = resolveProductScope(payload.productId)
+      if (!scope) {
+        error.value = 'No active product selected'
+        return null
+      }
+      const res = await apiFetch(buildProductScopedPath(scope, '/servers'), {
         method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify(payload),
+        token: useAuthStore().token,
+        json: {
+          ...payload,
+          productId: scope.productId,
+        },
       })
-      if (!res.ok) throw new Error('Failed to create server')
+      await ensureOk(res, 'Failed to create server')
       const created = await res.json()
       await fetchServers()
       return created
@@ -55,12 +64,18 @@ export const useServersStore = defineStore('servers', () => {
 
   async function updateServer(id: string, payload: Partial<CreateServerPayload>) {
     try {
-      const res = await fetch(`${API_BASE}/servers/${id}`, {
+      assertPageAction('integrations', 'edit', 'servers')
+      const scope = resolveProductScope()
+      if (!scope) {
+        error.value = 'No active product selected'
+        return
+      }
+      const res = await apiFetch(buildProductScopedPath(scope, `/servers/${id}`), {
         method: 'PUT',
-        headers: authHeaders(),
-        body: JSON.stringify(payload),
+        token: useAuthStore().token,
+        json: payload,
       })
-      if (!res.ok) throw new Error('Failed to update server')
+      await ensureOk(res, 'Failed to update server')
       await fetchServers()
     } catch (e) {
       error.value = (e as Error).message
@@ -69,11 +84,17 @@ export const useServersStore = defineStore('servers', () => {
 
   async function deleteServer(id: string) {
     try {
-      const res = await fetch(`${API_BASE}/servers/${id}`, {
+      assertPageAction('integrations', 'delete', 'servers')
+      const scope = resolveProductScope()
+      if (!scope) {
+        error.value = 'No active product selected'
+        return
+      }
+      const res = await apiFetch(buildProductScopedPath(scope, `/servers/${id}`), {
         method: 'DELETE',
-        headers: authHeaders(),
+        token: useAuthStore().token,
       })
-      if (!res.ok) throw new Error('Failed to delete server')
+      await ensureOk(res, 'Failed to delete server')
       servers.value = servers.value.filter(s => s.id !== id)
     } catch (e) {
       error.value = (e as Error).message

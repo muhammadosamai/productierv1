@@ -10,8 +10,25 @@ import { useTestCyclesStore } from '@/stores/testCycles'
 import { useBacklogStore } from '@/stores/backlog'
 import { useAuthStore } from '@/stores/auth'
 import { useProductStore } from '@/stores/products'
+import { usePagePermissions } from '@/lib/pagePermissions'
+import { usersApi } from '@/lib/api'
+import { organizationTeamsApi } from '@/lib/apiClient'
 import draggable from 'vuedraggable'
 import type { TestCycle, TestCycleIssue, IssueSeverity, IssueStatus } from '@/types/testCycle'
+
+interface TeamUser {
+  id: string
+  name: string
+  email: string
+  role: string
+  avatar: string | null
+}
+
+interface OrganizationTeam {
+  id: string
+  name: string
+  key: string
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -19,6 +36,10 @@ const store = useTestCyclesStore()
 const backlogStore = useBacklogStore()
 const authStore = useAuthStore()
 const productStore = useProductStore()
+const testCyclePermissions = usePagePermissions('test-cycles')
+const canCreateTestCycleIssues = computed(() => testCyclePermissions.canCreate.value)
+const canEditTestCycles = computed(() => testCyclePermissions.canEdit.value)
+const canDeleteTestCycles = computed(() => testCyclePermissions.canDelete.value)
 
 const cycle = ref<TestCycle | null>(null)
 const loading = ref(true)
@@ -28,7 +49,11 @@ const activeView = ref<'kanban' | 'list'>('kanban')
 const showAddIssue = ref(false)
 const issueTitle = ref('')
 const issueSeverity = ref<IssueSeverity>('minor')
+const issueAssigneeUserId = ref('')
+const issueAssigneeTeamId = ref('')
 const addingIssue = ref(false)
+const teamUsers = ref<TeamUser[]>([])
+const organizationTeams = ref<OrganizationTeam[]>([])
 
 // Kanban columns
 interface ColumnMeta {
@@ -69,6 +94,7 @@ watch(() => cycle.value?.issues, (issues) => {
 }, { immediate: true, deep: true })
 
 async function onColumnChange(colKey: string, evt: any) {
+  if (!canEditTestCycles.value) return
   if (!evt.added || !cycle.value) return
   const issue = evt.added.element as TestCycleIssue
   const col = columnDefs.find(c => c.key === colKey)
@@ -79,34 +105,69 @@ async function onColumnChange(colKey: string, evt: any) {
   cycle.value = await store.fetchCycle(cycle.value.id)
 }
 
+async function fetchAssignmentTargets() {
+  const organizationId = productStore.activeProduct.organizationId
+  try {
+    const userPayload = await usersApi.list({ q: '' }, authStore.token)
+    teamUsers.value = Array.isArray(userPayload)
+      ? userPayload
+      : (Array.isArray(userPayload?.items) ? userPayload.items : [])
+  } catch {
+    teamUsers.value = []
+  }
+
+  if (!organizationId) {
+    organizationTeams.value = []
+    return
+  }
+  try {
+    const teamPayload = await organizationTeamsApi.list(organizationId, {}, authStore.token)
+    organizationTeams.value = Array.isArray(teamPayload)
+      ? teamPayload.map((team) => ({ id: team.id, name: team.name, key: team.key }))
+      : []
+  } catch {
+    organizationTeams.value = []
+  }
+}
+
 onMounted(async () => {
-  backlogStore.fetchStories(productStore.activeProduct.name)
-  const data = await store.fetchCycle(route.params.id as string)
+  backlogStore.fetchStories(productStore.activeProduct.id)
+  const [data] = await Promise.all([
+    store.fetchCycle(route.params.id as string),
+    fetchAssignmentTargets(),
+  ])
   cycle.value = data
   loading.value = false
 })
 
 async function addIssue() {
+  if (!canCreateTestCycleIssues.value) return
   if (!issueTitle.value.trim() || !cycle.value) return
   addingIssue.value = true
   await store.addIssue(cycle.value.id, {
     title: issueTitle.value.trim(),
     severity: issueSeverity.value,
+    assignedToUserId: issueAssigneeUserId.value || null,
+    assignedToTeamId: issueAssigneeTeamId.value || null,
   })
   issueTitle.value = ''
   issueSeverity.value = 'minor'
+  issueAssigneeUserId.value = ''
+  issueAssigneeTeamId.value = ''
   showAddIssue.value = false
   addingIssue.value = false
   cycle.value = await store.fetchCycle(cycle.value.id)
 }
 
 async function updateIssueStatus(issue: TestCycleIssue, status: IssueStatus) {
+  if (!canEditTestCycles.value) return
   if (!cycle.value) return
   await store.updateIssue(cycle.value.id, issue.id, { status })
   cycle.value = await store.fetchCycle(cycle.value.id)
 }
 
 async function deleteIssue(issue: TestCycleIssue) {
+  if (!canDeleteTestCycles.value) return
   if (!cycle.value) return
   await store.deleteIssue(cycle.value.id, issue.id)
   cycle.value = await store.fetchCycle(cycle.value.id)
@@ -193,7 +254,12 @@ const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status 
           </div>
         </div>
         <button
-          class="flex items-center gap-1.5 bg-[#4857FE] hover:bg-[#3E4BDE] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer"
+          class="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          :class="canCreateTestCycleIssues
+            ? 'bg-[#4857FE] hover:bg-[#3E4BDE] text-white cursor-pointer'
+            : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+          :disabled="!canCreateTestCycleIssues"
+          :title="testCyclePermissions.deniedReason('create', 'test cycle issues') || 'Report issue'"
           @click="showAddIssue = true"
         >
           <Plus :size="15" />
@@ -240,12 +306,12 @@ const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status 
           <h3 class="text-sm font-semibold text-gray-900">Report Issue</h3>
           <button class="text-gray-400 hover:text-gray-600 cursor-pointer" @click="showAddIssue = false"><X :size="16" /></button>
         </div>
-        <form @submit.prevent="addIssue" class="flex items-center gap-3">
+        <form @submit.prevent="addIssue" class="flex items-center gap-3 flex-wrap">
           <input
             v-model="issueTitle"
             placeholder="Issue title..."
             autofocus
-            class="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#4857FE] placeholder-gray-400"
+            class="min-w-[240px] flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#4857FE] placeholder-gray-400"
           />
           <select v-model="issueSeverity" class="text-xs border border-gray-200 rounded-lg px-2 py-2 outline-none focus:border-[#4857FE] bg-white">
             <option value="trivial">Trivial</option>
@@ -253,7 +319,22 @@ const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status 
             <option value="major">Major</option>
             <option value="critical">Critical</option>
           </select>
-          <button type="submit" :disabled="!issueTitle.trim() || addingIssue" class="text-sm font-medium text-white bg-[#4857FE] hover:bg-[#3E4BDE] px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50">
+          <select v-model="issueAssigneeUserId" class="text-xs border border-gray-200 rounded-lg px-2 py-2 outline-none focus:border-[#4857FE] bg-white">
+            <option value="">No assignee</option>
+            <option v-for="user in teamUsers" :key="user.id" :value="user.id">{{ user.name }}</option>
+          </select>
+          <select v-model="issueAssigneeTeamId" class="text-xs border border-gray-200 rounded-lg px-2 py-2 outline-none focus:border-[#4857FE] bg-white">
+            <option value="">No team</option>
+            <option v-for="team in organizationTeams" :key="team.id" :value="team.id">{{ team.name }}</option>
+          </select>
+          <button
+            type="submit"
+            :disabled="!issueTitle.trim() || addingIssue || !canCreateTestCycleIssues"
+            class="text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+            :class="canCreateTestCycleIssues
+              ? 'text-white bg-[#4857FE] hover:bg-[#3E4BDE] cursor-pointer'
+              : 'text-gray-400 bg-gray-100 cursor-not-allowed'"
+          >
             {{ addingIssue ? 'Adding...' : 'Add Issue' }}
           </button>
         </form>
@@ -281,7 +362,12 @@ const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status 
               </div>
               <button
                 v-if="col.hasAdd"
-                class="flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-[#4857FE] transition-colors px-2 py-1 rounded-md hover:bg-[#4857FE]/5 cursor-pointer"
+                class="flex items-center gap-1 text-xs font-medium transition-colors px-2 py-1 rounded-md"
+                :class="canCreateTestCycleIssues
+                  ? 'text-gray-400 hover:text-[#4857FE] hover:bg-[#4857FE]/5 cursor-pointer'
+                  : 'text-gray-300 cursor-not-allowed'"
+                :disabled="!canCreateTestCycleIssues"
+                :title="testCyclePermissions.deniedReason('create', 'test cycle issues') || 'Add issue'"
                 @click="showAddIssue = true"
               >
                 <Plus :size="13" />
@@ -296,6 +382,7 @@ const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status 
                 group="kanban-issues"
                 item-key="id"
                 :animation="200"
+                :disabled="!canEditTestCycles"
                 ghost-class="kanban-ghost"
                 drag-class="kanban-drag"
                 class="space-y-3 h-full min-h-[200px]"
@@ -311,7 +398,10 @@ const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status 
                         {{ issue.severity.charAt(0).toUpperCase() + issue.severity.slice(1) }}
                       </span>
                       <button
-                        class="p-1 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover/card:opacity-100 transition-all cursor-pointer"
+                        class="p-1 rounded opacity-0 group-hover/card:opacity-100 transition-all"
+                        :class="canDeleteTestCycles ? 'text-gray-300 hover:text-red-500 hover:bg-red-50 cursor-pointer' : 'text-gray-200 cursor-not-allowed'"
+                        :disabled="!canDeleteTestCycles"
+                        :title="testCyclePermissions.deniedReason('delete', 'test cycle issues') || 'Delete issue'"
                         @click.stop="deleteIssue(issue)"
                       >
                         <Trash2 :size="12" />
@@ -328,10 +418,15 @@ const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status 
 
                     <!-- Footer: reporter + date -->
                     <div class="flex items-center justify-between pt-2 border-t border-gray-100">
-                      <div v-if="issue.reportedByUser" class="flex items-center gap-1.5">
-                        <img v-if="issue.reportedByUser.avatar" :src="issue.reportedByUser.avatar" class="w-5 h-5 rounded-full object-cover" />
-                        <div v-else class="w-5 h-5 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[8px] font-semibold text-[#4857FE]">{{ issue.reportedByUser.name[0] }}</div>
-                        <span class="text-[10px] text-gray-500">{{ issue.reportedByUser.name.split(' ')[0] }}</span>
+                      <div class="min-w-0">
+                        <div v-if="issue.reportedByUser" class="flex items-center gap-1.5">
+                          <img v-if="issue.reportedByUser.avatar" :src="issue.reportedByUser.avatar" class="w-5 h-5 rounded-full object-cover" />
+                          <div v-else class="w-5 h-5 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[8px] font-semibold text-[#4857FE]">{{ issue.reportedByUser.name[0] }}</div>
+                          <span class="text-[10px] text-gray-500">{{ issue.reportedByUser.name.split(' ')[0] }}</span>
+                        </div>
+                        <div class="text-[10px] text-gray-400 truncate mt-1">
+                          {{ issue.assignedToUser?.name || issue.assignedToTeam?.name || 'Unassigned' }}
+                        </div>
                       </div>
                       <span class="text-[10px] text-gray-400">{{ formatDate(issue.createdAt) }}</span>
                     </div>
@@ -361,6 +456,7 @@ const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status 
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Severity</th>
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Reported By</th>
+                <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Assignee</th>
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Story</th>
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
                 <th class="w-10"></th>
@@ -383,8 +479,9 @@ const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status 
                 <td class="px-5 py-3.5">
                   <select
                     :value="issue.status"
-                    class="text-xs font-medium rounded-full px-2.5 py-1 outline-none cursor-pointer border-0 appearance-none"
+                    class="text-xs font-medium rounded-full px-2.5 py-1 outline-none border-0 appearance-none"
                     :class="issueStatusStyle(issue.status)"
+                    :disabled="!canEditTestCycles"
                     @change="updateIssueStatus(issue, ($event.target as HTMLSelectElement).value as IssueStatus)"
                   >
                     <option v-for="s in issueStatuses" :key="s" :value="s">{{ statusLabel(s) }}</option>
@@ -398,6 +495,9 @@ const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status 
                   </div>
                 </td>
                 <td class="px-5 py-3.5">
+                  <span class="text-sm text-gray-600">{{ issue.assignedToUser?.name || issue.assignedToTeam?.name || '—' }}</span>
+                </td>
+                <td class="px-5 py-3.5">
                   <span v-if="issue.story" class="text-xs text-[#4857FE] bg-[#4857FE]/8 px-1.5 py-0.5 rounded truncate max-w-[120px] inline-block">{{ issue.story.title }}</span>
                   <span v-else class="text-sm text-gray-400">—</span>
                 </td>
@@ -406,7 +506,10 @@ const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status 
                 </td>
                 <td class="px-5 py-3.5">
                   <button
-                    class="p-1 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+                    class="p-1 rounded opacity-0 group-hover:opacity-100 transition-all"
+                    :class="canDeleteTestCycles ? 'text-gray-300 hover:text-red-500 hover:bg-red-50 cursor-pointer' : 'text-gray-200 cursor-not-allowed'"
+                    :disabled="!canDeleteTestCycles"
+                    :title="testCyclePermissions.deniedReason('delete', 'test cycle issues') || 'Delete issue'"
                     @click="deleteIssue(issue)"
                   >
                     <Trash2 :size="13" />

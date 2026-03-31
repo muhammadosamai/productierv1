@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">NovaForge demo logo</title>
+  <desc id="desc">Neutral geometric logo for seeded demo product profiles.</desc>
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1f2937" />
+      <stop offset="100%" stop-color="#4f46e5" />
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="40" fill="url(#g)" />
+  <path d="M62 182V74h24l54 70V74h24v108h-23L86 112v70z" fill="#ffffff" />
+  <circle cx="196" cy="86" r="20" fill="#a5b4fc" />
+</svg>

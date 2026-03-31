@@ -1,80 +1,113 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
-import { userSettings, users } from '../db/schema'
+import { userSettings } from '../db/schema'
 import { eq, and } from 'drizzle-orm'
-import { jwt } from '@elysiajs/jwt'
+import { authPlugin } from '../plugins/auth'
+import { requireAuth } from '../lib/authz'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
+function isSettingsStorageUnavailable(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const maybeErr = error as { code?: string; message?: string }
+  const normalizedCode = (maybeErr.code || '').toUpperCase()
+  if ([
+    '42P01', // relation does not exist
+    'ECONNREFUSED',
+    'ENOTFOUND',
+    'ETIMEDOUT',
+    'EHOSTUNREACH',
+    'ECONNRESET',
+  ].includes(normalizedCode)) {
+    return true
+  }
 
-async function getUserFromHeader(jwtVerify: any, headers: Record<string, string | undefined>) {
-  const authHeader = headers.authorization
-  if (!authHeader?.startsWith('Bearer ')) return null
-  const token = authHeader.replace('Bearer ', '')
-  const payload = await jwtVerify(token)
-  if (!payload?.userId) return null
-  const user = await db.query.users.findFirst({ where: eq(users.id, payload.userId as string) })
-  return user || null
+  const message = (maybeErr.message || '').toLowerCase()
+  return message.includes('relation "user_settings" does not exist')
+    || message.includes('connection refused')
+    || message.includes('connection terminated')
+    || message.includes('terminating connection')
 }
 
 export const settingsRoutes = new Elysia({ prefix: '/api/settings' })
-  .use(jwt({ name: 'jwt', secret: JWT_SECRET }))
+  .use(authPlugin)
 
   // GET /api/settings/:key — Get a single setting by key
   .get('/:key', async ({ params: { key }, jwt: jwtInstance, headers, set }) => {
-    const user = await getUserFromHeader(jwtInstance.verify, headers)
-    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+    const user = await requireAuth(jwtInstance.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
 
-    const setting = await db.query.userSettings.findFirst({
-      where: and(
-        eq(userSettings.userId, user.id),
-        eq(userSettings.key, key),
-      ),
-    })
+    try {
+      const setting = await db.query.userSettings.findFirst({
+        where: and(
+          eq(userSettings.userId, user.id),
+          eq(userSettings.key, key),
+        ),
+      })
 
-    return { key, value: setting?.value ?? null }
+      return { key, value: setting?.value ?? null }
+    } catch (error) {
+      if (!isSettingsStorageUnavailable(error)) throw error
+      console.warn('[settings] Falling back to null for key lookup.', { key, userId: user.id, error })
+      return { key, value: null }
+    }
   })
 
   // GET /api/settings — Get all settings for the current user
   .get('/', async ({ jwt: jwtInstance, headers, set }) => {
-    const user = await getUserFromHeader(jwtInstance.verify, headers)
-    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+    const user = await requireAuth(jwtInstance.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
 
-    const settings = await db.select()
-      .from(userSettings)
-      .where(eq(userSettings.userId, user.id))
+    try {
+      const settings = await db.select()
+        .from(userSettings)
+        .where(eq(userSettings.userId, user.id))
 
-    const result: Record<string, any> = {}
-    for (const s of settings) {
-      result[s.key] = s.value
+      const result: Record<string, any> = {}
+      for (const s of settings) {
+        result[s.key] = s.value
+      }
+      return result
+    } catch (error) {
+      if (!isSettingsStorageUnavailable(error)) throw error
+      console.warn('[settings] Falling back to empty settings map.', { userId: user.id, error })
+      return {}
     }
-    return result
   })
 
   // PUT /api/settings/:key — Upsert a setting
   .put('/:key', async ({ params: { key }, body, jwt: jwtInstance, headers, set }) => {
-    const user = await getUserFromHeader(jwtInstance.verify, headers)
-    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+    const user = await requireAuth(jwtInstance.verify, headers, set)
+    if (!user) return { error: 'Unauthorized' }
 
-    const existing = await db.query.userSettings.findFirst({
-      where: and(
-        eq(userSettings.userId, user.id),
-        eq(userSettings.key, key),
-      ),
-    })
+    // Local schemas may keep user_settings.value as NOT NULL. Normalize null writes
+    // to an empty string to avoid surfacing 500s to the UI.
+    const normalizedValue = body.value === null ? '' : body.value
 
-    if (existing) {
-      await db.update(userSettings)
-        .set({ value: body.value, updatedAt: new Date() })
-        .where(eq(userSettings.id, existing.id))
-    } else {
-      await db.insert(userSettings).values({
-        userId: user.id,
-        key,
-        value: body.value,
+    try {
+      const existing = await db.query.userSettings.findFirst({
+        where: and(
+          eq(userSettings.userId, user.id),
+          eq(userSettings.key, key),
+        ),
       })
-    }
 
-    return { key, value: body.value }
+      if (existing) {
+        await db.update(userSettings)
+          .set({ value: normalizedValue, updatedAt: new Date() })
+          .where(eq(userSettings.id, existing.id))
+      } else {
+        await db.insert(userSettings).values({
+          userId: user.id,
+          key,
+          value: normalizedValue,
+        })
+      }
+
+      return { key, value: normalizedValue }
+    } catch (error) {
+      if (!isSettingsStorageUnavailable(error)) throw error
+      console.warn('[settings] Persist skipped because storage is unavailable.', { key, userId: user.id, error })
+      return { key, value: normalizedValue, persisted: false }
+    }
   }, {
     body: t.Object({
       value: t.Any(),

@@ -5,15 +5,18 @@ import {
   Loader2, ArrowLeft, Pencil, Check, X, Plus, MoreHorizontal,
   MessageSquare, AlertTriangle, Search,
   Palette, Code2, TestTube2, Eye, FlaskConical, Wrench, FileText, Rocket, Link2,
-  CalendarDays, ListChecks,
+  CalendarDays, ListChecks, Target, ShieldCheck, AlertOctagon,
 } from 'lucide-vue-next'
 import { useDeliveriesStore } from '@/stores/deliveries'
 import { useBacklogStore } from '@/stores/backlog'
-import { useProductStore } from '@/stores/products'
-import { useAuthStore } from '@/stores/auth'
+import { useInitiativesStore } from '@/stores/initiatives'
+import { usePagePermissions } from '@/lib/pagePermissions'
+import { useDomainOptions } from '@/composables/useDomainOptions'
+import { useDomainPresentation } from '@/composables/useDomainPresentation'
+import { useOrganizationMembers } from '@/composables/useOrganizationMembers'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import type { Delivery, DeliveryStatus } from '@/types/delivery'
-import type { Task, TaskStatus, ItemType, TaskPriority } from '@/types/backlog'
+import type { Task, TaskStatus, TaskPriority } from '@/types/backlog'
 import draggable from 'vuedraggable'
 import DeliveryTimeline from '@/components/delivery/DeliveryTimeline.vue'
 import DeliveryList from '@/components/delivery/DeliveryList.vue'
@@ -23,8 +26,11 @@ const route = useRoute()
 const router = useRouter()
 const deliveriesStore = useDeliveriesStore()
 const backlogStore = useBacklogStore()
-const productStore = useProductStore()
-const authStore = useAuthStore()
+const initiativesStore = useInitiativesStore()
+const deliveryPermissions = usePagePermissions('deliveries')
+const canEditDeliveries = computed(() => deliveryPermissions.canEdit.value)
+const domainPresentation = useDomainPresentation()
+const { deliveryStatusOptions } = useDomainOptions()
 
 const delivery = ref<Delivery | null>(null)
 const loading = ref(true)
@@ -35,6 +41,8 @@ const activeView = ref<'kanban' | 'timeline' | 'list'>('kanban')
 // Task detail panel
 const selectedTask = ref<Task | null>(null)
 const showTaskPanel = ref(false)
+const editingInitiatives = ref(false)
+const initiativeSearch = ref('')
 
 function openTaskDetail(task: Task) {
   selectedTask.value = task
@@ -66,29 +74,15 @@ const titleInputRef = ref<HTMLInputElement | null>(null)
 const descriptionInputRef = ref<HTMLTextAreaElement | null>(null)
 
 // Team members for resolving assignee avatars
-interface TeamUser {
-  id: string
-  name: string
-  email: string
-  avatar: string | null
-}
-const teamMembers = ref<TeamUser[]>([])
+const memberDirectory = useOrganizationMembers()
+const teamMembers = memberDirectory.members
 
 async function fetchTeamMembers() {
-  try {
-    const res = await fetch(`/api/auth/users?q=`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    if (res.ok) {
-      teamMembers.value = await res.json()
-    }
-  } catch {
-    teamMembers.value = []
-  }
+  await memberDirectory.loadMembers('')
 }
 
-function getUserById(id: string): TeamUser | undefined {
-  return teamMembers.value.find(u => u.id === id)
+function getUserById(id: string) {
+  return memberDirectory.getMemberById(id)
 }
 
 // Close dropdowns on outside click
@@ -108,6 +102,7 @@ onMounted(async () => {
     loadDelivery(route.params.id as string),
     fetchTeamMembers(),
     backlogStore.fetchStories(),
+    initiativesStore.fetchInitiatives(),
   ])
   document.addEventListener('click', handleGlobalClick)
 })
@@ -119,6 +114,8 @@ onUnmounted(() => {
 watch(() => route.params.id, (newId) => {
   if (newId) {
     editingField.value = null
+    editingInitiatives.value = false
+    initiativeSearch.value = ''
     loadDelivery(newId as string)
   }
 })
@@ -134,7 +131,7 @@ interface ColumnMeta {
 
 const columnDefs: ColumnMeta[] = [
   { key: 'todo', label: 'To-Do', color: '#c4c4c4', status: null, hasAdd: true },
-  { key: 'in_progress', label: 'On Progress', color: '#fdab3d', status: 'in_progress', hasAdd: true },
+  { key: 'in_progress', label: 'In Progress', color: '#fdab3d', status: 'in_progress', hasAdd: true },
   { key: 'in_review', label: 'In Review', color: '#579bfc', status: 'in_review', hasAdd: true },
   { key: 'done', label: 'Done', color: '#00c875', status: 'done' },
   { key: 'others', label: 'Others', color: '#e2445c', status: null },
@@ -159,6 +156,34 @@ const filterLabel = computed(() => {
   const user = getUserById(filterUserId.value)
   return user?.name || 'Unknown'
 })
+
+const selectedInitiativeIds = computed(() => (delivery.value?.initiatives || []).map((initiative) => initiative.id))
+const filteredInitiativeOptions = computed(() => {
+  const query = initiativeSearch.value.trim().toLowerCase()
+  if (!query) return initiativesStore.initiatives
+  return initiativesStore.initiatives.filter((initiative) => initiative.title.toLowerCase().includes(query))
+})
+const deliveryHealth = computed(() => delivery.value?.healthSummary || null)
+
+async function toggleDeliveryInitiative(initiativeId: string) {
+  if (!canEditDeliveries.value || !delivery.value) return
+  const current = new Set(selectedInitiativeIds.value)
+  if (current.has(initiativeId)) {
+    current.delete(initiativeId)
+  } else {
+    current.add(initiativeId)
+  }
+  await deliveriesStore.updateDelivery(delivery.value.id, {
+    initiativeIds: [...current],
+  })
+  delivery.value = await deliveriesStore.fetchDelivery(delivery.value.id)
+}
+
+function confidenceStyle(confidenceBand: string | undefined) {
+  if (confidenceBand === 'high') return 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+  if (confidenceBand === 'medium') return 'bg-amber-50 text-amber-700 border border-amber-200'
+  return 'bg-red-50 text-red-700 border border-red-200'
+}
 
 function selectFilter(userId: string) {
   filterUserId.value = userId
@@ -199,6 +224,7 @@ watch([() => delivery.value?.tasks, filterUserId], ([tasks]) => {
 const isDragging = ref(false)
 
 async function onColumnChange(colKey: string, evt: any) {
+  if (!canEditDeliveries.value) return
   // Only handle the "added" event (task dropped into this column)
   if (!evt.added) return
 
@@ -231,6 +257,7 @@ async function onColumnChange(colKey: string, evt: any) {
 
 // Timeline drag: update task due date
 async function onTaskDueChange(taskId: string, dueAt: string) {
+  if (!canEditDeliveries.value) return
   await backlogStore.updateTask(taskId, { dueAt })
   if (delivery.value) {
     delivery.value = await deliveriesStore.fetchDelivery(delivery.value.id)
@@ -279,6 +306,7 @@ const filteredAvailableTasks = computed(() => {
 })
 
 async function addTaskToDelivery(taskId: string) {
+  if (!canEditDeliveries.value) return
   if (!delivery.value) return
   await backlogStore.updateTask(taskId, { deliveryId: delivery.value.id } as any)
   delivery.value = await deliveriesStore.fetchDelivery(delivery.value.id)
@@ -286,12 +314,14 @@ async function addTaskToDelivery(taskId: string) {
 }
 
 function openTaskPicker() {
+  if (!canEditDeliveries.value) return
   taskSearchQuery.value = ''
   showTaskPicker.value = true
   backlogStore.fetchStories()
 }
 
 async function removeTaskFromDelivery(taskId: string) {
+  if (!canEditDeliveries.value) return
   if (!delivery.value) return
   await backlogStore.updateTask(taskId, { deliveryId: null } as any)
   delivery.value = await deliveriesStore.fetchDelivery(delivery.value.id)
@@ -300,6 +330,7 @@ async function removeTaskFromDelivery(taskId: string) {
 
 // Delivery edit helpers
 async function updateField(field: string, value: any) {
+  if (!canEditDeliveries.value) return
   if (!delivery.value) return
   await deliveriesStore.updateDelivery(delivery.value.id, { [field]: value })
   delivery.value = await deliveriesStore.fetchDelivery(delivery.value.id)
@@ -307,6 +338,7 @@ async function updateField(field: string, value: any) {
 }
 
 function startEditTitle() {
+  if (!canEditDeliveries.value) return
   if (!delivery.value) return
   editTitle.value = delivery.value.title
   editingField.value = 'title'
@@ -322,6 +354,7 @@ function saveTitle() {
 }
 
 function startEditDescription() {
+  if (!canEditDeliveries.value) return
   if (!delivery.value) return
   editDescription.value = stripHtml(delivery.value.description || '')
   editingField.value = 'description'
@@ -343,33 +376,33 @@ function stripHtml(html: string) {
 }
 
 function updateStatus(status: DeliveryStatus) {
+  if (!canEditDeliveries.value) return
   updateField('status', status)
 }
 
 // Delivery status styling
-const deliveryStatuses: { value: DeliveryStatus; label: string; color: string }[] = [
-  { value: 'initialized', label: 'Initialized', color: 'bg-[#ff69b4]' },
-  { value: 'in_progress', label: 'In Progress', color: 'bg-[#fdab3d]' },
-  { value: 'overdue', label: 'Overdue', color: 'bg-[#e2445c]' },
-  { value: 'blocked', label: 'Blocked', color: 'bg-[#a25ddc]' },
-  { value: 'completed', label: 'Completed', color: 'bg-[#00c875]' },
-  { value: 'archived', label: 'Archived', color: 'bg-[#c4c4c4]' },
-]
+const deliveryStatuses = computed(() => deliveryStatusOptions.value.map((option) => ({
+  value: option.value,
+  label: option.label || domainPresentation.enumLabel(option.value),
+  color: option.value === 'initialized'
+    ? 'bg-[#ff69b4]'
+    : option.value === 'in_progress'
+      ? 'bg-[#fdab3d]'
+      : option.value === 'overdue'
+        ? 'bg-[#e2445c]'
+        : option.value === 'blocked'
+          ? 'bg-[#a25ddc]'
+          : option.value === 'completed'
+            ? 'bg-[#00c875]'
+            : 'bg-[#c4c4c4]',
+})))
 
 function deliveryStatusStyle(status: string) {
-  switch (status) {
-    case 'initialized': return 'bg-[#ff69b4]/15 text-[#ff69b4] border border-[#ff69b4]/30'
-    case 'in_progress': return 'bg-[#fdab3d]/15 text-[#d48806] border border-[#fdab3d]/30'
-    case 'overdue': return 'bg-[#e2445c]/15 text-[#e2445c] border border-[#e2445c]/30'
-    case 'blocked': return 'bg-[#a25ddc]/15 text-[#a25ddc] border border-[#a25ddc]/30'
-    case 'completed': return 'bg-[#00c875]/15 text-[#00a65a] border border-[#00c875]/30'
-    case 'archived': return 'bg-gray-100 text-gray-500 border border-gray-200'
-    default: return 'bg-gray-100 text-gray-500 border border-gray-200'
-  }
+  return domainPresentation.deliveryStatusStyle(status)
 }
 
 function statusLabel(status: string) {
-  return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return domainPresentation.enumLabel(status)
 }
 
 // Task styling
@@ -447,7 +480,7 @@ const typeIcons: Record<string, any> = {
 }
 
 function typeLabel(type: string) {
-  return type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return domainPresentation.enumLabel(type)
 }
 
 function progressBarColor(status: string) {
@@ -520,7 +553,11 @@ function taskShortId(task: Task) {
             </div>
             <h1
               v-else
-              class="text-xl font-semibold text-gray-900 cursor-pointer hover:text-[#4857FE] transition-colors group/title shrink-0"
+              class="text-xl font-semibold transition-colors group/title shrink-0"
+              :class="canEditDeliveries
+                ? 'text-gray-900 cursor-pointer hover:text-[#4857FE]'
+                : 'text-gray-900 cursor-not-allowed'"
+              :title="deliveryPermissions.deniedReason('edit', 'deliveries') || 'Edit title'"
               @click="startEditTitle"
             >
               {{ delivery.title }}
@@ -531,8 +568,10 @@ function taskShortId(task: Task) {
             <Popover>
               <PopoverTrigger as-child>
                 <button
-                  class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+                  class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold shrink-0 transition-opacity"
                   :class="deliveryStatusStyle(delivery.status)"
+                  :disabled="!canEditDeliveries"
+                  :title="deliveryPermissions.deniedReason('edit', 'deliveries') || 'Update status'"
                 >
                   {{ statusLabel(delivery.status) }}
                 </button>
@@ -544,6 +583,7 @@ function taskShortId(task: Task) {
                   :key="s.value"
                   class="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors"
                   :class="delivery.status === s.value ? 'bg-[#4857FE]/10 text-[#4857FE] font-medium' : 'text-gray-600 hover:bg-gray-50'"
+                  :disabled="!canEditDeliveries"
                   @click="updateStatus(s.value)"
                 >
                   <span class="w-3 h-3 rounded-full" :class="s.color"></span>
@@ -603,13 +643,121 @@ function taskShortId(task: Task) {
           </div>
           <p
             v-else
-            class="text-sm cursor-pointer hover:text-[#4857FE] transition-colors group/desc"
+            class="text-sm transition-colors group/desc"
             :class="delivery.description ? 'text-gray-500' : 'text-gray-400 italic'"
+            :title="deliveryPermissions.deniedReason('edit', 'deliveries') || 'Edit description'"
             @click="startEditDescription"
           >
             {{ delivery.description ? stripHtml(delivery.description) : 'Click to add a description...' }}
             <Pencil :size="11" class="inline ml-1 opacity-0 group-hover/desc:opacity-40 transition-opacity" />
           </p>
+        </div>
+      </div>
+
+      <div class="bg-white px-8 py-4 border-b border-gray-100">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <div class="rounded-xl border border-gray-200 bg-white p-3">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wide flex items-center gap-1.5">
+                <Target :size="13" class="text-gray-400" />
+                Initiatives
+              </h3>
+              <button
+                class="text-[11px] font-medium"
+                :class="canEditDeliveries ? 'text-[#4857FE] hover:text-[#3E4BDE]' : 'text-gray-300 cursor-not-allowed'"
+                :disabled="!canEditDeliveries"
+                :title="deliveryPermissions.deniedReason('edit', 'deliveries') || 'Edit initiatives'"
+                @click="editingInitiatives = !editingInitiatives"
+              >
+                {{ editingInitiatives ? 'Done' : 'Edit' }}
+              </button>
+            </div>
+            <div v-if="delivery.initiatives && delivery.initiatives.length > 0" class="flex flex-wrap gap-1.5 mb-2">
+              <router-link
+                v-for="initiative in delivery.initiatives"
+                :key="initiative.id"
+                :to="`/initiatives/${initiative.id}`"
+                class="inline-flex items-center px-2 py-1 rounded-md text-[11px] bg-[#4857FE]/10 text-[#4857FE] hover:bg-[#4857FE]/15"
+              >
+                {{ initiative.title }}
+              </router-link>
+            </div>
+            <p v-else class="text-xs text-gray-400 mb-2">No initiatives linked yet.</p>
+            <div v-if="editingInitiatives" class="space-y-2 border-t border-gray-100 pt-2 mt-2">
+              <input
+                v-model="initiativeSearch"
+                class="w-full text-xs border border-gray-200 rounded-md px-2 py-1.5 outline-none focus:border-[#4857FE]"
+                placeholder="Filter initiatives..."
+              />
+              <div class="max-h-[140px] overflow-y-auto space-y-1 pr-1">
+                <button
+                  v-for="initiative in filteredInitiativeOptions"
+                  :key="initiative.id"
+                  class="w-full flex items-center justify-between text-left px-2 py-1.5 rounded-md text-xs transition-colors"
+                  :class="selectedInitiativeIds.includes(initiative.id) ? 'bg-[#4857FE]/10 text-[#4857FE]' : 'hover:bg-gray-50 text-gray-600'"
+                  @click="toggleDeliveryInitiative(initiative.id)"
+                >
+                  <span class="truncate">{{ initiative.title }}</span>
+                  <Check v-if="selectedInitiativeIds.includes(initiative.id)" :size="12" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-xl border border-gray-200 bg-white p-3">
+            <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wide flex items-center gap-1.5 mb-2">
+              <Link2 :size="13" class="text-gray-400" />
+              Linked Releases
+            </h3>
+            <div v-if="delivery.linkedReleases && delivery.linkedReleases.length > 0" class="space-y-1.5">
+              <router-link
+                v-for="release in delivery.linkedReleases"
+                :key="release.id"
+                :to="`/releases/${release.id}`"
+                class="flex items-center justify-between rounded-md border border-gray-100 px-2.5 py-1.5 hover:bg-gray-50"
+              >
+                <span class="text-xs font-medium text-gray-700 truncate">{{ release.title }}</span>
+                <span class="text-[10px] text-gray-500 shrink-0">{{ release.version || release.status }}</span>
+              </router-link>
+            </div>
+            <p v-else class="text-xs text-gray-400">No linked releases for this delivery.</p>
+          </div>
+
+          <div class="rounded-xl border border-gray-200 bg-white p-3">
+            <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wide flex items-center gap-1.5 mb-2">
+              <ShieldCheck :size="13" class="text-gray-400" />
+              Delivery Health
+            </h3>
+            <div v-if="deliveryHealth" class="space-y-2">
+              <div class="inline-flex items-center px-2 py-1 rounded-md text-[11px] font-semibold" :class="confidenceStyle(deliveryHealth.confidenceBand)">
+                Confidence: {{ deliveryHealth.confidenceBand }}
+              </div>
+              <div class="grid grid-cols-3 gap-2 text-[11px]">
+                <div class="rounded-md bg-gray-50 px-2 py-1">
+                  <p class="text-gray-500">Blocked</p>
+                  <p class="font-semibold text-gray-700">{{ deliveryHealth.blockedTasks }}</p>
+                </div>
+                <div class="rounded-md bg-gray-50 px-2 py-1">
+                  <p class="text-gray-500">Overdue</p>
+                  <p class="font-semibold text-gray-700">{{ deliveryHealth.overdueTasks }}</p>
+                </div>
+                <div class="rounded-md bg-gray-50 px-2 py-1">
+                  <p class="text-gray-500">Variance</p>
+                  <p class="font-semibold" :class="deliveryHealth.scheduleVarianceDays > 0 ? 'text-red-600' : 'text-emerald-600'">
+                    {{ deliveryHealth.scheduleVarianceDays > 0 ? '+' : '' }}{{ deliveryHealth.scheduleVarianceDays }}d
+                  </p>
+                </div>
+              </div>
+              <div v-if="deliveryHealth.riskReasons.length > 0" class="space-y-1">
+                <p class="text-[11px] text-gray-500 flex items-center gap-1">
+                  <AlertOctagon :size="11" class="text-amber-500" />
+                  Risk signals
+                </p>
+                <p class="text-[11px] text-gray-600">{{ deliveryHealth.riskReasons.join(' · ') }}</p>
+              </div>
+            </div>
+            <p v-else class="text-xs text-gray-400">Health summary is not available.</p>
+          </div>
         </div>
       </div>
 
@@ -766,7 +914,12 @@ function taskShortId(task: Task) {
               </div>
               <button
                 v-if="col.hasAdd"
-                class="flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-[#4857FE] transition-colors px-2 py-1 rounded-md hover:bg-[#4857FE]/5 cursor-pointer"
+                class="flex items-center gap-1 text-xs font-medium transition-colors px-2 py-1 rounded-md"
+                :class="canEditDeliveries
+                  ? 'text-gray-400 hover:text-[#4857FE] hover:bg-[#4857FE]/5 cursor-pointer'
+                  : 'text-gray-300 cursor-not-allowed'"
+                :disabled="!canEditDeliveries"
+                :title="deliveryPermissions.deniedReason('edit', 'deliveries') || 'Add task to delivery'"
                 @click="openTaskPicker"
               >
                 <Plus :size="13" />
@@ -781,6 +934,7 @@ function taskShortId(task: Task) {
                 group="kanban"
                 item-key="id"
                 :animation="200"
+                :disabled="!canEditDeliveries"
                 ghost-class="kanban-ghost"
                 drag-class="kanban-drag"
                 class="space-y-3 h-full min-h-[200px]"
@@ -798,8 +952,10 @@ function taskShortId(task: Task) {
                       <div class="flex items-center justify-between mb-2">
                         <span class="text-[10px] font-mono text-gray-400">{{ taskShortId(task) }}</span>
                         <button
-                          class="text-gray-300 hover:text-red-500 opacity-0 group-hover/card:opacity-100 transition-all p-0.5 rounded hover:bg-red-50"
-                          title="Remove from delivery"
+                          class="opacity-0 group-hover/card:opacity-100 transition-all p-0.5 rounded"
+                          :class="canEditDeliveries ? 'text-gray-300 hover:text-red-500 hover:bg-red-50' : 'text-gray-200 cursor-not-allowed'"
+                          :disabled="!canEditDeliveries"
+                          :title="deliveryPermissions.deniedReason('edit', 'deliveries') || 'Remove from delivery'"
                           @click.stop="removeTaskFromDelivery(task.id)"
                         >
                           <X :size="12" />
@@ -860,7 +1016,7 @@ function taskShortId(task: Task) {
                               v-for="(userId, i) in task.assigneeUserIds.slice(0, 3)"
                               :key="userId"
                               class="w-6 h-6 rounded-full border-2 border-white overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold"
-                              :style="{ zIndex: 3 - i }"
+                              :style="{ zIndex: 3 - Number(i) }"
                               :title="getUserById(userId)?.name || userId"
                             >
                               <img v-if="getUserById(userId)?.avatar" :src="getUserById(userId)!.avatar!" class="w-6 h-6 rounded-full object-cover" />
@@ -939,7 +1095,9 @@ function taskShortId(task: Task) {
               <button
                 v-for="task in filteredAvailableTasks"
                 :key="task.id"
-                class="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0"
+                class="w-full flex items-start gap-3 px-4 py-3 text-left transition-colors border-b border-gray-50 last:border-0"
+                :class="canEditDeliveries ? 'hover:bg-gray-50 cursor-pointer' : 'text-gray-300 cursor-not-allowed'"
+                :disabled="!canEditDeliveries"
                 @click="addTaskToDelivery(task.id)"
               >
                 <Plus :size="14" class="text-[#4857FE] shrink-0 mt-0.5" />

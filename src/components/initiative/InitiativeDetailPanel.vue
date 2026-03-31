@@ -127,12 +127,11 @@ async function selectPriority(priority: InitiativePriority) {
 }
 
 // Leader
-async function selectLeader(name: string, avatar: string | null) {
+async function selectLeader(userId: string) {
   saving.value = true
   try {
     await initiativesStore.updateInitiative(props.initiative!.id, {
-      leader: name,
-      leaderAvatar: avatar || undefined,
+      leaderUserId: userId,
     })
     emit('updated')
   } catch {}
@@ -384,7 +383,7 @@ function formatDate(dateStr: string | null) {
                         v-for="user in filteredTeamMembers" :key="user.id"
                         class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
                         :class="initiative.leader === user.name ? 'text-[#4857FE] font-medium' : 'text-gray-600'"
-                        @click="selectLeader(user.name, user.avatar)"
+                        @click="selectLeader(user.id)"
                       >
                         <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
                           <img v-if="user.avatar" :src="user.avatar" class="w-6 h-6 rounded-full object-cover" />

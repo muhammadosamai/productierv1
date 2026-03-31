@@ -3,6 +3,7 @@ import { ref, watch, nextTick } from 'vue'
 import { useInitiativesStore } from '@/stores/initiatives'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
+import { usersApi } from '@/lib/api'
 import {
   Dialog,
   DialogContent,
@@ -50,6 +51,7 @@ const status = ref<InitiativeStatus>('planning')
 const dateRange = ref<{ start: string | null; end: string | null }>({ start: null, end: null })
 const leader = ref('')
 const leaderAvatar = ref<string | null>(null)
+const leaderUserId = ref<string | null>(null)
 const priority = ref<InitiativePriority>('medium')
 const submitting = ref(false)
 
@@ -64,12 +66,10 @@ let leaderSearchTimeout: ReturnType<typeof setTimeout> | null = null
 async function searchUsers(query: string) {
   leaderSearchLoading.value = true
   try {
-    const res = await fetch(`/api/auth/users?q=${encodeURIComponent(query)}`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    if (res.ok) {
-      leaderSearchResults.value = await res.json()
-    }
+    const payload = await usersApi.list({ q: query }, authStore.token)
+    leaderSearchResults.value = Array.isArray(payload)
+      ? payload
+      : (Array.isArray(payload?.items) ? payload.items : [])
   } catch {
     leaderSearchResults.value = []
   } finally {
@@ -88,6 +88,7 @@ function onLeaderInput() {
 function selectLeader(user: UserResult) {
   leader.value = user.name
   leaderAvatar.value = user.avatar
+  leaderUserId.value = user.id
   leaderSearchQuery.value = ''
   leaderSearchResults.value = []
 }
@@ -95,6 +96,7 @@ function selectLeader(user: UserResult) {
 function clearLeader() {
   leader.value = ''
   leaderAvatar.value = null
+  leaderUserId.value = null
   leaderSearchQuery.value = ''
   leaderSearchResults.value = []
   nextTick(() => leaderInputRef.value?.focus())
@@ -133,6 +135,7 @@ function resetForm() {
   dateRange.value = { start: null, end: null }
   leader.value = ''
   leaderAvatar.value = null
+  leaderUserId.value = null
   leaderSearchQuery.value = ''
   leaderSearchResults.value = []
   priority.value = 'medium'
@@ -155,10 +158,9 @@ async function handleSubmit() {
     status: status.value,
     periodStart: dateRange.value.start || undefined,
     periodEnd: dateRange.value.end || undefined,
-    leader: leader.value.trim() || undefined,
-    leaderAvatar: leaderAvatar.value || undefined,
+    leaderUserId: leaderUserId.value || undefined,
     priority: priority.value,
-    product: productStore.activeProduct.name,
+    productId: productStore.activeProduct.id,
   })
   submitting.value = false
   submitted.value = true

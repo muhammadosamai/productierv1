@@ -12,11 +12,15 @@ export interface Story {
   type: StoryType
   priority: StoryPriority
   status: StoryStatus
-  product: string
-  initiative: string | null
+  productId: string
+  initiativeId: string | null
+  initiative?: string | null
   delivery: string | null
-  owner: string | null
-  ownerAvatar: string | null
+  ownerUserId: string | null
+  ownerUser?: { id: string; name: string; email: string; avatar: string | null }
+  owner?: string | null
+  ownerAvatar?: string | null
+  sortOrder: number
   estimate: string | null
   acceptanceCriteria: string | null
   createdAt: string
@@ -40,6 +44,7 @@ export interface Task {
   productId: string
   initiativeId: string | null
   storyId: string
+  parentTaskId?: string | null
   deliveryId: string | null
   title: string
   description: string | null
@@ -47,8 +52,11 @@ export interface Task {
   priority: TaskPriority
   type: TaskType | null
   ownerUserId: string | null
+  ownerTeamId?: string | null
   assigneeUserIds: string[] | null
+  assigneeTeamIds?: string[] | null
   reviewerUserIds: string[] | null
+  reviewerTeamIds?: string[] | null
   createdByUserId: string
   estimateValue: number | null
   dependent: string[] | null
@@ -87,17 +95,17 @@ export interface TaskAttachment {
 
 export interface CreateStoryPayload {
   title: string
-  description?: string
+  description?: string | null
   type?: StoryType
   priority?: StoryPriority
   status?: StoryStatus
-  product?: string
-  initiative?: string
-  delivery?: string
-  owner?: string
-  ownerAvatar?: string | null
-  estimate?: string
-  acceptanceCriteria?: string
+  productId?: string
+  initiativeId?: string | null
+  initiative?: string | null
+  delivery?: string | null
+  ownerUserId?: string | null
+  estimate?: string | null
+  acceptanceCriteria?: string | null
 }
 
 export interface CreateTaskPayload {
@@ -106,9 +114,13 @@ export interface CreateTaskPayload {
   status?: TaskStatus
   priority?: TaskPriority
   type?: TaskType | null
+  parentTaskId?: string | null
   ownerUserId?: string | null
+  ownerTeamId?: string | null
   assigneeUserIds?: string[] | null
+  assigneeTeamIds?: string[] | null
   reviewerUserIds?: string[] | null
+  reviewerTeamIds?: string[] | null
   estimateValue?: number | null
   dependent?: string[] | null
   blockedReason?: string | null

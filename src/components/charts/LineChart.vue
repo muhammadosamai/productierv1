@@ -10,7 +10,18 @@ Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Too
 
 const props = withDefaults(defineProps<{
   labels: string[]
-  datasets: { label: string; data: number[]; borderColor?: string; backgroundColor?: string; fill?: boolean; tension?: number; borderDash?: number[] }[]
+  datasets: {
+    label: string
+    data: Array<number | null>
+    borderColor?: string
+    backgroundColor?: string
+    fill?: boolean | string
+    tension?: number
+    borderDash?: number[]
+    pointRadius?: number
+    borderWidth?: number
+    spanGaps?: boolean
+  }[]
   height?: number
   showLegend?: boolean
   yTitle?: string
@@ -26,9 +37,10 @@ const chartData = computed(() => ({
     borderColor: ds.borderColor || '#4857FE',
     backgroundColor: ds.backgroundColor || (ds.fill ? 'rgba(72,87,254,0.08)' : 'transparent'),
     tension: ds.tension ?? 0.3,
-    pointRadius: 3,
+    pointRadius: ds.pointRadius ?? 3,
     pointHoverRadius: 5,
-    borderWidth: 2,
+    borderWidth: ds.borderWidth ?? 2,
+    spanGaps: ds.spanGaps ?? false,
   })),
 }))
 
@@ -36,11 +48,20 @@ const options = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   interaction: { mode: 'index' as const, intersect: false },
+  layout: { padding: { top: 4, right: 8, bottom: 0, left: 0 } },
   plugins: {
     legend: {
       display: props.showLegend && props.datasets.length > 1,
       position: 'top' as const,
-      labels: { usePointStyle: true, pointStyle: 'circle', padding: 16, font: { size: 11, family: 'Inter, system-ui, sans-serif' } },
+      align: 'start' as const,
+      labels: {
+        usePointStyle: true,
+        pointStyle: 'circle',
+        boxWidth: 8,
+        boxHeight: 8,
+        padding: 12,
+        font: { size: 11, family: 'Inter, system-ui, sans-serif' },
+      },
     },
     tooltip: {
       backgroundColor: '#1F2937',
@@ -53,7 +74,13 @@ const options = computed(() => ({
   scales: {
     x: {
       grid: { display: false },
-      ticks: { font: { size: 10, family: 'Inter, system-ui, sans-serif' }, color: '#9CA3AF' },
+      ticks: {
+        font: { size: 10, family: 'Inter, system-ui, sans-serif' },
+        color: '#9CA3AF',
+        maxRotation: 0,
+        autoSkip: true,
+        maxTicksLimit: 10,
+      },
     },
     y: {
       beginAtZero: true,

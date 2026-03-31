@@ -47,6 +47,34 @@ export interface AssetRelation {
   targetAsset?: Asset
 }
 
+export interface AssetRevision {
+  id: string
+  assetId: string
+  revisionNumber: number
+  title: string
+  description: string | null
+  content: string | null
+  status: AssetStatus
+  visibility: AssetVisibility
+  tags: string[] | null
+  changedByUserId: string
+  changeSummary: string | null
+  createdAt: string
+  changedByUser?: { id: string; name: string; email: string; avatar: string | null }
+}
+
+export interface AssetRevisionDiffLine {
+  type: 'context' | 'add' | 'remove'
+  line: string
+}
+
+export interface AssetRevisionDiff {
+  targetRevisionId: string
+  baseRevisionId: string | null
+  fields: Array<{ field: string; from: string | null; to: string | null }>
+  contentDiff: AssetRevisionDiffLine[]
+}
+
 export interface CreateAssetPayload {
   productId: string
   assetTypeId: string
@@ -59,6 +87,7 @@ export interface CreateAssetPayload {
   tags?: string[] | null
   parentId?: string | null
   sortOrder?: number
+  changeSummary?: string
 }
 
 export interface CreateAssetTypePayload {

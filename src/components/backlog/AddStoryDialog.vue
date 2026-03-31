@@ -4,6 +4,7 @@ import { useBacklogStore } from '@/stores/backlog'
 import { useProductStore } from '@/stores/products'
 import { useInitiativesStore } from '@/stores/initiatives'
 import { useAuthStore } from '@/stores/auth'
+import { usersApi } from '@/lib/api'
 import {
   Dialog,
   DialogContent,
@@ -87,8 +88,13 @@ const initiativeId = ref('')
 const requiredBy = ref<string | null>(null)
 const owner = ref('')
 const ownerAvatar = ref<string | null>(null)
+const ownerUserId = ref<string | null>(null)
 const submitting = ref(false)
 const submittingWithBreakdown = ref(false)
+const activeProductLogoFailed = ref(false)
+const showActiveProductLogo = computed(
+  () => Boolean(productStore.activeProduct.logo) && !activeProductLogoFailed.value,
+)
 
 // Sub-tasks for breakdown
 const showBreakdown = ref(false)
@@ -102,7 +108,12 @@ const ownerSearchLoading = ref(false)
 const selectedOwnerIndex = ref(-1)
 const ownerInputRef = ref<HTMLInputElement | null>(null)
 const showOwnerDropdown = ref(false)
+const ownerMouseDownOnDropdown = ref(false)
 let ownerSearchTimeout: ReturnType<typeof setTimeout> | null = null
+
+function onActiveProductLogoError(): void {
+  activeProductLogoFailed.value = true
+}
 
 // Initiative search
 const initiativeSearchQuery = ref('')
@@ -152,16 +163,28 @@ const typeColors: Record<string, string> = {
   documentation: 'text-[#a1a1aa]',
 }
 
+function storyTypeLabel(value: StoryType) {
+  switch (value) {
+    case 'feature': return 'Feature'
+    case 'bug': return 'Bug'
+    case 'improvement': return 'Improvement'
+    case 'technical_debt': return 'Technical Debt'
+    case 'research': return 'Research'
+    case 'infrastructure': return 'Infrastructure'
+    case 'testing': return 'Testing'
+    case 'documentation': return 'Documentation'
+    default: return value
+  }
+}
+
 // ---- Owner search methods ----
 async function searchOwners(query: string) {
   ownerSearchLoading.value = true
   try {
-    const res = await fetch(`/api/auth/users?q=${encodeURIComponent(query)}`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    if (res.ok) {
-      ownerSearchResults.value = await res.json()
-    }
+    const payload = await usersApi.list({ q: query }, authStore.token)
+    ownerSearchResults.value = Array.isArray(payload)
+      ? payload
+      : (Array.isArray(payload?.items) ? payload.items : [])
   } catch {
     ownerSearchResults.value = []
   } finally {
@@ -181,6 +204,7 @@ function onOwnerInput() {
 function selectOwner(user: UserResult) {
   owner.value = user.name
   ownerAvatar.value = user.avatar
+  ownerUserId.value = user.id
   ownerSearchQuery.value = ''
   ownerSearchResults.value = []
   showOwnerDropdown.value = false
@@ -189,6 +213,7 @@ function selectOwner(user: UserResult) {
 function clearOwner() {
   owner.value = ''
   ownerAvatar.value = null
+  ownerUserId.value = null
   ownerSearchQuery.value = ''
   ownerSearchResults.value = []
   nextTick(() => ownerInputRef.value?.focus())
@@ -337,6 +362,7 @@ function resetForm() {
   calendarValue.value = undefined
   owner.value = ''
   ownerAvatar.value = null
+  ownerUserId.value = null
   ownerSearchQuery.value = ''
   ownerSearchResults.value = []
   showOwnerDropdown.value = false
@@ -352,6 +378,17 @@ watch(open, (val) => {
     resetForm()
     submitted.value = false
   }
+  if (val) {
+    activeProductLogoFailed.value = false
+  }
+})
+
+watch(() => productStore.activeProduct.id, () => {
+  activeProductLogoFailed.value = false
+})
+
+watch(() => productStore.activeProduct.logo, () => {
+  activeProductLogoFailed.value = false
 })
 
 async function handleSubmit(withBreakdown = false) {
@@ -369,11 +406,11 @@ async function handleSubmit(withBreakdown = false) {
     acceptanceCriteria: acceptanceCriteria.value.trim() || undefined,
     type: type.value,
     priority: priority.value,
-    product: productStore.activeProduct.name,
+    productId: productStore.activeProduct.id,
+    initiativeId: initiativeId.value || undefined,
     initiative: initiative.value.trim() || undefined,
     delivery: requiredBy.value || undefined,
-    owner: owner.value.trim() || undefined,
-    ownerAvatar: ownerAvatar.value || undefined,
+    ownerUserId: ownerUserId.value || undefined,
   })
 
   // Create subtasks if any
@@ -457,7 +494,10 @@ async function handleSubmit(withBreakdown = false) {
             <label class="text-sm font-medium text-gray-700">Type</label>
             <Select v-model="type">
               <SelectTrigger>
-                <SelectValue placeholder="Select type" />
+                <span class="inline-flex items-center gap-2">
+                  <component :is="typeIcons[type]" :size="14" :class="typeColors[type]" />
+                  {{ storyTypeLabel(type) }}
+                </span>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="feature">
@@ -553,8 +593,19 @@ async function handleSubmit(withBreakdown = false) {
           <div class="space-y-1.5">
             <label class="text-sm font-medium text-gray-700">Product</label>
             <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 bg-gray-50 text-sm text-gray-500 cursor-not-allowed">
-              <div v-if="productStore.activeProduct.logo" class="w-5 h-5 rounded overflow-hidden shrink-0">
-                <img :src="productStore.activeProduct.logo" class="w-full h-full object-cover" :alt="productStore.activeProduct.name" />
+              <div v-if="showActiveProductLogo" class="w-5 h-5 rounded overflow-hidden shrink-0">
+                <img
+                  :src="productStore.activeProduct.logo"
+                  class="w-full h-full object-cover"
+                  :alt="productStore.activeProduct.name"
+                  @error="onActiveProductLogoError"
+                />
+              </div>
+              <div
+                v-else
+                class="w-5 h-5 rounded bg-[#4857FE]/10 flex items-center justify-center text-[9px] font-bold text-[#4857FE] shrink-0"
+              >
+                {{ productStore.activeProduct.name.slice(0, 2).toUpperCase() }}
               </div>
               <span class="truncate">{{ productStore.activeProduct.name }}</span>
             </div>
@@ -592,7 +643,7 @@ async function handleSubmit(withBreakdown = false) {
               <div
                 v-if="showOwnerDropdown && ownerSearchResults.length > 0"
                 class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[200px] overflow-auto z-[100]"
-                @mousedown.prevent
+                @mousedown.prevent="ownerMouseDownOnDropdown = true"
               >
                 <button
                   v-for="(user, idx) in ownerSearchResults"

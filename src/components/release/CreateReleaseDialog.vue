@@ -4,6 +4,7 @@ import { useReleasesStore } from '@/stores/releases'
 import { useDeliveriesStore } from '@/stores/deliveries'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
+import { usersApi } from '@/lib/api'
 import {
   Dialog,
   DialogContent,
@@ -55,10 +56,10 @@ const selectedManager = ref<any>(null)
 async function searchManagers(query: string) {
   if (!query.trim()) { managerSearchResults.value = []; return }
   try {
-    const res = await fetch(`/api/auth/users?q=${encodeURIComponent(query)}`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    if (res.ok) managerSearchResults.value = await res.json()
+    const payload = await usersApi.list({ q: query }, authStore.token)
+    managerSearchResults.value = Array.isArray(payload)
+      ? payload
+      : (Array.isArray(payload?.items) ? payload.items : [])
   } catch { /* ignore */ }
 }
 
@@ -122,7 +123,7 @@ async function submit() {
       plannedAt: plannedAt.value || null,
       releaseManagerId: releaseManagerId.value,
       notes: notes.value || null,
-      productId: productStore.activeProduct.name,
+      productId: productStore.activeProduct.id,
       deliveryIds: selectedDeliveryIds.value,
     })
     if (result) {

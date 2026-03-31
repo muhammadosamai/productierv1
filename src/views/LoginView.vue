@@ -1,104 +1,139 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import AuthShell from '@/components/auth/AuthShell.vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Loader2, Eye, EyeOff } from 'lucide-vue-next'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 
 const email = ref('')
 const password = ref('')
 const showPassword = ref(false)
+const emailInputId = 'login-email'
+const passwordInputId = 'login-password'
+
+const passwordToggleLabel = computed(() => (
+  showPassword.value ? 'Hide password' : 'Show password'
+))
+
+const loginFeatureItems = [
+  {
+    title: 'Organization-wide visibility',
+    description: 'Coordinate delivery work with shared priorities, ownership, and transparent status.',
+  },
+  {
+    title: 'Execution at scale',
+    description: 'Align stories, tasks, initiatives, and releases across teams without process drift.',
+  },
+  {
+    title: 'Trusted access control',
+    description: 'Use role-aware permissions and secure defaults designed for enterprise collaboration.',
+  },
+]
 
 async function handleSubmit() {
   const success = await authStore.login(email.value, password.value)
   if (success) {
-    router.push('/')
+    const redirectPath = typeof route.query.redirect === 'string'
+      ? route.query.redirect
+      : '/'
+    router.push(redirectPath)
   }
 }
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center" style="background-color: #F8FAFF">
-    <div class="w-full max-w-[420px] px-6">
-      <!-- Logo & Title -->
-      <div class="text-center mb-8">
-        <img src="/logo.png" alt="Productier" class="w-14 h-14 rounded-2xl mb-4 shadow-lg shadow-[#7C5CFC]/20 mx-auto block" />
-        <h1 class="text-2xl font-bold text-gray-900">Welcome back</h1>
-        <p class="text-sm text-gray-500 mt-1">Sign in to your Productier account</p>
+  <AuthShell
+    title="Welcome back"
+    subtitle="Sign in to continue managing delivery across your organization."
+    hero-title="Run enterprise delivery with confidence"
+    hero-description="Productier keeps strategy, execution, and governance aligned from intake to release."
+    :feature-items="loginFeatureItems"
+  >
+    <form @submit.prevent="handleSubmit" class="space-y-5">
+      <p class="text-xs leading-relaxed text-muted-foreground">
+        Use your work email to access organization workspaces, planning context, and shared execution workflows.
+      </p>
+
+      <div
+        v-if="authStore.error"
+        role="alert"
+        aria-live="polite"
+        class="rounded-lg border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+      >
+        {{ authStore.error }}
       </div>
 
-      <!-- Form Card -->
-      <div class="bg-white rounded-2xl border border-gray-100 p-8 shadow-sm">
-        <form @submit.prevent="handleSubmit" class="space-y-5">
-          <!-- Error message -->
-          <div v-if="authStore.error" class="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
-            <p class="text-sm text-red-600">{{ authStore.error }}</p>
-          </div>
+      <div class="space-y-1.5">
+        <label :for="emailInputId" class="text-sm font-medium text-foreground">Work Email</label>
+        <Input
+          :id="emailInputId"
+          v-model="email"
+          type="email"
+          placeholder="you@company.com"
+          autocomplete="email"
+          autofocus
+          required
+          class="h-11 bg-background"
+        />
+      </div>
 
-          <!-- Email -->
-          <div class="space-y-1.5">
-            <label class="text-sm font-medium text-gray-700">Email</label>
-            <Input
-              v-model="email"
-              type="email"
-              placeholder="you@example.com"
-              autofocus
-              required
-            />
-          </div>
+      <div class="space-y-1.5">
+        <div class="flex items-center justify-between">
+          <label :for="passwordInputId" class="text-sm font-medium text-foreground">Password</label>
+          <router-link to="/forgot-password" class="text-xs font-medium text-primary hover:text-primary/80">
+            Forgot password?
+          </router-link>
+        </div>
 
-          <!-- Password -->
-          <div class="space-y-1.5">
-            <div class="flex items-center justify-between">
-              <label class="text-sm font-medium text-gray-700">Password</label>
-              <router-link
-                to="/forgot-password"
-                class="text-xs text-[#7C5CFC] hover:text-[#6B4CE0] font-medium"
-              >
-                Forgot password?
-              </router-link>
-            </div>
-            <div class="relative">
-              <Input
-                v-model="password"
-                :type="showPassword ? 'text' : 'password'"
-                placeholder="Enter your password"
-                required
-                class="pr-10"
-              />
-              <button
-                type="button"
-                class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                @click="showPassword = !showPassword"
-              >
-                <component :is="showPassword ? EyeOff : Eye" :size="16" />
-              </button>
-            </div>
-          </div>
-
-          <!-- Submit -->
-          <Button
-            type="submit"
-            class="w-full bg-[#7C5CFC] hover:bg-[#6B4CE0] h-11 text-sm font-medium"
-            :disabled="authStore.loading || !email || !password"
+        <div class="relative">
+          <Input
+            :id="passwordInputId"
+            v-model="password"
+            :type="showPassword ? 'text' : 'password'"
+            placeholder="Enter your password"
+            autocomplete="current-password"
+            required
+            class="h-11 bg-background pr-10"
+          />
+          <button
+            type="button"
+            :aria-label="passwordToggleLabel"
+            :aria-pressed="showPassword"
+            class="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            @click="showPassword = !showPassword"
           >
-            <Loader2 v-if="authStore.loading" :size="16" class="animate-spin mr-2" />
-            {{ authStore.loading ? 'Signing in...' : 'Sign In' }}
-          </Button>
-        </form>
+            <component :is="showPassword ? EyeOff : Eye" :size="16" />
+          </button>
+        </div>
       </div>
 
-      <!-- Footer link -->
-      <p class="text-center text-sm text-gray-500 mt-6">
-        Don't have an account?
-        <router-link to="/register" class="text-[#7C5CFC] hover:text-[#6B4CE0] font-medium">
-          Sign Up
+      <Button
+        type="submit"
+        class="h-11 w-full"
+        :disabled="authStore.loading || !email || !password"
+      >
+        <Loader2 v-if="authStore.loading" :size="16" class="mr-2 animate-spin" />
+        {{ authStore.loading ? 'Signing you in...' : 'Sign in to Productier' }}
+      </Button>
+
+      <p class="text-center text-xs text-muted-foreground">
+        Protected by organization-level access controls and secure workspace boundaries.
+      </p>
+    </form>
+
+    <template #footer>
+      <p class="text-center text-sm text-muted-foreground">
+        No account yet?
+        <router-link to="/register" class="font-medium text-primary hover:text-primary/80">
+          Create one
         </router-link>
       </p>
-    </div>
-  </div>
+    </template>
+  </AuthShell>
 </template>

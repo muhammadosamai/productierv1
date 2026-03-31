@@ -13,7 +13,15 @@ import { useDeliveriesStore } from '@/stores/deliveries'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { useRolesStore } from '@/stores/roles'
+import { usePagePermissions } from '@/lib/pagePermissions'
 import type { Activity } from '@/stores/activities'
+import { STORAGE_KEYS } from '@/constants/storageKeys'
+import { useDomainOptions } from '@/composables/useDomainOptions'
+import { useDomainPresentation } from '@/composables/useDomainPresentation'
+import { useHybridSettings } from '@/composables/useHybridSettings'
+import { usePersistedViewMode } from '@/composables/usePersistedViewMode'
+import { useEntityActivityDropdown } from '@/composables/useEntityActivityDropdown'
+import { storageGetJson, storageRemove, storageSet, storageSetJson } from '@/lib/browserStorage'
 import CreateDeliveryDialog from '@/components/delivery/CreateDeliveryDialog.vue'
 import DeliveryDetailPanel from '@/components/delivery/DeliveryDetailPanel.vue'
 import type { Delivery, DeliveryStatus } from '@/types/delivery'
@@ -26,23 +34,39 @@ interface TeamUser {
   avatar: string | null
 }
 
+type DeliveryStatusBuckets = {
+  all: Delivery[]
+  archived: Delivery[]
+  [status: string]: Delivery[]
+}
+
 const router = useRouter()
 const route = useRoute()
 const deliveriesStore = useDeliveriesStore()
 const productStore = useProductStore()
 const authStore = useAuthStore()
 const rolesStore = useRolesStore()
+const deliveryPermissions = usePagePermissions('deliveries')
+const canCreateDeliveries = computed(() => deliveryPermissions.canCreate.value)
+const canEditDeliveries = computed(() => deliveryPermissions.canEdit.value)
+const { deliveryStatusValues: deliveryStatusOptions } = useDomainOptions()
+const domainPresentation = useDomainPresentation()
+const DELIVERIES_VIEW_MODE_KEY = STORAGE_KEYS.views.deliveries.viewMode
+const DELIVERIES_COLUMN_CONFIG_KEY = STORAGE_KEYS.views.deliveries.columnConfig
+const DELIVERIES_COLUMN_WIDTHS_KEY = STORAGE_KEYS.views.deliveries.columnWidths
+const DELIVERIES_FILTER_STATE_KEY = STORAGE_KEYS.views.deliveries.filterState
+const {
+  saveSetting: saveUserSetting,
+  loadSettings: loadRemoteSettings,
+  cleanup: cleanupSettings,
+} = useHybridSettings(computed(() => authStore.token))
 
 const searchQuery = ref('')
-const activeTab = ref<'all' | 'initialized' | 'in_progress' | 'overdue' | 'blocked' | 'completed' | 'archived'>('all')
-const viewMode = ref<'table' | 'card'>(localStorage.getItem('deliveries-view-mode') as 'table' | 'card' || 'table')
+const activeTab = ref<string>('all')
+const viewMode = usePersistedViewMode(DELIVERIES_VIEW_MODE_KEY, saveUserSetting)
 const showCreateDialog = ref(false)
-
-// Save view mode to API + localStorage
-watch(viewMode, (v) => {
-  localStorage.setItem('deliveries-view-mode', v)
-  saveUserSetting('deliveries-view-mode', v)
-})
+const loadingMore = ref(false)
+const primaryDeliveryStatuses = computed(() => deliveryStatusOptions.value.filter((status) => status !== 'archived'))
 
 // Detail panel state
 const selectedDelivery = ref<Delivery | null>(null)
@@ -53,8 +77,6 @@ const inlineEditMode = ref(false)
 const editingCell = ref<{ id: string; field: string } | null>(null)
 const editValue = ref('')
 
-const deliveryStatusOptions = ['initialized', 'in_progress', 'overdue', 'blocked', 'completed', 'archived'] as const
-
 const editableFields = new Set(['title', 'status', 'description'])
 
 function isEditing(id: string, field: string) {
@@ -62,6 +84,7 @@ function isEditing(id: string, field: string) {
 }
 
 function startEditing(id: string, field: string, currentValue: string, event?: MouseEvent) {
+  if (!canEditDeliveries.value) return
   if (!inlineEditMode.value || !editableFields.has(field)) return
   if (event) event.stopPropagation()
   editingCell.value = { id, field }
@@ -74,11 +97,12 @@ function startEditing(id: string, field: string, currentValue: string, event?: M
 }
 
 async function saveInlineEdit(id: string, field: string, value: any) {
+  if (!canEditDeliveries.value) return
   const prev = editingCell.value
   editingCell.value = null
   if (prev && prev.id === id && prev.field === field) {
     await deliveriesStore.updateDelivery(id, { [field]: value })
-    await onDeliveryUpdated()
+    onDeliveryUpdated()
   }
 }
 
@@ -117,8 +141,7 @@ function navigateToDelivery(id: string) {
   router.push(`/deliveries/${id}`)
 }
 
-async function onDeliveryUpdated() {
-  await deliveriesStore.fetchDeliveries()
+function onDeliveryUpdated() {
   if (selectedDelivery.value) {
     const fresh = deliveriesStore.deliveries.find(d => d.id === selectedDelivery.value!.id)
     if (fresh) {
@@ -127,15 +150,39 @@ async function onDeliveryUpdated() {
   }
 }
 
-function onDeliveryCreated(id: string) {
+async function onDeliveryCreated(id: string) {
   showCreateDialog.value = false
-  deliveriesStore.fetchDeliveries()
   const created = deliveriesStore.deliveries.find(d => d.id === id)
-  if (created) openDetailPanel(created)
+  if (created) {
+    openDetailPanel(created)
+    return
+  }
+  await refreshDeliveries()
+  const fallback = deliveriesStore.deliveries.find(d => d.id === id)
+  if (fallback) openDetailPanel(fallback)
+}
+
+async function refreshDeliveries(cursor: string | null = null) {
+  await deliveriesStore.fetchDeliveries(undefined, {
+    q: searchQuery.value.trim() || undefined,
+    cursor,
+    limit: 80,
+    append: Boolean(cursor),
+  })
+}
+
+async function loadMoreDeliveries() {
+  if (!deliveriesStore.hasMore || !deliveriesStore.nextCursor || loadingMore.value) return
+  loadingMore.value = true
+  try {
+    await refreshDeliveries(deliveriesStore.nextCursor)
+  } finally {
+    loadingMore.value = false
+  }
 }
 
 onMounted(async () => {
-  await deliveriesStore.fetchDeliveries()
+  await refreshDeliveries()
   loadUserSettings()
   // Auto-open delivery from query param
   const deliveryId = route.query.delivery as string | undefined
@@ -145,8 +192,12 @@ onMounted(async () => {
   }
 })
 
-watch(() => productStore.activeProduct.name, () => {
-  deliveriesStore.fetchDeliveries()
+watch(() => productStore.activeProduct.id, () => {
+  refreshDeliveries()
+})
+
+watch(searchQuery, () => {
+  refreshDeliveries()
 })
 
 // Watch for delivery query param changes
@@ -158,26 +209,34 @@ watch(() => route.query.delivery, (deliveryId) => {
 })
 
 // Status-filtered delivery groups
-const deliveriesByStatus = computed(() => {
+const deliveriesByStatus = computed<DeliveryStatusBuckets>(() => {
   let base = deliveriesStore.deliveries
   // Self-view-only: show only deliveries created by user
   if (rolesStore.isSelfViewOnly('deliveries') && authStore.user) {
     base = base.filter(d => d.createdByUserId === authStore.user!.id)
   }
-  const all = base.filter(d => d.status !== 'archived')
-  return {
-    all,
-    initialized: all.filter(d => d.status === 'initialized'),
-    in_progress: all.filter(d => d.status === 'in_progress'),
-    overdue: all.filter(d => d.status === 'overdue'),
-    blocked: all.filter(d => d.status === 'blocked'),
-    completed: all.filter(d => d.status === 'completed'),
-    archived: base.filter(d => d.status === 'archived'),
+  const grouped: DeliveryStatusBuckets = {
+    all: [],
+    archived: [],
   }
+  for (const status of deliveryStatusOptions.value) {
+    grouped[status] = []
+  }
+  for (const delivery of base) {
+    const status = delivery.status
+    if (!grouped[status]) {
+      grouped[status] = []
+    }
+    grouped[status]!.push(delivery)
+    if (status !== 'archived') {
+      grouped.all.push(delivery)
+    }
+  }
+  return grouped
 })
 
-const filteredDeliveries = computed(() => {
-  const list = deliveriesByStatus.value[activeTab.value]
+const filteredDeliveries = computed<Delivery[]>(() => {
+  const list: Delivery[] = deliveriesByStatus.value[activeTab.value] ?? deliveriesByStatus.value.all
   const q = searchQuery.value.toLowerCase().trim()
   if (!q) return list
   return list.filter(d =>
@@ -190,6 +249,66 @@ const filteredDeliveries = computed(() => {
 type SortField = 'title' | 'status' | 'description' | 'period' | 'progress' | 'initiatives' | 'createdBy' | 'createdAt' | 'updatedAt'
 const sortField = ref<SortField | null>(null)
 const sortDirection = ref<'asc' | 'desc'>('asc')
+
+watch(
+  () => [searchQuery.value, activeTab.value, sortField.value, sortDirection.value],
+  () => {
+    persistDeliveriesFilterState()
+  },
+)
+
+interface DeliveriesFilterState {
+  searchQuery: string
+  activeTab: string
+  sortField: SortField | null
+  sortDirection: 'asc' | 'desc'
+}
+
+const deliverySortFields = new Set<SortField>([
+  'title',
+  'status',
+  'description',
+  'period',
+  'progress',
+  'initiatives',
+  'createdBy',
+  'createdAt',
+  'updatedAt',
+])
+
+function loadDeliveriesFilterState(): DeliveriesFilterState | null {
+  const saved = storageGetJson<Partial<DeliveriesFilterState> | null>(DELIVERIES_FILTER_STATE_KEY, null)
+  if (!saved || typeof saved !== 'object') return null
+  const nextSearch = typeof saved.searchQuery === 'string' ? saved.searchQuery : ''
+  const nextTab = typeof saved.activeTab === 'string' ? saved.activeTab : 'all'
+  const nextSortField = typeof saved.sortField === 'string' && deliverySortFields.has(saved.sortField as SortField)
+    ? saved.sortField as SortField
+    : null
+  const nextSortDirection = saved.sortDirection === 'desc' ? 'desc' : 'asc'
+  return {
+    searchQuery: nextSearch,
+    activeTab: nextTab,
+    sortField: nextSortField,
+    sortDirection: nextSortDirection,
+  }
+}
+
+function persistDeliveriesFilterState() {
+  storageSetJson(DELIVERIES_FILTER_STATE_KEY, {
+    searchQuery: searchQuery.value,
+    activeTab: activeTab.value,
+    sortField: sortField.value,
+    sortDirection: sortDirection.value,
+  } satisfies DeliveriesFilterState)
+}
+
+const persistedDeliveriesFilterState = loadDeliveriesFilterState()
+if (persistedDeliveriesFilterState) {
+  searchQuery.value = persistedDeliveriesFilterState.searchQuery
+  activeTab.value = persistedDeliveriesFilterState.activeTab
+  sortField.value = persistedDeliveriesFilterState.sortField
+  sortDirection.value = persistedDeliveriesFilterState.sortDirection
+}
 
 function toggleSort(field: SortField) {
   if (sortField.value === field) {
@@ -204,8 +323,6 @@ function toggleSort(field: SortField) {
     sortDirection.value = 'asc'
   }
 }
-
-const statusOrder: Record<string, number> = { initialized: 0, in_progress: 1, overdue: 2, blocked: 3, completed: 4, archived: 5 }
 
 function compareStr(a: string | null | undefined, b: string | null | undefined): number {
   return (a || '').localeCompare(b || '')
@@ -230,7 +347,8 @@ const sortedDeliveries = computed(() => {
         cmp = a.title.localeCompare(b.title)
         break
       case 'status':
-        cmp = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99)
+        cmp = domainPresentation.orderValue(domainPresentation.deliveryStatusOrder.value, a.status)
+          - domainPresentation.orderValue(domainPresentation.deliveryStatusOrder.value, b.status)
         break
       case 'description':
         cmp = compareStr(a.description, b.description)
@@ -292,64 +410,39 @@ function mergeWithDefaults(saved: ColumnConfig[]): ColumnConfig[] {
 }
 
 function loadColumnConfig(): ColumnConfig[] {
-  try {
-    const saved = localStorage.getItem('deliveries-column-config')
-    if (saved) return mergeWithDefaults(JSON.parse(saved) as ColumnConfig[])
-  } catch { /* ignore */ }
+  const saved = storageGetJson<ColumnConfig[] | null>(DELIVERIES_COLUMN_CONFIG_KEY, null)
+  if (Array.isArray(saved)) return mergeWithDefaults(saved)
   return defaultColumns.map(c => ({ ...c }))
 }
 
 const columns = ref<ColumnConfig[]>(loadColumnConfig())
 const showColumnCustomizer = ref(false)
 
-// Debounced save to API
-let saveTimeout: ReturnType<typeof setTimeout> | null = null
-function saveUserSetting(key: string, value: any) {
-  if (!authStore.token) return
-  if (saveTimeout) clearTimeout(saveTimeout)
-  saveTimeout = setTimeout(async () => {
-    try {
-      await fetch(`/api/settings/${key}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authStore.token}`,
-        },
-        body: JSON.stringify({ value }),
-      })
-    } catch { /* silently fail */ }
-  }, 500)
-}
-
 watch(columns, (v) => {
-  localStorage.setItem('deliveries-column-config', JSON.stringify(v))
-  saveUserSetting('deliveries-column-config', v)
+  storageSetJson(DELIVERIES_COLUMN_CONFIG_KEY, v)
+  saveUserSetting(DELIVERIES_COLUMN_CONFIG_KEY, v)
 }, { deep: true })
 
 async function loadUserSettings() {
   if (!authStore.token) return
   try {
-    const res = await fetch('/api/settings/', {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    if (!res.ok) return
-    const settings = await res.json()
+    const settings = await loadRemoteSettings()
 
-    if (settings['deliveries-column-config']) {
-      const serverCols = mergeWithDefaults(settings['deliveries-column-config'] as ColumnConfig[])
+    if (settings[DELIVERIES_COLUMN_CONFIG_KEY]) {
+      const serverCols = mergeWithDefaults(settings[DELIVERIES_COLUMN_CONFIG_KEY] as ColumnConfig[])
       columns.value = serverCols
-      localStorage.setItem('deliveries-column-config', JSON.stringify(serverCols))
+      storageSetJson(DELIVERIES_COLUMN_CONFIG_KEY, serverCols)
     }
-    if (settings['deliveries-view-mode']) {
-      viewMode.value = settings['deliveries-view-mode'] as 'table' | 'card'
-      localStorage.setItem('deliveries-view-mode', settings['deliveries-view-mode'])
+    if (settings[DELIVERIES_VIEW_MODE_KEY]) {
+      viewMode.value = settings[DELIVERIES_VIEW_MODE_KEY] as 'table' | 'card'
+      storageSet(DELIVERIES_VIEW_MODE_KEY, settings[DELIVERIES_VIEW_MODE_KEY] as string)
     }
-    if (settings['deliveries-column-widths']) {
-      const serverWidths = settings['deliveries-column-widths'] as Record<string, number>
+    if (settings[DELIVERIES_COLUMN_WIDTHS_KEY]) {
+      const serverWidths = settings[DELIVERIES_COLUMN_WIDTHS_KEY] as Record<string, number>
       for (const [k, v] of Object.entries(serverWidths)) {
         if (typeof v === 'number' && v >= 60) columnWidths[k] = v
       }
-      localStorage.setItem('deliveries-column-widths', JSON.stringify({ ...columnWidths }))
+      storageSetJson(DELIVERIES_COLUMN_WIDTHS_KEY, { ...columnWidths })
     }
   } catch { /* fall back to localStorage */ }
 }
@@ -382,7 +475,7 @@ function resetColumns() {
   for (const col of defaultColumns) {
     columnWidths[col.field] = parseDefaultWidth(col.width)
   }
-  localStorage.removeItem('deliveries-column-widths')
+  storageRemove(DELIVERIES_COLUMN_WIDTHS_KEY)
 }
 
 // --- Column resize ---
@@ -396,15 +489,12 @@ function loadColumnWidths(): Record<string, number> {
   for (const col of defaultColumns) {
     widths[col.field] = parseDefaultWidth(col.width)
   }
-  try {
-    const saved = localStorage.getItem('deliveries-column-widths')
-    if (saved) {
-      const parsed = JSON.parse(saved) as Record<string, number>
-      for (const [k, v] of Object.entries(parsed)) {
-        if (typeof v === 'number' && v >= 60) widths[k] = v
-      }
+  const saved = storageGetJson<Record<string, number> | null>(DELIVERIES_COLUMN_WIDTHS_KEY, null)
+  if (saved && typeof saved === 'object') {
+    for (const [k, v] of Object.entries(saved)) {
+      if (typeof v === 'number' && v >= 60) widths[k] = v
     }
-  } catch { /* ignore */ }
+  }
   return widths
 }
 
@@ -439,13 +529,14 @@ function onResizeEnd() {
   document.removeEventListener('mousemove', onResizeMove)
   document.removeEventListener('mouseup', onResizeEnd)
   resizingCol.value = null
-  localStorage.setItem('deliveries-column-widths', JSON.stringify({ ...columnWidths }))
-  saveUserSetting('deliveries-column-widths', { ...columnWidths })
+  storageSetJson(DELIVERIES_COLUMN_WIDTHS_KEY, { ...columnWidths })
+  saveUserSetting(DELIVERIES_COLUMN_WIDTHS_KEY, { ...columnWidths })
 }
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onResizeMove)
   document.removeEventListener('mouseup', onResizeEnd)
+  cleanupSettings()
 })
 
 // Drag-and-drop reordering
@@ -473,6 +564,11 @@ function onDrop(idx: number) {
   }
   const arr = [...columns.value]
   const [moved] = arr.splice(dragIndex.value, 1)
+  if (!moved) {
+    dragIndex.value = null
+    dragOverIndex.value = null
+    return
+  }
   arr.splice(idx, 0, moved)
   columns.value = arr
   dragIndex.value = null
@@ -504,53 +600,35 @@ function toggleArchivedTab() {
 }
 
 async function restoreDelivery(deliveryId: string) {
+  if (!canEditDeliveries.value) return
   await deliveriesStore.updateDelivery(deliveryId, { status: 'initialized' })
 }
 
+function toggleInlineEditMode() {
+  if (!canEditDeliveries.value) return
+  inlineEditMode.value = !inlineEditMode.value
+  editingCell.value = null
+}
+
 // ===== Activity Timeline =====
-const showActivityDropdown = ref(false)
-const deliveryActivities = ref<Activity[]>([])
-const deliveryActivitiesLoading = ref(false)
-
-async function fetchDeliveryActivities() {
-  deliveryActivitiesLoading.value = true
-  try {
-    const p = productStore.activeProduct.name
-    const res = await fetch(`/api/activities?product=${encodeURIComponent(p)}&entityType=delivery&limit=50`)
-    if (res.ok) {
-      deliveryActivities.value = await res.json()
-    }
-  } catch (e) {
-    console.error('Failed to fetch delivery activities:', e)
-  } finally {
-    deliveryActivitiesLoading.value = false
-  }
-}
-
-function toggleActivityDropdown() {
-  showActivityDropdown.value = !showActivityDropdown.value
-  if (showActivityDropdown.value) {
-    fetchDeliveryActivities()
-  }
-}
-
-function onActivityClickOutside(event: MouseEvent) {
-  const target = event.target as HTMLElement
-  if (!target.closest('.activity-dropdown-container')) {
-    showActivityDropdown.value = false
-  }
-}
-watch(showActivityDropdown, (v) => {
-  if (v) {
-    setTimeout(() => document.addEventListener('click', onActivityClickOutside), 0)
-  } else {
-    document.removeEventListener('click', onActivityClickOutside)
-  }
+const {
+  showDropdown: showActivityDropdown,
+  activities: deliveryActivities,
+  loading: deliveryActivitiesLoading,
+  error: deliveryActivitiesError,
+  toggleDropdown: toggleActivityDropdown,
+  closeDropdown: closeActivityDropdown,
+  fetchActivities: fetchDeliveryActivities,
+} = useEntityActivityDropdown({
+  entityType: 'delivery',
+  token: computed(() => authStore.token),
+  productId: computed(() => productStore.activeProduct?.id || null),
+  fetchErrorMessage: 'Failed to fetch delivery activities.',
 })
 
 function openDeliveryFromActivity(entityId: string | null) {
   if (!entityId) return
-  showActivityDropdown.value = false
+  closeActivityDropdown()
   router.push(`/deliveries/${entityId}`)
 }
 
@@ -586,13 +664,13 @@ function activityUserInitials(name: string) {
 }
 
 const groupedDeliveryActivities = computed(() => {
-  const groups: { label: string; activities: Activity[] }[] = []
+  const groups: { label: string; activities: Array<(typeof deliveryActivities.value)[number]> }[] = []
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const weekStart = new Date(today)
   weekStart.setDate(today.getDate() - today.getDay())
   const lastWeekStart = new Date(weekStart.getTime() - 7 * 86400000)
-  const buckets = new Map<string, Activity[]>()
+  const buckets = new Map<string, Array<(typeof deliveryActivities.value)[number]>>()
   for (const activity of deliveryActivities.value) {
     const d = new Date(activity.createdAt)
     const day = new Date(d.getFullYear(), d.getMonth(), d.getDate())
@@ -611,15 +689,11 @@ const groupedDeliveryActivities = computed(() => {
 
 // ===== Styling =====
 function statusStyle(status: string) {
-  switch (status) {
-    case 'initialized': return 'bg-[#ff69b4]/15 text-[#ff69b4] border border-[#ff69b4]/30'
-    case 'in_progress': return 'bg-[#fdab3d]/15 text-[#d48806] border border-[#fdab3d]/30'
-    case 'overdue': return 'bg-[#e2445c]/15 text-[#e2445c] border border-[#e2445c]/30'
-    case 'blocked': return 'bg-[#a25ddc]/15 text-[#a25ddc] border border-[#a25ddc]/30'
-    case 'completed': return 'bg-[#00c875]/15 text-[#00a65a] border border-[#00c875]/30'
-    case 'archived': return 'bg-gray-100 text-gray-400 border border-gray-200'
-    default: return 'bg-gray-100 text-gray-500 border border-gray-200'
-  }
+  const base = domainPresentation.deliveryStatusStyle(status)
+  const border = status === 'archived'
+    ? 'border border-gray-200'
+    : `border ${domainPresentation.deliveryStatusDot(status).replace('bg-', 'border-')}/30`
+  return `${base} ${border}`
 }
 
 function statusTabColor(status: string) {
@@ -635,31 +709,15 @@ function statusTabColor(status: string) {
 }
 
 function statusDotColor(status: string) {
-  switch (status) {
-    case 'initialized': return 'bg-[#ff69b4]'
-    case 'in_progress': return 'bg-[#fdab3d]'
-    case 'overdue': return 'bg-[#e2445c]'
-    case 'blocked': return 'bg-[#a25ddc]'
-    case 'completed': return 'bg-[#00c875]'
-    case 'archived': return 'bg-gray-300'
-    default: return 'bg-gray-400'
-  }
+  return domainPresentation.deliveryStatusDot(status)
 }
 
 function statusLabel(status: string) {
-  return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return domainPresentation.enumLabel(status)
 }
 
 function statusTextColor(status: string) {
-  switch (status) {
-    case 'initialized': return 'text-[#ff69b4]'
-    case 'in_progress': return 'text-[#fdab3d]'
-    case 'overdue': return 'text-[#e2445c]'
-    case 'blocked': return 'text-[#a25ddc]'
-    case 'completed': return 'text-[#00c875]'
-    case 'archived': return 'text-gray-400'
-    default: return 'text-gray-500'
-  }
+  return domainPresentation.deliveryStatusText(status)
 }
 
 function parseDeliveryTitle(title: string) {
@@ -708,7 +766,12 @@ function progressPercent(delivery: Delivery) {
         </div>
         <div class="flex items-center gap-3">
           <button
-            class="flex items-center gap-1.5 bg-[#4857FE] hover:bg-[#3E4BDE] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer"
+            class="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            :class="canCreateDeliveries
+              ? 'bg-[#4857FE] hover:bg-[#3E4BDE] text-white cursor-pointer'
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+            :disabled="!canCreateDeliveries"
+            :title="deliveryPermissions.deniedReason('create', 'deliveries') || 'Add delivery'"
             @click="showCreateDialog = true"
           >
             <Plus :size="15" />
@@ -735,7 +798,7 @@ function progressPercent(delivery: Delivery) {
           </button>
           <!-- Status tabs -->
           <button
-            v-for="status in (['initialized', 'in_progress', 'overdue', 'blocked', 'completed'] as const)"
+            v-for="status in primaryDeliveryStatuses"
             :key="status"
             class="flex items-center gap-1.5 px-2.5 py-2.5 text-sm font-medium border-b-2 transition-colors cursor-pointer"
             :class="activeTab === status
@@ -744,7 +807,7 @@ function progressPercent(delivery: Delivery) {
             @click="activeTab = status"
           >
             {{ statusLabel(status) }}
-            <span class="text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[20px] text-center" :class="statusTabColor(status).badge">{{ deliveriesByStatus[status].length }}</span>
+            <span class="text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[20px] text-center" :class="statusTabColor(status).badge">{{ deliveriesByStatus[status]?.length || 0 }}</span>
           </button>
         </div>
 
@@ -755,6 +818,7 @@ function progressPercent(delivery: Delivery) {
             class="flex items-center gap-1.5 p-1.5 rounded-lg transition-colors cursor-pointer"
             :class="activeTab === 'archived' ? 'bg-[#4857FE]/10 text-[#4857FE]' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
             @click="toggleArchivedTab()"
+            aria-label="Toggle archived deliveries"
             title="Archived deliveries"
           >
             <Archive :size="16" />
@@ -767,6 +831,7 @@ function progressPercent(delivery: Delivery) {
               class="flex items-center gap-1.5 p-1.5 rounded-lg transition-colors cursor-pointer"
               :class="showActivityDropdown ? 'bg-[#4857FE]/10 text-[#4857FE]' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
               @click.stop="toggleActivityDropdown()"
+              aria-label="Open delivery activity timeline"
               title="Activity timeline"
             >
               <Clock :size="16" />
@@ -794,6 +859,9 @@ function progressPercent(delivery: Delivery) {
                 <div class="max-h-[480px] overflow-y-auto">
                   <div v-if="deliveryActivitiesLoading" class="flex items-center justify-center py-16">
                     <Loader2 :size="20" class="animate-spin text-gray-400" />
+                  </div>
+                  <div v-else-if="deliveryActivitiesError" class="text-center py-10 px-6">
+                    <p class="text-sm text-red-600">{{ deliveryActivitiesError }}</p>
                   </div>
                   <div v-else-if="deliveryActivities.length === 0" class="text-center py-16 px-6">
                     <Clock :size="32" class="text-gray-200 mx-auto mb-3" />
@@ -965,9 +1033,12 @@ function progressPercent(delivery: Delivery) {
             class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer"
             :class="inlineEditMode
               ? 'bg-[#4857FE]/10 text-[#4857FE]'
-              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
-            @click="inlineEditMode = !inlineEditMode; editingCell = null"
-            title="Inline editing"
+              : canEditDeliveries
+                ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                : 'text-gray-300 cursor-not-allowed'"
+            :disabled="!canEditDeliveries"
+            @click="toggleInlineEditMode"
+            :title="deliveryPermissions.deniedReason('edit', 'deliveries') || 'Inline editing'"
           >
             <PencilLine :size="15" />
             <span v-if="inlineEditMode" class="text-xs">Editing</span>
@@ -982,6 +1053,9 @@ function progressPercent(delivery: Delivery) {
       <div v-if="deliveriesStore.loading" class="flex items-center justify-center py-16">
         <Loader2 :size="24" class="animate-spin text-[#4857FE]" />
         <span class="ml-2 text-sm text-gray-500">Loading deliveries...</span>
+      </div>
+      <div v-else-if="deliveriesStore.error" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        {{ deliveriesStore.error }}
       </div>
 
       <!-- TABLE VIEW -->
@@ -1049,7 +1123,7 @@ function progressPercent(delivery: Delivery) {
                   :class="inlineEditMode && !isEditing(delivery.id, 'title') ? 'hover:bg-gray-100/60 rounded px-1 -mx-1 cursor-text' : ''"
                   @click="startEditing(delivery.id, 'title', delivery.title, $event)"
                 >
-                  <FavoriteStar entity-type="delivery" :entity-id="delivery.id" :product-id="productStore.activeProduct.name" />
+                  <FavoriteStar entity-type="delivery" :entity-id="delivery.id" :product-id="productStore.activeProduct.id || ''" />
                   <template v-if="isEditing(delivery.id, 'title')">
                     <input
                       v-model="editValue"
@@ -1078,10 +1152,23 @@ function progressPercent(delivery: Delivery) {
                   :class="inlineEditMode ? 'cursor-pointer' : ''"
                   @click="startEditing(delivery.id, 'status', delivery.status, $event)"
                 >
-                  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold" :class="statusStyle(delivery.status)">
-                    <span class="w-1.5 h-1.5 rounded-full" :class="statusDotColor(delivery.status)"></span>
-                    {{ statusLabel(delivery.status) }}
-                  </span>
+                  <div class="flex items-center gap-1.5">
+                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold" :class="statusStyle(delivery.status)">
+                      <span class="w-1.5 h-1.5 rounded-full" :class="statusDotColor(delivery.status)"></span>
+                      {{ statusLabel(delivery.status) }}
+                    </span>
+                    <span
+                      v-if="delivery.healthSummary"
+                      class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase"
+                      :class="delivery.healthSummary.confidenceBand === 'high'
+                        ? 'bg-emerald-50 text-emerald-700'
+                        : delivery.healthSummary.confidenceBand === 'medium'
+                          ? 'bg-amber-50 text-amber-700'
+                          : 'bg-red-50 text-red-700'"
+                    >
+                      {{ delivery.healthSummary.confidenceBand }}
+                    </span>
+                  </div>
                   <div v-if="isEditing(delivery.id, 'status')"
                     class="inline-edit-dropdown absolute top-full left-0 mt-1 bg-white rounded-lg border border-gray-200 shadow-xl z-50 py-1 min-w-[160px]"
                     @click.stop
@@ -1140,6 +1227,9 @@ function progressPercent(delivery: Delivery) {
                     {{ delivery.initiatives.map(i => i.title).join(', ') }}
                   </span>
                   <span v-else class="text-sm text-gray-400">—</span>
+                  <span v-if="delivery.linkedReleases && delivery.linkedReleases.length > 0" class="text-[11px] text-gray-400 block mt-0.5">
+                    {{ delivery.linkedReleases.length }} linked release{{ delivery.linkedReleases.length > 1 ? 's' : '' }}
+                  </span>
                 </div>
 
                 <!-- Created By -->
@@ -1167,14 +1257,28 @@ function progressPercent(delivery: Delivery) {
               <!-- Restore button for archived -->
               <button
                 v-if="activeTab === 'archived'"
-                class="ml-auto p-1 rounded-md hover:bg-green-50 text-gray-300 hover:text-green-500 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                title="Restore delivery"
+                class="ml-auto p-1 rounded-md transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                :class="canEditDeliveries
+                  ? 'hover:bg-green-50 text-gray-300 hover:text-green-500'
+                  : 'text-gray-200 cursor-not-allowed'"
+                :disabled="!canEditDeliveries"
+                :title="deliveryPermissions.deniedReason('edit', 'deliveries') || 'Restore delivery'"
                 @click.stop="restoreDelivery(delivery.id)"
               >
                 <RotateCw :size="14" />
               </button>
             </div>
           </div>
+        </div>
+        <div v-if="deliveriesStore.hasMore" class="mt-4 flex justify-center">
+          <button
+            type="button"
+            class="rounded-lg border border-gray-200 bg-white px-4 py-2 text-xs font-medium text-gray-600 transition-colors hover:border-[#4857FE]/40 hover:text-[#4857FE] disabled:cursor-not-allowed disabled:opacity-60"
+            :disabled="loadingMore"
+            @click="loadMoreDeliveries"
+          >
+            {{ loadingMore ? 'Loading more...' : 'Load more deliveries' }}
+          </button>
         </div>
 
         <!-- Empty state -->
@@ -1213,7 +1317,7 @@ function progressPercent(delivery: Delivery) {
 
               <!-- Title -->
               <div class="mb-1.5 flex items-start gap-2">
-                <FavoriteStar entity-type="delivery" :entity-id="delivery.id" :product-id="productStore.activeProduct.name" />
+                <FavoriteStar entity-type="delivery" :entity-id="delivery.id" :product-id="productStore.activeProduct.id || ''" />
                 <h4 class="text-base leading-snug line-clamp-2 group-hover/card:text-[#4857FE] transition-colors">
                   <span v-if="parseDeliveryTitle(delivery.title).prefix" class="font-medium" :class="statusTextColor(delivery.status)">{{ parseDeliveryTitle(delivery.title).prefix }}</span>
                   <span v-if="parseDeliveryTitle(delivery.title).prefix"> - </span>
@@ -1261,6 +1365,16 @@ function progressPercent(delivery: Delivery) {
               </div>
             </div>
           </div>
+        </div>
+        <div v-if="deliveriesStore.hasMore" class="mt-4 flex justify-center">
+          <button
+            type="button"
+            class="rounded-lg border border-gray-200 bg-white px-4 py-2 text-xs font-medium text-gray-600 transition-colors hover:border-[#4857FE]/40 hover:text-[#4857FE] disabled:cursor-not-allowed disabled:opacity-60"
+            :disabled="loadingMore"
+            @click="loadMoreDeliveries"
+          >
+            {{ loadingMore ? 'Loading more...' : 'Load more deliveries' }}
+          </button>
         </div>
 
         <!-- Empty state (card) -->

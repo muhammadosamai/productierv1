@@ -1,39 +1,36 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import AuthShell from '@/components/auth/AuthShell.vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Loader2, Eye, EyeOff } from 'lucide-vue-next'
-import type { UserRole } from '@/types/user'
 
 const router = useRouter()
 const authStore = useAuthStore()
+
+const envFlags = import.meta.env as Record<string, string | undefined>
+const onboardingEnabled = String(
+  envFlags.VITE_NEW_ONBOARDING_ENABLED
+  ?? envFlags.NEW_ONBOARDING_ENABLED
+  ?? 'true',
+).toLowerCase() !== 'false'
 
 const name = ref('')
 const email = ref('')
 const password = ref('')
 const confirmPassword = ref('')
-const role = ref<UserRole>('viewer')
 const showPassword = ref(false)
 const localError = ref('')
+const nameInputId = 'register-name'
+const emailInputId = 'register-email'
+const passwordInputId = 'register-password'
+const confirmPasswordInputId = 'register-confirm-password'
 
-const roles: { value: UserRole; label: string }[] = [
-  { value: 'super_admin', label: 'Super Admin' },
-  { value: 'admin', label: 'Admin' },
-  { value: 'product_admin', label: 'Product Admin' },
-  { value: 'product_manager', label: 'Product Manager' },
-  { value: 'business_analyst', label: 'Business Analyst' },
-  { value: 'developer', label: 'Developer' },
-  { value: 'viewer', label: 'Viewer' },
-]
+const passwordToggleLabel = computed(() => (
+  showPassword.value ? 'Hide password' : 'Show password'
+))
 
 async function handleSubmit() {
   localError.value = ''
@@ -47,126 +44,113 @@ async function handleSubmit() {
     return
   }
 
-  const success = await authStore.register(name.value, email.value, password.value, role.value)
+  const success = await authStore.register(name.value, email.value, password.value)
   if (success) {
-    router.push('/')
+    router.push(onboardingEnabled ? '/onboarding' : '/')
   }
 }
 
-const displayError = ref('')
-// Compute which error to show
-function getError() {
+function displayError() {
   return localError.value || authStore.error || ''
 }
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center" style="background-color: #F8FAFF">
-    <div class="w-full max-w-[420px] px-6">
-      <!-- Logo & Title -->
-      <div class="text-center mb-8">
-        <img src="/logo.png" alt="Productier" class="w-14 h-14 rounded-2xl mb-4 shadow-lg shadow-[#7C5CFC]/20 mx-auto block" />
-        <h1 class="text-2xl font-bold text-gray-900">Create an account</h1>
-        <p class="text-sm text-gray-500 mt-1">Get started with Productier</p>
+  <AuthShell
+    title="Create your account"
+    subtitle="Set up your access first. Organization onboarding starts right after signup."
+  >
+    <form @submit.prevent="handleSubmit" class="space-y-4">
+      <div
+        v-if="displayError()"
+        role="alert"
+        aria-live="polite"
+        class="rounded-lg border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+      >
+        {{ displayError() }}
       </div>
 
-      <!-- Form Card -->
-      <div class="bg-white rounded-2xl border border-gray-100 p-8 shadow-sm">
-        <form @submit.prevent="handleSubmit" class="space-y-4">
-          <!-- Error message -->
-          <div v-if="getError()" class="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
-            <p class="text-sm text-red-600">{{ getError() }}</p>
-          </div>
+      <div class="space-y-1.5">
+        <label :for="nameInputId" class="text-sm font-medium text-foreground">Full Name</label>
+        <Input
+          :id="nameInputId"
+          v-model="name"
+          type="text"
+          placeholder="John Doe"
+          autocomplete="name"
+          autofocus
+          required
+          class="h-11 bg-background"
+        />
+      </div>
 
-          <!-- Name -->
-          <div class="space-y-1.5">
-            <label class="text-sm font-medium text-gray-700">Full Name</label>
-            <Input
-              v-model="name"
-              type="text"
-              placeholder="John Doe"
-              autofocus
-              required
-            />
-          </div>
+      <div class="space-y-1.5">
+        <label :for="emailInputId" class="text-sm font-medium text-foreground">Work Email</label>
+        <Input
+          :id="emailInputId"
+          v-model="email"
+          type="email"
+          placeholder="you@company.com"
+          autocomplete="email"
+          required
+          class="h-11 bg-background"
+        />
+      </div>
 
-          <!-- Email -->
-          <div class="space-y-1.5">
-            <label class="text-sm font-medium text-gray-700">Email</label>
-            <Input
-              v-model="email"
-              type="email"
-              placeholder="you@example.com"
-              required
-            />
-          </div>
-
-          <!-- Role -->
-          <div class="space-y-1.5">
-            <label class="text-sm font-medium text-gray-700">Role</label>
-            <Select v-model="role">
-              <SelectTrigger>
-                <SelectValue placeholder="Select a role" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="r in roles" :key="r.value" :value="r.value">
-                  {{ r.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <!-- Password -->
-          <div class="space-y-1.5">
-            <label class="text-sm font-medium text-gray-700">Password</label>
-            <div class="relative">
-              <Input
-                v-model="password"
-                :type="showPassword ? 'text' : 'password'"
-                placeholder="At least 6 characters"
-                required
-                class="pr-10"
-              />
-              <button
-                type="button"
-                class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                @click="showPassword = !showPassword"
-              >
-                <component :is="showPassword ? EyeOff : Eye" :size="16" />
-              </button>
-            </div>
-          </div>
-
-          <!-- Confirm Password -->
-          <div class="space-y-1.5">
-            <label class="text-sm font-medium text-gray-700">Confirm Password</label>
-            <Input
-              v-model="confirmPassword"
-              type="password"
-              placeholder="Re-enter your password"
-              required
-            />
-          </div>
-
-          <!-- Submit -->
-          <Button
-            type="submit"
-            class="w-full bg-[#7C5CFC] hover:bg-[#6B4CE0] h-11 text-sm font-medium"
-            :disabled="authStore.loading || !name || !email || !password || !confirmPassword"
+      <div class="space-y-1.5">
+        <label :for="passwordInputId" class="text-sm font-medium text-foreground">Password</label>
+        <div class="relative">
+          <Input
+            :id="passwordInputId"
+            v-model="password"
+            :type="showPassword ? 'text' : 'password'"
+            placeholder="At least 6 characters"
+            autocomplete="new-password"
+            required
+            class="h-11 bg-background pr-10"
+          />
+          <button
+            type="button"
+            :aria-label="passwordToggleLabel"
+            :aria-pressed="showPassword"
+            class="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            @click="showPassword = !showPassword"
           >
-            <Loader2 v-if="authStore.loading" :size="16" class="animate-spin mr-2" />
-            {{ authStore.loading ? 'Creating account...' : 'Create Account' }}
-          </Button>
-        </form>
+            <component :is="showPassword ? EyeOff : Eye" :size="16" />
+          </button>
+        </div>
       </div>
 
-      <!-- Footer link -->
-      <p class="text-center text-sm text-gray-500 mt-6">
+      <div class="space-y-1.5">
+        <label :for="confirmPasswordInputId" class="text-sm font-medium text-foreground">Confirm Password</label>
+        <Input
+          :id="confirmPasswordInputId"
+          v-model="confirmPassword"
+          type="password"
+          placeholder="Re-enter your password"
+          autocomplete="new-password"
+          required
+          class="h-11 bg-background"
+        />
+      </div>
+
+      <Button
+        type="submit"
+        class="h-11 w-full"
+        :disabled="authStore.loading || !name || !email || !password || !confirmPassword"
+      >
+        <Loader2 v-if="authStore.loading" :size="16" class="mr-2 animate-spin" />
+        {{ authStore.loading ? 'Creating account...' : 'Create Account' }}
+      </Button>
+    </form>
+
+    <template #footer>
+      <p class="text-center text-sm text-muted-foreground">
         Already have an account?
-        <router-link to="/login" class="text-[#7C5CFC] hover:text-[#6B4CE0] font-medium">
-          Sign In
+        <router-link to="/login" class="font-medium text-primary hover:text-primary/80">
+          Sign in
         </router-link>
       </p>
-    </div>
-  </div>
+    </template>
+  </AuthShell>
 </template>

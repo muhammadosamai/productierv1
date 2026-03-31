@@ -36,11 +36,20 @@ const options = computed(() => ({
   indexAxis: (props.horizontal ? 'y' : 'x') as 'x' | 'y',
   responsive: true,
   maintainAspectRatio: false,
+  layout: { padding: { top: 4, right: 8, bottom: 0, left: 0 } },
   plugins: {
     legend: {
       display: props.showLegend && props.datasets.length > 1,
       position: 'top' as const,
-      labels: { usePointStyle: true, pointStyle: 'circle', padding: 16, font: { size: 11, family: 'Inter, system-ui, sans-serif' } },
+      align: 'start' as const,
+      labels: {
+        usePointStyle: true,
+        pointStyle: 'circle',
+        boxWidth: 8,
+        boxHeight: 8,
+        padding: 12,
+        font: { size: 11, family: 'Inter, system-ui, sans-serif' },
+      },
     },
     tooltip: {
       backgroundColor: '#1F2937',
@@ -54,7 +63,13 @@ const options = computed(() => ({
     x: {
       stacked: props.stacked,
       grid: { display: props.horizontal },
-      ticks: { font: { size: 10, family: 'Inter, system-ui, sans-serif' }, color: '#9CA3AF' },
+      ticks: {
+        font: { size: 10, family: 'Inter, system-ui, sans-serif' },
+        color: '#9CA3AF',
+        maxRotation: 0,
+        autoSkip: true,
+        maxTicksLimit: 10,
+      },
     },
     y: {
       stacked: props.stacked,

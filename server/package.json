@@ -5,24 +5,53 @@
   "type": "module",
   "scripts": {
     "dev": "bun --watch src/index.ts",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push",
+    "type-check": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "test": "vitest run",
+    "test:config": "vitest run --config vitest.config.runtime.ts",
+    "test:integration": "bun run db:migration:status:strict && vitest run --config vitest.config.ts",
+    "db:generate": "bun ./node_modules/drizzle-kit/bin.cjs generate",
+    "db:migrate": "bun ./node_modules/drizzle-kit/bin.cjs migrate",
+    "db:push": "bun ./node_modules/drizzle-kit/bin.cjs push",
+    "db:preflight:cutover": "bun src/db/preflight-cutover.ts",
+    "db:integrity:post-cutover": "bun src/db/post-cutover-integrity-check.ts",
     "db:seed": "bun src/db/seed.ts",
+    "db:seed:full": "bun src/db/seed-single-org-full.ts",
+    "db:seed:endpoint-test": "bun src/db/seed-endpoint-test-org.ts",
+    "db:cleanup:novaforge": "bun src/db/cleanup-novaforge-demo.ts",
+    "db:normalize:tenancy": "bun src/db/normalize-tenant-boundaries.ts",
     "db:seed-users": "bun src/db/seed-users.ts",
-    "db:studio": "drizzle-kit studio"
+    "db:migration:status": "bun src/db/migration-status.ts",
+    "db:migration:status:strict": "bun src/db/migration-status.ts --strict",
+    "db:migration:reconcile": "bun src/db/migration-status.ts --reconcile",
+    "db:studio": "bun ./node_modules/drizzle-kit/bin.cjs studio",
+    "db:docs": "bun database-docs/generate-db-docs.ts",
+    "db:docs:dump": "bun database-docs/generate-db-docs-from-dump.ts",
+    "search:reindex": "bun src/db/reindex-search-documents.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1019.0",
     "@elysiajs/cors": "^1.2",
     "@elysiajs/jwt": "^1.4.1",
     "@elysiajs/static": "^1.4.7",
+    "@langchain/openai": "^1.3.1",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.38",
     "elysia": "^1.2",
-    "postgres": "^3.4"
+    "jose": "^6.2.2",
+    "langchain": "^1.2.37",
+    "postgres": "^3.4",
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/bcryptjs": "^3.0.0",
-    "drizzle-kit": "^0.30"
+    "@types/bun": "^1.3.11",
+    "@types/node": "^25.5.0",
+    "drizzle-kit": "^0.30",
+    "eslint": "^10.1.0",
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.57.2",
+    "vitest": "^4.1.2"
   }
 }

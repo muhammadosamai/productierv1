@@ -14,7 +14,16 @@ import { useBacklogStore } from '@/stores/backlog'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { useRolesStore } from '@/stores/roles'
+import { usePagePermissions } from '@/lib/pagePermissions'
 import type { Activity } from '@/stores/activities'
+import { STORAGE_KEYS } from '@/constants/storageKeys'
+import { useDomainOptions } from '@/composables/useDomainOptions'
+import { useDomainPresentation } from '@/composables/useDomainPresentation'
+import { useHybridSettings } from '@/composables/useHybridSettings'
+import { usePersistedViewMode } from '@/composables/usePersistedViewMode'
+import { useEntityActivityDropdown } from '@/composables/useEntityActivityDropdown'
+import { storageGetJson, storageRemove, storageSet, storageSetJson } from '@/lib/browserStorage'
+import { usersApi } from '@/lib/api'
 import FavoriteStar from '@/components/shared/FavoriteStar.vue'
 import TaskDetailPanel from '@/components/delivery/TaskDetailPanel.vue'
 import TaskStatusIcon from '@/components/shared/TaskStatusIcon.vue'
@@ -33,17 +42,47 @@ const backlogStore = useBacklogStore()
 const productStore = useProductStore()
 const authStore = useAuthStore()
 const rolesStore = useRolesStore()
+const taskPermissions = usePagePermissions('tasks')
+const canCreateTasks = computed(() => taskPermissions.canCreate.value)
+const canEditTasks = computed(() => taskPermissions.canEdit.value)
+const {
+  taskStatusValues: taskStatusOptions,
+  taskPriorityValues: taskPriorityOptions,
+  taskTypeValues: taskTypeOptions,
+} = useDomainOptions()
+const domainPresentation = useDomainPresentation()
+const TASK_VIEW_MODE_KEY = STORAGE_KEYS.views.tasks.viewMode
+const TASK_COLUMN_CONFIG_KEY = STORAGE_KEYS.views.tasks.columnConfig
+const TASK_COLUMN_WIDTHS_KEY = STORAGE_KEYS.views.tasks.columnWidths
+const {
+  saveSetting: saveUserSetting,
+  loadSettings: loadRemoteSettings,
+  cleanup: cleanupSettings,
+} = useHybridSettings(computed(() => authStore.token))
+const viewMode = usePersistedViewMode(TASK_VIEW_MODE_KEY, saveUserSetting)
 
 const searchQuery = ref('')
-const activeTab = ref<'all' | 'created' | 'assigned' | 'in_progress' | 'in_review' | 'done' | 'overdue' | 'blocked' | 'archived'>('all')
-const viewMode = ref<'table' | 'card'>(localStorage.getItem('tasks-view-mode') as 'table' | 'card' || 'table')
-const showCreateDialog = ref(false)
+type TaskTab = 'all' | 'created' | 'assigned' | 'in_progress' | 'in_review' | 'done' | 'overdue' | 'blocked' | 'archived'
 
-// Save view mode to API + localStorage
-watch(viewMode, (v) => {
-  localStorage.setItem('tasks-view-mode', v)
-  saveUserSetting('tasks-view-mode', v)
-})
+function normalizeTaskTab(value: unknown): TaskTab | null {
+  if (
+    value === 'all' ||
+    value === 'created' ||
+    value === 'assigned' ||
+    value === 'in_progress' ||
+    value === 'in_review' ||
+    value === 'done' ||
+    value === 'overdue' ||
+    value === 'blocked' ||
+    value === 'archived'
+  ) {
+    return value
+  }
+  return null
+}
+
+const activeTab = ref<TaskTab>(normalizeTaskTab(route.query.status) || 'all')
+const showCreateDialog = ref(false)
 
 // Detail panel state
 const selectedTask = ref<Task | null>(null)
@@ -57,10 +96,6 @@ const editingCell = ref<{ id: string; field: string } | null>(null)
 const editValue = ref('')
 const inlineOwnerSearch = ref('')
 
-const taskStatusOptions = ['created', 'assigned', 'in_progress', 'in_review', 'done', 'overdue', 'blocked', 'archived'] as const
-const taskPriorityOptions = ['critical', 'high', 'medium', 'low'] as const
-const taskTypeOptions = ['design', 'development', 'testing', 'review', 'research', 'fix', 'documentation', 'deployment'] as const
-
 const taskEditableFields = new Set(['title', 'status', 'priority', 'type', 'owner', 'assignees', 'reviewers', 'estimate', 'dueAt', 'blockedReason'])
 
 function isEditing(id: string, field: string) {
@@ -68,6 +103,7 @@ function isEditing(id: string, field: string) {
 }
 
 function startTaskEditing(id: string, field: string, currentValue: string, event?: MouseEvent) {
+  if (!taskPermissions.canEdit.value) return
   if (!inlineEditMode.value || !taskEditableFields.has(field)) return
   if (event) event.stopPropagation()
   editingCell.value = { id, field }
@@ -81,6 +117,7 @@ function startTaskEditing(id: string, field: string, currentValue: string, event
 }
 
 async function saveTaskInlineEdit(id: string, field: string, value: any) {
+  if (!taskPermissions.canEdit.value) return
   const prev = editingCell.value
   editingCell.value = null
   if (prev && prev.id === id && prev.field === field) {
@@ -89,17 +126,20 @@ async function saveTaskInlineEdit(id: string, field: string, value: any) {
 }
 
 async function saveTaskOwnerInline(id: string, member: TeamUser | null) {
+  if (!taskPermissions.canEdit.value) return
   editingCell.value = null
   await backlogStore.updateTask(id, { ownerUserId: member?.id || null })
 }
 
 async function saveTaskAssigneesToggle(id: string, currentIds: string[] | null, userId: string) {
+  if (!taskPermissions.canEdit.value) return
   const current = currentIds || []
   const newIds = current.includes(userId) ? current.filter(id => id !== userId) : [...current, userId]
   await backlogStore.updateTask(id, { assigneeUserIds: newIds.length > 0 ? newIds : null })
 }
 
 async function saveTaskReviewersToggle(id: string, currentIds: string[] | null, userId: string) {
+  if (!taskPermissions.canEdit.value) return
   const current = currentIds || []
   const newIds = current.includes(userId) ? current.filter(id => id !== userId) : [...current, userId]
   await backlogStore.updateTask(id, { reviewerUserIds: newIds.length > 0 ? newIds : null })
@@ -132,27 +172,15 @@ watch(editingCell, (v) => {
 })
 
 function taskTypeIcon(type: string | null) {
-  switch (type) {
-    case 'design': return Palette
-    case 'development': return Code2
-    case 'testing': return TestTube2
-    case 'review': return Eye
-    case 'research': return FlaskConical
-    case 'fix': return Wrench
-    case 'documentation': return FileText
-    case 'deployment': return Rocket
-    default: return FolderOpen
-  }
+  return domainPresentation.taskTypeIcon(type || '')
 }
 
 async function fetchTeamMembers() {
   try {
-    const res = await fetch(`/api/auth/users?q=`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    if (res.ok) {
-      teamMembers.value = await res.json()
-    }
+    const payload = await usersApi.list({ q: '' }, authStore.token)
+    teamMembers.value = Array.isArray(payload)
+      ? payload
+      : (Array.isArray(payload?.items) ? payload.items : [])
   } catch {
     teamMembers.value = []
   }
@@ -169,8 +197,7 @@ function closeTaskPanel() {
   fromStoryId.value = null
 }
 
-async function onTaskUpdated() {
-  await backlogStore.fetchStories()
+function onTaskUpdated() {
   if (selectedTask.value) {
     const fresh = backlogStore.allTasks.find(t => t.id === selectedTask.value!.id)
     if (fresh) {
@@ -180,7 +207,9 @@ async function onTaskUpdated() {
 }
 
 function onTaskCreated() {
-  backlogStore.fetchStories()
+  if (selectedTask.value) {
+    onTaskUpdated()
+  }
 }
 
 onMounted(async () => {
@@ -199,7 +228,7 @@ onMounted(async () => {
   }
 })
 
-watch(() => productStore.activeProduct.name, () => {
+watch(() => productStore.activeProduct.id, () => {
   backlogStore.fetchStories()
   fetchTeamMembers()
 })
@@ -213,6 +242,12 @@ watch(() => route.query.task, (taskId) => {
       fromStoryId.value = (route.query.fromStory as string) || null
     }
   }
+})
+
+watch(() => route.query.status, (statusParam) => {
+  const nextTab = normalizeTaskTab(statusParam)
+  if (!nextTab) return
+  activeTab.value = nextTab
 })
 
 // Status-filtered task groups
@@ -274,10 +309,6 @@ function toggleSort(field: SortField) {
   }
 }
 
-const statusOrder: Record<string, number> = { created: 0, assigned: 1, in_progress: 2, in_review: 3, done: 4, overdue: 5, blocked: 6 }
-const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
-const typeOrder: Record<string, number> = { design: 0, development: 1, testing: 2, review: 3, research: 4, fix: 5, documentation: 6, deployment: 7 }
-
 function compareStr(a: string | null | undefined, b: string | null | undefined): number {
   return (a || '').localeCompare(b || '')
 }
@@ -308,13 +339,16 @@ const sortedTasks = computed(() => {
         cmp = a.title.localeCompare(b.title)
         break
       case 'status':
-        cmp = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99)
+        cmp = domainPresentation.orderValue(domainPresentation.taskStatusOrder.value, a.status)
+          - domainPresentation.orderValue(domainPresentation.taskStatusOrder.value, b.status)
         break
       case 'priority':
-        cmp = (priorityOrder[a.priority] ?? 99) - (priorityOrder[b.priority] ?? 99)
+        cmp = domainPresentation.orderValue(domainPresentation.taskPriorityOrder.value, a.priority)
+          - domainPresentation.orderValue(domainPresentation.taskPriorityOrder.value, b.priority)
         break
       case 'type':
-        cmp = (typeOrder[a.type || ''] ?? 99) - (typeOrder[b.type || ''] ?? 99)
+        cmp = domainPresentation.orderValue(domainPresentation.taskTypeOrder.value, a.type || '')
+          - domainPresentation.orderValue(domainPresentation.taskTypeOrder.value, b.type || '')
         break
       case 'story':
         cmp = compareStr((a as any).storyTitle, (b as any).storyTitle)
@@ -382,7 +416,7 @@ const defaultColumns: ColumnConfig[] = [
   { field: 'title', label: 'Title', width: '1fr', visible: true },
   { field: 'status', label: 'Status', width: '120px', visible: true },
   { field: 'priority', label: 'Priority', width: '100px', visible: true },
-  { field: 'type', label: 'Type', width: '110px', visible: false },
+  { field: 'type', label: 'Type', width: '110px', visible: true },
   { field: 'story', label: 'Story', width: '160px', visible: true },
   { field: 'owner', label: 'Owner', width: '140px', visible: false },
   { field: 'assignees', label: 'Assignees', width: '160px', visible: true },
@@ -401,83 +435,75 @@ const defaultColumns: ColumnConfig[] = [
   { field: 'blockedReason', label: 'Blocked Reason', width: '160px', visible: false },
 ]
 
-function mergeWithDefaults(saved: ColumnConfig[]): ColumnConfig[] {
-  const knownFields = new Set(saved.map(c => c.field))
-  const merged = [...saved]
-  for (const def of defaultColumns) {
-    if (!knownFields.has(def.field)) merged.push({ ...def })
+function mergeWithDefaults(saved: Partial<ColumnConfig>[]): ColumnConfig[] {
+  const defaultsByField = new Map(defaultColumns.map(c => [c.field, c]))
+  const seen = new Set<SortField>()
+  const merged: ColumnConfig[] = []
+
+  for (const item of saved) {
+    if (!item.field) continue
+    const def = defaultsByField.get(item.field)
+    if (!def) continue
+
+    merged.push({
+      field: def.field,
+      label: typeof item.label === 'string' && item.label.length > 0 ? item.label : def.label,
+      width: typeof item.width === 'string' && item.width.length > 0 ? item.width : def.width,
+      visible: typeof item.visible === 'boolean' ? item.visible : def.visible,
+    })
+    seen.add(def.field)
   }
+
+  for (const def of defaultColumns) {
+    if (!seen.has(def.field)) merged.push({ ...def })
+  }
+
   return merged
 }
 
 function loadColumnConfig(): ColumnConfig[] {
-  try {
-    const saved = localStorage.getItem('tasks-column-config')
-    if (saved) return mergeWithDefaults(JSON.parse(saved) as ColumnConfig[])
-  } catch { /* ignore */ }
+  const saved = storageGetJson<ColumnConfig[] | null>(TASK_COLUMN_CONFIG_KEY, null)
+  if (Array.isArray(saved)) return mergeWithDefaults(saved)
   return defaultColumns.map(c => ({ ...c }))
 }
 
 const columns = ref<ColumnConfig[]>(loadColumnConfig())
 const showColumnCustomizer = ref(false)
 
-// Debounced save to API
-let saveTimeout: ReturnType<typeof setTimeout> | null = null
-function saveUserSetting(key: string, value: any) {
-  if (!authStore.token) return
-  // Debounce API calls
-  if (saveTimeout) clearTimeout(saveTimeout)
-  saveTimeout = setTimeout(async () => {
-    try {
-      await fetch(`/api/settings/${key}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authStore.token}`,
-        },
-        body: JSON.stringify({ value }),
-      })
-    } catch { /* silently fail, localStorage is the fallback */ }
-  }, 500)
-}
-
 watch(columns, (v) => {
-  localStorage.setItem('tasks-column-config', JSON.stringify(v))
-  saveUserSetting('tasks-column-config', v)
+  storageSetJson(TASK_COLUMN_CONFIG_KEY, v)
+  saveUserSetting(TASK_COLUMN_CONFIG_KEY, v)
 }, { deep: true })
 
 // Load user settings from API on mount (overrides localStorage if available)
 async function loadUserSettings() {
   if (!authStore.token) return
   try {
-    const res = await fetch('/api/settings/', {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    if (!res.ok) return
-    const settings = await res.json()
+    const settings = await loadRemoteSettings()
 
-    if (settings['tasks-column-config']) {
-      const serverCols = mergeWithDefaults(settings['tasks-column-config'] as ColumnConfig[])
+    if (settings[TASK_COLUMN_CONFIG_KEY]) {
+      const serverCols = mergeWithDefaults(settings[TASK_COLUMN_CONFIG_KEY] as ColumnConfig[])
       columns.value = serverCols
-      localStorage.setItem('tasks-column-config', JSON.stringify(serverCols))
+      storageSetJson(TASK_COLUMN_CONFIG_KEY, serverCols)
     }
 
-    if (settings['tasks-view-mode']) {
-      viewMode.value = settings['tasks-view-mode'] as 'table' | 'card'
-      localStorage.setItem('tasks-view-mode', settings['tasks-view-mode'])
+    if (settings[TASK_VIEW_MODE_KEY]) {
+      viewMode.value = settings[TASK_VIEW_MODE_KEY] as 'table' | 'card'
+      storageSet(TASK_VIEW_MODE_KEY, settings[TASK_VIEW_MODE_KEY] as string)
     }
 
-    if (settings['tasks-column-widths']) {
-      const serverWidths = settings['tasks-column-widths'] as Record<string, number>
+    if (settings[TASK_COLUMN_WIDTHS_KEY]) {
+      const serverWidths = settings[TASK_COLUMN_WIDTHS_KEY] as Record<string, number>
       for (const [k, v] of Object.entries(serverWidths)) {
         if (typeof v === 'number' && v >= 60) columnWidths[k] = v
       }
-      localStorage.setItem('tasks-column-widths', JSON.stringify({ ...columnWidths }))
+      storageSetJson(TASK_COLUMN_WIDTHS_KEY, { ...columnWidths })
     }
   } catch { /* fall back to localStorage */ }
 }
 
 const visibleColumns = computed(() => columns.value.filter(c => c.visible))
+const isTypeColumnVisible = computed(() => visibleColumns.value.some((column) => column.field === 'type'))
 
 const gridTemplateCols = computed(() =>
   visibleColumns.value.map(c => (columnWidths[c.field] || parseDefaultWidth(c.width)) + 'px').join(' ')
@@ -508,11 +534,12 @@ function resetColumns() {
   for (const col of defaultColumns) {
     columnWidths[col.field] = parseDefaultWidth(col.width)
   }
-  localStorage.removeItem('tasks-column-widths')
+  storageRemove(TASK_COLUMN_WIDTHS_KEY)
 }
 
 // --- Column resize ---
-function parseDefaultWidth(w: string): number {
+function parseDefaultWidth(w?: string): number {
+  if (!w) return 200
   if (w.endsWith('px')) return parseInt(w)
   return 200 // default for 1fr
 }
@@ -522,15 +549,12 @@ function loadColumnWidths(): Record<string, number> {
   for (const col of defaultColumns) {
     widths[col.field] = parseDefaultWidth(col.width)
   }
-  try {
-    const saved = localStorage.getItem('tasks-column-widths')
-    if (saved) {
-      const parsed = JSON.parse(saved) as Record<string, number>
-      for (const [k, v] of Object.entries(parsed)) {
-        if (typeof v === 'number' && v >= 60) widths[k] = v
-      }
+  const saved = storageGetJson<Record<string, number> | null>(TASK_COLUMN_WIDTHS_KEY, null)
+  if (saved && typeof saved === 'object') {
+    for (const [k, v] of Object.entries(saved)) {
+      if (typeof v === 'number' && v >= 60) widths[k] = v
     }
-  } catch { /* ignore */ }
+  }
   return widths
 }
 
@@ -567,13 +591,14 @@ function onResizeEnd() {
   document.removeEventListener('mouseup', onResizeEnd)
   resizingCol.value = null
   // Persist
-  localStorage.setItem('tasks-column-widths', JSON.stringify({ ...columnWidths }))
-  saveUserSetting('tasks-column-widths', { ...columnWidths })
+  storageSetJson(TASK_COLUMN_WIDTHS_KEY, { ...columnWidths })
+  saveUserSetting(TASK_COLUMN_WIDTHS_KEY, { ...columnWidths })
 }
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onResizeMove)
   document.removeEventListener('mouseup', onResizeEnd)
+  cleanupSettings()
 })
 
 // Drag-and-drop reordering
@@ -606,6 +631,11 @@ function onDrop(idx: number) {
   }
   const arr = [...columns.value]
   const [moved] = arr.splice(dragIndex.value, 1)
+  if (!moved) {
+    dragIndex.value = null
+    dragOverIndex.value = null
+    return
+  }
   arr.splice(idx, 0, moved)
   columns.value = arr
   dragIndex.value = null
@@ -639,55 +669,37 @@ function toggleArchivedTab() {
 }
 
 async function restoreTask(taskId: string) {
+  if (!taskPermissions.canEdit.value) return
   await backlogStore.updateTask(taskId, { status: 'created' })
 }
 
+function toggleInlineEditMode() {
+  if (!taskPermissions.canEdit.value) return
+  inlineEditMode.value = !inlineEditMode.value
+  editingCell.value = null
+}
+
 // ===== Activity Timeline =====
-const showActivityDropdown = ref(false)
-const taskActivities = ref<Activity[]>([])
-const taskActivitiesLoading = ref(false)
-
-async function fetchTaskActivities() {
-  taskActivitiesLoading.value = true
-  try {
-    const p = productStore.activeProduct.name
-    const res = await fetch(`/api/activities?product=${encodeURIComponent(p)}&entityType=task&limit=50`)
-    if (res.ok) {
-      taskActivities.value = await res.json()
-    }
-  } catch (e) {
-    console.error('Failed to fetch task activities:', e)
-  } finally {
-    taskActivitiesLoading.value = false
-  }
-}
-
-function toggleActivityDropdown() {
-  showActivityDropdown.value = !showActivityDropdown.value
-  if (showActivityDropdown.value) {
-    fetchTaskActivities()
-  }
-}
-
-function onActivityClickOutside(event: MouseEvent) {
-  const target = event.target as HTMLElement
-  if (!target.closest('.activity-dropdown-container')) {
-    showActivityDropdown.value = false
-  }
-}
-
-watch(showActivityDropdown, (v) => {
-  if (v) {
-    setTimeout(() => document.addEventListener('click', onActivityClickOutside), 0)
-  } else {
-    document.removeEventListener('click', onActivityClickOutside)
-  }
+const {
+  showDropdown: showActivityDropdown,
+  activities: taskActivities,
+  loading: taskActivitiesLoading,
+  error: taskActivitiesError,
+  toggleDropdown: toggleActivityDropdown,
+  closeDropdown: closeActivityDropdown,
+  fetchActivities: fetchTaskActivities,
+} = useEntityActivityDropdown({
+  entityType: 'task',
+  token: computed(() => authStore.token),
+  productId: computed(() => productStore.activeProduct?.id || null),
+  fetchErrorMessage: 'Failed to fetch task activities.',
 })
 
 
 
 function openTaskFromActivity(entityId: string | null) {
   if (!entityId) return
+  closeActivityDropdown()
   const task = backlogStore.allTasks.find(t => t.id === entityId)
   if (task) {
     showActivityDropdown.value = false
@@ -841,14 +853,14 @@ function changeDisplayValue(field: string, value: string | null): string {
 }
 
 const groupedTaskActivities = computed(() => {
-  const groups: { label: string; activities: Activity[] }[] = []
+  const groups: { label: string; activities: Array<(typeof taskActivities.value)[number]> }[] = []
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const weekStart = new Date(today)
   weekStart.setDate(today.getDate() - today.getDay())
   const lastWeekStart = new Date(weekStart.getTime() - 7 * 86400000)
 
-  const buckets = new Map<string, Activity[]>()
+  const buckets = new Map<string, Array<(typeof taskActivities.value)[number]>>()
 
   for (const activity of taskActivities.value) {
     const d = new Date(activity.createdAt)
@@ -876,92 +888,40 @@ function getUserById(id: string): TeamUser | undefined {
 }
 
 function statusStyle(status: string) {
-  switch (status) {
-    case 'created': return 'bg-gray-400 text-white'
-    case 'assigned': return 'bg-[#a25ddc] text-white'
-    case 'in_progress': return 'bg-[#fdab3d] text-white'
-    case 'in_review': return 'bg-[#579bfc] text-white'
-    case 'done': return 'bg-[#00c875] text-white'
-    case 'overdue': return 'bg-red-500 text-white'
-    case 'blocked': return 'bg-[#e2445c] text-white'
-    case 'archived': return 'bg-gray-400 text-white'
-    default: return 'bg-gray-400 text-white'
-  }
+  return domainPresentation.taskStatusStyle(status)
 }
 
 function statusDotColor(status: string) {
-  switch (status) {
-    case 'created': return 'bg-gray-400'
-    case 'assigned': return 'bg-[#a25ddc]'
-    case 'in_progress': return 'bg-[#fdab3d]'
-    case 'in_review': return 'bg-[#579bfc]'
-    case 'done': return 'bg-[#00c875]'
-    case 'overdue': return 'bg-red-500'
-    case 'blocked': return 'bg-[#e2445c]'
-    case 'archived': return 'bg-gray-400'
-    default: return 'bg-gray-400'
-  }
+  return domainPresentation.taskStatusDot(status)
 }
 
 function statusTextColor(status: string) {
-  switch (status) {
-    case 'created': return 'text-gray-500'
-    case 'assigned': return 'text-[#a25ddc]'
-    case 'in_progress': return 'text-[#fdab3d]'
-    case 'in_review': return 'text-[#579bfc]'
-    case 'done': return 'text-[#00c875]'
-    case 'overdue': return 'text-red-500'
-    case 'blocked': return 'text-[#e2445c]'
-    case 'archived': return 'text-gray-400'
-    default: return 'text-gray-500'
-  }
+  return domainPresentation.taskStatusText(status)
 }
 
 function priorityStyle(priority: string) {
-  switch (priority) {
-    case 'critical': return 'bg-red-100 text-red-700 border border-red-200'
-    case 'high': return 'bg-orange-100 text-orange-700 border border-orange-200'
-    case 'medium': return 'bg-green-100 text-green-700 border border-green-200'
-    case 'low': return 'bg-blue-100 text-blue-700 border border-blue-200'
-    default: return 'bg-gray-100 text-gray-600 border border-gray-200'
-  }
+  return domainPresentation.taskPriorityStyle(priority)
 }
 
 function priorityDotStyle(priority: string) {
-  switch (priority) {
-    case 'critical': return 'bg-red-500'
-    case 'high': return 'bg-orange-500'
-    case 'medium': return 'bg-green-500'
-    case 'low': return 'bg-blue-500'
-    default: return 'bg-gray-400'
-  }
+  return domainPresentation.taskPriorityDot(priority)
 }
 
 function statusLabel(status: string) {
-  return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return domainPresentation.enumLabel(status)
 }
 
 function priorityLabel(priority: string) {
-  return priority.charAt(0).toUpperCase() + priority.slice(1)
+  return domainPresentation.enumLabel(priority)
 }
 
 function typeStyle(type: string | null) {
-  switch (type) {
-    case 'design': return 'bg-purple-50/80 text-purple-600'
-    case 'development': return 'bg-blue-50/80 text-blue-600'
-    case 'testing': return 'bg-green-50/80 text-green-600'
-    case 'review': return 'bg-cyan-50/80 text-cyan-600'
-    case 'research': return 'bg-yellow-50/80 text-yellow-600'
-    case 'fix': return 'bg-red-50/80 text-red-600'
-    case 'documentation': return 'bg-gray-50/80 text-gray-500'
-    case 'deployment': return 'bg-orange-50/80 text-orange-600'
-    default: return 'bg-gray-50/80 text-gray-500'
-  }
+  return domainPresentation.taskTypeStyle(type || '')
 }
 
 function typeLabel(type: string | null) {
   if (!type) return '—'
-  return type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return domainPresentation.enumLabel(type)
 }
 
 function formatDate(dateStr: string | null) {
@@ -990,7 +950,12 @@ function renderUserAvatar(userId: string | null) {
         <div class="flex items-center gap-3">
           <!-- Create Task -->
           <button
-            class="flex items-center gap-1.5 bg-[#4857FE] hover:bg-[#3E4BDE] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer"
+            class="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            :class="canCreateTasks
+              ? 'bg-[#4857FE] hover:bg-[#3E4BDE] text-white cursor-pointer'
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+            :disabled="!canCreateTasks"
+            :title="taskPermissions.deniedReason('create', 'tasks') || 'Create task'"
             @click="showCreateDialog = true"
           >
             <Plus :size="15" />
@@ -1117,6 +1082,7 @@ function renderUserAvatar(userId: string | null) {
             class="flex items-center gap-1.5 p-1.5 rounded-lg transition-colors cursor-pointer"
             :class="activeTab === 'archived' ? 'bg-[#4857FE]/10 text-[#4857FE]' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
             @click="toggleArchivedTab()"
+            aria-label="Toggle archived tasks"
             title="Archived tasks"
           >
             <Archive :size="16" />
@@ -1129,6 +1095,7 @@ function renderUserAvatar(userId: string | null) {
               class="flex items-center gap-1.5 p-1.5 rounded-lg transition-colors cursor-pointer"
               :class="showActivityDropdown ? 'bg-[#4857FE]/10 text-[#4857FE]' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
               @click.stop="toggleActivityDropdown()"
+              aria-label="Open task activity timeline"
               title="Activity timeline"
             >
               <Clock :size="16" />
@@ -1165,6 +1132,10 @@ function renderUserAvatar(userId: string | null) {
                   <!-- Loading -->
                   <div v-if="taskActivitiesLoading" class="flex items-center justify-center py-16">
                     <Loader2 :size="20" class="animate-spin text-gray-400" />
+                  </div>
+
+                  <div v-else-if="taskActivitiesError" class="text-center py-10 px-6">
+                    <p class="text-sm text-red-600">{{ taskActivitiesError }}</p>
                   </div>
 
                   <!-- Empty -->
@@ -1413,9 +1384,12 @@ function renderUserAvatar(userId: string | null) {
             class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer"
             :class="inlineEditMode
               ? 'bg-[#4857FE]/10 text-[#4857FE]'
-              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
-            @click="inlineEditMode = !inlineEditMode; editingCell = null"
-            title="Inline editing"
+              : canEditTasks
+                ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                : 'text-gray-300 cursor-not-allowed'"
+            :disabled="!canEditTasks"
+            @click="toggleInlineEditMode"
+            :title="taskPermissions.deniedReason('edit', 'tasks') || 'Inline editing'"
           >
             <PencilLine :size="15" />
             <span v-if="inlineEditMode" class="text-xs">Editing</span>
@@ -1498,7 +1472,7 @@ function renderUserAvatar(userId: string | null) {
                   @click="startTaskEditing(task.id, 'title', task.title, $event)"
                 >
                   <template v-if="isEditing(task.id, 'title')">
-                    <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProduct.name" />
+                    <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProduct.id || ''" />
                     <TaskStatusIcon :status="task.status" :size="18" />
                     <input
                       v-model="editValue"
@@ -1510,9 +1484,17 @@ function renderUserAvatar(userId: string | null) {
                     />
                   </template>
                   <template v-else>
-                    <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProduct.name" />
+                    <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProduct.id || ''" />
                     <TaskStatusIcon :status="task.status" :size="18" />
                     <span class="text-sm font-medium truncate" :class="(task.status === 'done' || task.status === 'archived') ? 'text-gray-400 line-through' : 'text-gray-800'">{{ task.title }}</span>
+                    <span
+                      v-if="task.type && !isTypeColumnVisible"
+                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium shrink-0"
+                      :class="typeStyle(task.type)"
+                    >
+                      <component :is="taskTypeIcon(task.type)" :size="11" />
+                      {{ typeLabel(task.type) }}
+                    </span>
                     <ChevronRight v-if="!inlineEditMode" :size="14" class="text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                   </template>
                 </div>
@@ -1566,7 +1548,8 @@ function renderUserAvatar(userId: string | null) {
                   :class="inlineEditMode ? 'cursor-pointer' : ''"
                   @click="startTaskEditing(task.id, 'type', task.type || '', $event)"
                 >
-                  <span class="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-medium" :class="typeStyle(task.type)">
+                  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium" :class="typeStyle(task.type)">
+                    <component v-if="task.type" :is="taskTypeIcon(task.type)" :size="12" />
                     {{ typeLabel(task.type) }}
                   </span>
                   <div v-if="isEditing(task.id, 'type')"
@@ -1865,8 +1848,12 @@ function renderUserAvatar(userId: string | null) {
               <!-- Restore button for archived tasks -->
               <button
                 v-if="activeTab === 'archived'"
-                class="ml-auto p-1 rounded-md hover:bg-green-50 text-gray-300 hover:text-green-500 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                title="Restore task"
+                class="ml-auto p-1 rounded-md transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                :class="canEditTasks
+                  ? 'hover:bg-green-50 text-gray-300 hover:text-green-500'
+                  : 'text-gray-200 cursor-not-allowed'"
+                :disabled="!canEditTasks"
+                :title="taskPermissions.deniedReason('edit', 'tasks') || 'Restore task'"
                 @click.stop="restoreTask(task.id)"
               >
                 <RotateCw :size="14" />
@@ -1901,7 +1888,7 @@ function renderUserAvatar(userId: string | null) {
               <!-- Row 1: Status badge -->
               <div class="flex items-center justify-between mb-3.5">
                 <div class="flex items-center gap-2">
-                  <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProduct.name" />
+                  <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProduct.id || ''" />
                   <div class="w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center">
                     <ListChecks :size="18" class="text-gray-400" />
                   </div>
@@ -1914,6 +1901,12 @@ function renderUserAvatar(userId: string | null) {
               <!-- Row 2: Title -->
               <div class="mb-1.5">
                 <h4 class="text-base font-semibold text-gray-900 line-clamp-2 leading-snug group-hover/card:text-[#4857FE] transition-colors">{{ task.title }}</h4>
+              </div>
+              <div v-if="task.type" class="mb-2.5">
+                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium" :class="typeStyle(task.type)">
+                  <component :is="taskTypeIcon(task.type)" :size="12" />
+                  {{ typeLabel(task.type) }}
+                </span>
               </div>
 
               <!-- Row 3: Description -->

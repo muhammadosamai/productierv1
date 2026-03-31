@@ -11,6 +11,9 @@ import {
 import { useRouter } from 'vue-router'
 import { useBacklogStore } from '@/stores/backlog'
 import { useAuthStore } from '@/stores/auth'
+import { useDomainOptions } from '@/composables/useDomainOptions'
+import { useDomainPresentation } from '@/composables/useDomainPresentation'
+import { apiFetch } from '@/lib/apiClient'
 import type { Story, StoryType, StoryStatus, StoryPriority, TaskComment } from '@/types/backlog'
 import AddTaskInline from '@/components/backlog/AddTaskInline.vue'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
@@ -63,6 +66,12 @@ const emit = defineEmits<{
 const router = useRouter()
 const backlogStore = useBacklogStore()
 const authStore = useAuthStore()
+const {
+  storyTypeOptions: baseStoryTypeOptions,
+  storyStatusOptions: statusOptions,
+  storyPriorityOptions: priorityOptions,
+} = useDomainOptions()
+const domainPresentation = useDomainPresentation()
 
 // Active tab
 const activeTab = ref<'description' | 'tasks' | 'comments' | 'activities'>('description')
@@ -103,33 +112,10 @@ const deletingCommentId = ref<string | null>(null)
 const commentTaskId = ref<string | null>(null) // null = story-level, task id = task-level
 const commentFilter = ref<string>('all') // 'all', 'story', or task id
 
-// Options
-const typeOptions: { value: StoryType; label: string; icon: any }[] = [
-  { value: 'feature', label: 'Feature', icon: Sparkles },
-  { value: 'bug', label: 'Bug', icon: Bug },
-  { value: 'improvement', label: 'Improvement', icon: Lightbulb },
-  { value: 'technical_debt', label: 'Technical Debt', icon: Wrench },
-  { value: 'research', label: 'Research', icon: FlaskConical },
-  { value: 'infrastructure', label: 'Infrastructure', icon: Server },
-  { value: 'testing', label: 'Testing', icon: TestTube2 },
-  { value: 'documentation', label: 'Documentation', icon: FileText },
-]
-
-const statusOptions: { value: StoryStatus; label: string }[] = [
-  { value: 'backlog', label: 'Backlog' },
-  { value: 'drafted', label: 'Drafted' },
-  { value: 'initialized', label: 'Initialized' },
-  { value: 'in_progress', label: 'In Progress' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'archived', label: 'Archived' },
-]
-
-const priorityOptions: { value: StoryPriority; label: string }[] = [
-  { value: 'critical', label: 'Critical' },
-  { value: 'high', label: 'High' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'low', label: 'Low' },
-]
+const typeOptions = computed(() => baseStoryTypeOptions.value.map((option) => ({
+  ...option,
+  icon: domainPresentation.storyTypeIcon(option.value),
+})))
 
 const filteredOwnerMembers = computed(() => {
   const q = ownerSearchQuery.value.toLowerCase().trim()
@@ -164,7 +150,10 @@ async function loadActivities(storyId: string) {
     // Aggregate activities for the story + all its child tasks
     const taskIds = props.story?.tasks?.map(t => t.id) || []
     const allIds = [storyId, ...taskIds].join(',')
-    const res = await fetch(`/api/activities?entityIds=${allIds}&limit=50`)
+    const res = await apiFetch('/activities', {
+      token: authStore.token,
+      query: { entityIds: allIds, limit: 50 },
+    })
     if (res.ok) {
       activities.value = await res.json()
     }
@@ -284,7 +273,7 @@ async function selectOwner(user: TeamUser) {
   ownerSearchQuery.value = ''
   saving.value = true
   try {
-    await backlogStore.updateStory(props.story!.id, { owner: user.name, ownerAvatar: user.avatar || null })
+    await backlogStore.updateStory(props.story!.id, { ownerUserId: user.id })
     emit('updated')
   } catch {}
   finally {
@@ -297,7 +286,7 @@ async function clearOwner() {
   showOwnerDropdown.value = false
   saving.value = true
   try {
-    await backlogStore.updateStory(props.story!.id, { owner: null, ownerAvatar: null })
+    await backlogStore.updateStory(props.story!.id, { ownerUserId: null })
     emit('updated')
   } catch {}
   finally {
@@ -352,68 +341,27 @@ function onBackdropClick() {
 // ============ STYLING ============
 
 function statusStyle(status: string) {
-  switch (status) {
-    case 'backlog': return 'bg-[#c4c4c4] text-white'
-    case 'drafted': return 'bg-[#a25ddc] text-white'
-    case 'initialized': return 'bg-[#579bfc] text-white'
-    case 'in_progress': return 'bg-[#fdab3d] text-white'
-    case 'completed': return 'bg-[#00c875] text-white'
-    case 'archived': return 'bg-gray-400 text-white'
-    default: return 'bg-gray-400 text-white'
-  }
+  return domainPresentation.storyStatusStyle(status)
 }
 
 function priorityStyle(priority: string) {
-  switch (priority) {
-    case 'critical': return 'bg-red-100 text-red-700 border border-red-200'
-    case 'high': return 'bg-orange-100 text-orange-700 border border-orange-200'
-    case 'medium': return 'bg-green-100 text-green-700 border border-green-200'
-    case 'low': return 'bg-blue-100 text-blue-700 border border-blue-200'
-    default: return 'bg-gray-100 text-gray-600 border border-gray-200'
-  }
+  return domainPresentation.storyPriorityStyle(priority)
 }
 
 function typeBadgeStyle(type: string) {
-  switch (type) {
-    case 'feature': return 'bg-blue-50/80 text-blue-600'
-    case 'bug': return 'bg-red-50/80 text-red-600'
-    case 'improvement': return 'bg-purple-50/80 text-purple-600'
-    case 'technical_debt': return 'bg-orange-50/80 text-orange-600'
-    case 'research': return 'bg-yellow-50/80 text-yellow-600'
-    case 'infrastructure': return 'bg-gray-100/80 text-gray-600'
-    case 'testing': return 'bg-green-50/80 text-green-600'
-    case 'documentation': return 'bg-gray-50/80 text-gray-500'
-    default: return 'bg-gray-50/80 text-gray-500'
-  }
+  return domainPresentation.storyTypeStyle(type)
 }
 
 function typeIconColor(type: string) {
-  switch (type) {
-    case 'feature': return 'text-blue-500'
-    case 'bug': return 'text-red-500'
-    case 'improvement': return 'text-purple-500'
-    case 'technical_debt': return 'text-orange-500'
-    case 'research': return 'text-yellow-500'
-    case 'infrastructure': return 'text-gray-500'
-    case 'testing': return 'text-green-500'
-    case 'documentation': return 'text-gray-400'
-    default: return 'text-gray-400'
-  }
+  return domainPresentation.storyTypeIconColor(type)
 }
 
-const typeIcons: Record<string, any> = {
-  feature: Sparkles,
-  bug: Bug,
-  improvement: Lightbulb,
-  technical_debt: Wrench,
-  research: FlaskConical,
-  infrastructure: Server,
-  testing: TestTube2,
-  documentation: FileText,
+function storyTypeIcon(type: string) {
+  return domainPresentation.storyTypeIcon(type)
 }
 
 function label(s: string) {
-  return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return domainPresentation.enumLabel(s)
 }
 
 function formatDate(dateStr: string | null) {
@@ -644,18 +592,15 @@ async function submitComment() {
   // Determine endpoint based on commentTaskId
   const isStoryComment = !commentTaskId.value
   const url = isStoryComment
-    ? `/api/stories/${props.story.id}/comments`
-    : `/api/tasks/${commentTaskId.value}/comments`
+    ? `/stories/${props.story.id}/comments`
+    : `/tasks/${commentTaskId.value}/comments`
 
   sendingComment.value = true
   try {
-    const res = await fetch(url, {
+    const res = await apiFetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${authStore.token}`,
-      },
-      body: JSON.stringify({ content: newComment.value.trim() }),
+      token: authStore.token,
+      json: { content: newComment.value.trim() },
     })
     if (res.ok) {
       newComment.value = ''
@@ -670,9 +615,9 @@ async function deleteComment(comment: UnifiedComment) {
   deletingCommentId.value = comment.id
   try {
     if (comment.source === 'story') {
-      await fetch(`/api/stories/${props.story.id}/comments/${comment.id}`, {
+      await apiFetch(`/stories/${props.story.id}/comments/${comment.id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${authStore.token}` },
+        token: authStore.token,
       })
       emit('updated')
     } else {
@@ -761,7 +706,7 @@ async function deleteComment(comment: UnifiedComment) {
                 @click.stop="startEditTitle"
                 :title="story.title"
               >
-                <component :is="typeIcons[story.type] || Circle" :size="16" :class="typeIconColor(story.type)" class="shrink-0" />
+                <component :is="storyTypeIcon(story.type)" :size="16" :class="typeIconColor(story.type)" class="shrink-0" />
                 <span class="truncate">{{ story.title }}</span>
                 <span class="text-xs text-gray-300 opacity-0 group-hover/title:opacity-100 ml-1 transition-opacity shrink-0">edit</span>
               </h2>
@@ -828,7 +773,7 @@ async function deleteComment(comment: UnifiedComment) {
                     :class="typeBadgeStyle(story.type)"
                     @click="showTypeDropdown = !showTypeDropdown; showStatusDropdown = false; showPriorityDropdown = false; showOwnerDropdown = false"
                   >
-                    <component :is="typeIcons[story.type] || Circle" :size="12" />
+                    <component :is="storyTypeIcon(story.type)" :size="12" />
                     {{ label(story.type) }}
                     <ChevronDown :size="12" />
                   </button>

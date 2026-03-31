@@ -3,6 +3,8 @@ import { ref, watch, computed } from 'vue'
 import { useBacklogStore } from '@/stores/backlog'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
+import { usersApi } from '@/lib/api'
+import { organizationTeamsApi } from '@/lib/apiClient'
 import {
   Dialog,
   DialogContent,
@@ -43,6 +45,12 @@ interface UserResult {
   avatar: string | null
 }
 
+interface TeamResult {
+  id: string
+  name: string
+  key: string
+}
+
 const open = defineModel<boolean>('open', { default: false })
 
 const emit = defineEmits<{
@@ -59,6 +67,46 @@ const type = ref<TaskType>('development')
 const priority = ref<TaskPriority>('medium')
 const selectedStoryId = ref('')
 const submitting = ref(false)
+const activeProductLogoFailed = ref(false)
+const showActiveProductLogo = computed(
+  () => Boolean(productStore.activeProduct.logo) && !activeProductLogoFailed.value,
+)
+
+const taskTypeIcons: Record<TaskType, any> = {
+  design: Palette,
+  development: Code2,
+  testing: TestTube2,
+  review: Eye,
+  research: FlaskConical,
+  fix: Wrench,
+  documentation: FileText,
+  deployment: Rocket,
+}
+
+const taskTypeColors: Record<TaskType, string> = {
+  design: 'text-[#7C5CFC]',
+  development: 'text-[#4857FE]',
+  testing: 'text-[#00c875]',
+  review: 'text-[#06b6d4]',
+  research: 'text-[#eab308]',
+  fix: 'text-[#e2445c]',
+  documentation: 'text-[#a1a1aa]',
+  deployment: 'text-[#fdab3d]',
+}
+
+function taskTypeLabel(value: TaskType) {
+  switch (value) {
+    case 'design': return 'Design'
+    case 'development': return 'Development'
+    case 'testing': return 'Testing'
+    case 'review': return 'Review'
+    case 'research': return 'Research'
+    case 'fix': return 'Fix'
+    case 'documentation': return 'Documentation'
+    case 'deployment': return 'Deployment'
+    default: return value
+  }
+}
 
 // Story search
 const storySearchQuery = ref('')
@@ -88,62 +136,106 @@ function clearStory() {
   storySearchQuery.value = ''
 }
 
-// Owner search
-const ownerUserId = ref<string | null>(null)
-const ownerSearchQuery = ref('')
-const ownerSearchResults = ref<UserResult[]>([])
-const ownerSearchLoading = ref(false)
-const showOwnerDropdown = ref(false)
-let ownerSearchTimeout: ReturnType<typeof setTimeout> | null = null
+function onStoryFocus() {
+  showStoryDropdown.value = true
+}
 
-const selectedOwner = computed(() => {
-  if (!ownerUserId.value) return null
-  return ownerSearchResults.value.find(u => u.id === ownerUserId.value) || cachedOwner.value
+function onStoryBlur() {
+  globalThis.setTimeout(() => {
+    showStoryDropdown.value = false
+  }, 150)
+}
+
+// Owner is always the task creator; assignee can be a member or a team.
+const creatorOwner = computed(() => authStore.user)
+const assigneeUserId = ref<string | null>(null)
+const assigneeTeamId = ref<string | null>(null)
+const assigneeSearchQuery = ref('')
+const assigneeSearchResults = ref<UserResult[]>([])
+const assigneeTeams = ref<TeamResult[]>([])
+const assigneeSearchLoading = ref(false)
+const showAssigneeDropdown = ref(false)
+let assigneeSearchTimeout: ReturnType<typeof setTimeout> | null = null
+
+const selectedAssignee = computed(() => {
+  if (!assigneeUserId.value) return null
+  return assigneeSearchResults.value.find((u) => u.id === assigneeUserId.value) || cachedAssignee.value
 })
 
-const cachedOwner = ref<UserResult | null>(null)
+const cachedAssignee = ref<UserResult | null>(null)
 
-async function searchOwners(query: string) {
-  ownerSearchLoading.value = true
+function onActiveProductLogoError(): void {
+  activeProductLogoFailed.value = true
+}
+
+async function searchAssignees(query: string) {
+  assigneeSearchLoading.value = true
   try {
-    const res = await fetch(`/api/auth/users?q=${encodeURIComponent(query)}`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    if (res.ok) {
-      ownerSearchResults.value = await res.json()
-    }
+    const payload = await usersApi.list({ q: query }, authStore.token)
+    assigneeSearchResults.value = Array.isArray(payload)
+      ? payload
+      : (Array.isArray(payload?.items) ? payload.items : [])
   } catch {
-    ownerSearchResults.value = []
+    assigneeSearchResults.value = []
   } finally {
-    ownerSearchLoading.value = false
+    assigneeSearchLoading.value = false
   }
 }
 
-function onOwnerInput() {
-  showOwnerDropdown.value = true
-  if (ownerSearchTimeout) clearTimeout(ownerSearchTimeout)
-  ownerSearchTimeout = setTimeout(() => {
-    searchOwners(ownerSearchQuery.value)
+async function loadAssigneeTeams() {
+  const organizationId = productStore.activeProduct.organizationId
+  if (!organizationId) {
+    assigneeTeams.value = []
+    return
+  }
+  try {
+    const payload = await organizationTeamsApi.list(organizationId, {}, authStore.token)
+    assigneeTeams.value = Array.isArray(payload)
+      ? payload.map((team) => ({ id: team.id, name: team.name, key: team.key }))
+      : []
+  } catch {
+    assigneeTeams.value = []
+  }
+}
+
+function onAssigneeInput() {
+  showAssigneeDropdown.value = true
+  if (assigneeSearchTimeout) clearTimeout(assigneeSearchTimeout)
+  assigneeSearchTimeout = setTimeout(() => {
+    searchAssignees(assigneeSearchQuery.value)
   }, 200)
 }
 
-function selectOwner(user: UserResult) {
-  ownerUserId.value = user.id
-  cachedOwner.value = user
-  ownerSearchQuery.value = ''
-  showOwnerDropdown.value = false
+function selectAssignee(user: UserResult) {
+  assigneeUserId.value = user.id
+  assigneeTeamId.value = null
+  cachedAssignee.value = user
+  assigneeSearchQuery.value = ''
+  showAssigneeDropdown.value = false
 }
 
-function clearOwner() {
-  ownerUserId.value = null
-  cachedOwner.value = null
-  ownerSearchQuery.value = ''
+function clearAssignee() {
+  assigneeUserId.value = null
+  cachedAssignee.value = null
+  assigneeSearchQuery.value = ''
 }
 
-function onOwnerFocus() {
-  showOwnerDropdown.value = true
-  if (!ownerUserId.value) searchOwners(ownerSearchQuery.value)
+function onAssigneeFocus() {
+  showAssigneeDropdown.value = true
+  if (!assigneeUserId.value) searchAssignees(assigneeSearchQuery.value)
 }
+
+function onAssigneeBlur() {
+  globalThis.setTimeout(() => {
+    showAssigneeDropdown.value = false
+  }, 150)
+}
+
+watch(assigneeTeamId, (teamId) => {
+  if (teamId && assigneeUserId.value) {
+    clearAssignee()
+  }
+})
 
 // Status colors for story dots
 function storyStatusDot(status: string) {
@@ -168,11 +260,12 @@ function resetForm() {
   selectedStoryId.value = ''
   storySearchQuery.value = ''
   showStoryDropdown.value = false
-  ownerUserId.value = null
-  cachedOwner.value = null
-  ownerSearchQuery.value = ''
-  ownerSearchResults.value = []
-  showOwnerDropdown.value = false
+  assigneeUserId.value = null
+  assigneeTeamId.value = null
+  cachedAssignee.value = null
+  assigneeSearchQuery.value = ''
+  assigneeSearchResults.value = []
+  showAssigneeDropdown.value = false
 }
 
 // Only reset form after successful submission
@@ -181,6 +274,19 @@ watch(open, (val) => {
     resetForm()
     submitted.value = false
   }
+  if (val) {
+    activeProductLogoFailed.value = false
+    loadAssigneeTeams()
+  }
+})
+
+watch(() => productStore.activeProduct.id, () => {
+  activeProductLogoFailed.value = false
+  if (open.value) loadAssigneeTeams()
+})
+
+watch(() => productStore.activeProduct.logo, () => {
+  activeProductLogoFailed.value = false
 })
 
 async function handleSubmit() {
@@ -192,7 +298,9 @@ async function handleSubmit() {
     description: description.value.trim() || null,
     type: type.value,
     priority: priority.value,
-    ownerUserId: ownerUserId.value,
+    ownerUserId: authStore.user?.id || null,
+    assigneeUserIds: assigneeUserId.value ? [assigneeUserId.value] : null,
+    assigneeTeamIds: assigneeTeamId.value ? [assigneeTeamId.value] : null,
   })
 
   submitting.value = false
@@ -204,7 +312,7 @@ async function handleSubmit() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-[520px] !overflow-visible">
+    <DialogContent class="sm:max-w-[520px] overflow-visible!">
       <DialogHeader>
         <DialogTitle>Create Task</DialogTitle>
         <DialogDescription>Create a new task under a story.</DialogDescription>
@@ -255,13 +363,13 @@ async function handleSubmit() {
                 v-model="storySearchQuery"
                 class="text-sm text-gray-900 bg-transparent outline-none w-full placeholder-gray-400"
                 placeholder="Search stories..."
-                @focus="showStoryDropdown = true"
-                @blur="setTimeout(() => showStoryDropdown = false, 150)"
+                @focus="onStoryFocus"
+                @blur="onStoryBlur"
               />
             </div>
             <div
               v-if="showStoryDropdown && filteredStories.length > 0"
-              class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[200px] overflow-auto z-[100]"
+              class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[200px] overflow-auto z-100"
               @mousedown.prevent
             >
               <button
@@ -277,7 +385,7 @@ async function handleSubmit() {
             </div>
             <div
               v-else-if="showStoryDropdown && storySearchQuery && filteredStories.length === 0"
-              class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-[100]"
+              class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-100"
             >
               <p class="text-xs text-gray-400 text-center">No stories found</p>
             </div>
@@ -290,7 +398,10 @@ async function handleSubmit() {
             <label class="text-sm font-medium text-gray-700">Type</label>
             <Select v-model="type">
               <SelectTrigger>
-                <SelectValue placeholder="Select type" />
+                <span class="inline-flex items-center gap-2">
+                  <component :is="taskTypeIcons[type]" :size="14" :class="taskTypeColors[type]" />
+                  {{ taskTypeLabel(type) }}
+                </span>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="design">
@@ -386,8 +497,19 @@ async function handleSubmit() {
           <div class="space-y-1.5">
             <label class="text-sm font-medium text-gray-700">Product</label>
             <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 bg-gray-50 text-sm text-gray-500 cursor-not-allowed">
-              <div v-if="productStore.activeProduct.logo" class="w-5 h-5 rounded overflow-hidden shrink-0">
-                <img :src="productStore.activeProduct.logo" class="w-full h-full object-cover" :alt="productStore.activeProduct.name" />
+              <div v-if="showActiveProductLogo" class="w-5 h-5 rounded overflow-hidden shrink-0">
+                <img
+                  :src="productStore.activeProduct.logo"
+                  class="w-full h-full object-cover"
+                  :alt="productStore.activeProduct.name"
+                  @error="onActiveProductLogoError"
+                />
+              </div>
+              <div
+                v-else
+                class="w-5 h-5 rounded bg-[#4857FE]/10 flex items-center justify-center text-[9px] font-bold text-[#4857FE] shrink-0"
+              >
+                {{ productStore.activeProduct.name.slice(0, 2).toUpperCase() }}
               </div>
               <span class="truncate">{{ productStore.activeProduct.name }}</span>
             </div>
@@ -395,61 +517,96 @@ async function handleSubmit() {
 
           <div class="space-y-1.5">
             <label class="text-sm font-medium text-gray-700">Owner</label>
-            <!-- Selected owner display -->
-            <div v-if="selectedOwner" class="flex items-center gap-2.5 border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white">
+            <div class="flex items-center gap-2.5 border border-gray-200 rounded-lg px-2.5 py-1.5 bg-gray-50">
               <div class="w-6 h-6 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[9px] font-medium overflow-hidden shrink-0">
-                <img v-if="selectedOwner.avatar" :src="selectedOwner.avatar" class="w-6 h-6 rounded-full object-cover" :alt="selectedOwner.name" />
-                <span v-else>{{ selectedOwner.name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2) }}</span>
+                <img
+                  v-if="creatorOwner?.avatar"
+                  :src="creatorOwner.avatar"
+                  class="w-6 h-6 rounded-full object-cover"
+                  :alt="creatorOwner.name"
+                />
+                <span v-else>{{ (creatorOwner?.name || 'U').split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2) }}</span>
               </div>
-              <span class="text-sm font-medium text-gray-900 flex-1 truncate">{{ selectedOwner.name }}</span>
-              <button type="button" class="text-gray-400 hover:text-gray-600 shrink-0" @click="clearOwner">
-                <X :size="14" />
+              <span class="text-sm font-medium text-gray-900 flex-1 truncate">{{ creatorOwner?.name || 'Current user' }}</span>
+            </div>
+            <p class="text-[11px] text-gray-500">
+              Owner is automatically set to the task creator.
+            </p>
+          </div>
+        </div>
+
+        <div class="space-y-1.5">
+          <label class="text-sm font-medium text-gray-700">Assignee</label>
+          <!-- Selected assignee display -->
+          <div v-if="selectedAssignee" class="flex items-center gap-2.5 border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white">
+            <div class="w-6 h-6 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[9px] font-medium overflow-hidden shrink-0">
+              <img v-if="selectedAssignee.avatar" :src="selectedAssignee.avatar" class="w-6 h-6 rounded-full object-cover" :alt="selectedAssignee.name" />
+              <span v-else>{{ selectedAssignee.name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2) }}</span>
+            </div>
+            <span class="text-sm font-medium text-gray-900 flex-1 truncate">{{ selectedAssignee.name }}</span>
+            <button type="button" class="text-gray-400 hover:text-gray-600 shrink-0" @click="clearAssignee">
+              <X :size="14" />
+            </button>
+          </div>
+          <!-- Assignee search input -->
+          <div v-else class="relative">
+            <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-2.5 py-1.5 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white">
+              <Search :size="14" class="text-gray-400 shrink-0" />
+              <input
+                v-model="assigneeSearchQuery"
+                class="text-sm text-gray-900 bg-transparent outline-none w-full placeholder-gray-400"
+                placeholder="Search users..."
+                @input="onAssigneeInput"
+                @focus="onAssigneeFocus"
+                @blur="onAssigneeBlur"
+              />
+              <Loader2 v-if="assigneeSearchLoading" :size="14" class="text-gray-400 animate-spin shrink-0" />
+            </div>
+            <div
+              v-if="showAssigneeDropdown && assigneeSearchResults.length > 0"
+              class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[200px] overflow-auto z-100"
+              @mousedown.prevent
+            >
+              <button
+                v-for="user in assigneeSearchResults"
+                :key="user.id"
+                type="button"
+                class="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
+                @click="selectAssignee(user)"
+              >
+                <div class="w-6 h-6 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[9px] font-medium overflow-hidden shrink-0">
+                  <img v-if="user.avatar" :src="user.avatar" class="w-6 h-6 rounded-full object-cover" :alt="user.name" />
+                  <span v-else>{{ user.name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2) }}</span>
+                </div>
+                <div class="flex flex-col min-w-0">
+                  <span class="text-sm font-medium text-gray-900 truncate">{{ user.name }}</span>
+                  <span class="text-[10px] text-gray-400 truncate">{{ user.email }}</span>
+                </div>
               </button>
             </div>
-            <!-- Owner search input -->
-            <div v-else class="relative">
-              <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-2.5 py-1.5 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white">
-                <Search :size="14" class="text-gray-400 shrink-0" />
-                <input
-                  v-model="ownerSearchQuery"
-                  class="text-sm text-gray-900 bg-transparent outline-none w-full placeholder-gray-400"
-                  placeholder="Search users..."
-                  @input="onOwnerInput"
-                  @focus="onOwnerFocus"
-                  @blur="setTimeout(() => showOwnerDropdown = false, 150)"
-                />
-                <Loader2 v-if="ownerSearchLoading" :size="14" class="text-gray-400 animate-spin shrink-0" />
-              </div>
-              <div
-                v-if="showOwnerDropdown && ownerSearchResults.length > 0"
-                class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[200px] overflow-auto z-[100]"
-                @mousedown.prevent
-              >
-                <button
-                  v-for="user in ownerSearchResults"
-                  :key="user.id"
-                  type="button"
-                  class="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
-                  @click="selectOwner(user)"
-                >
-                  <div class="w-6 h-6 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[9px] font-medium overflow-hidden shrink-0">
-                    <img v-if="user.avatar" :src="user.avatar" class="w-6 h-6 rounded-full object-cover" :alt="user.name" />
-                    <span v-else>{{ user.name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2) }}</span>
-                  </div>
-                  <div class="flex flex-col min-w-0">
-                    <span class="text-sm font-medium text-gray-900 truncate">{{ user.name }}</span>
-                    <span class="text-[10px] text-gray-400 truncate">{{ user.email }}</span>
-                  </div>
-                </button>
-              </div>
-              <div
-                v-else-if="showOwnerDropdown && ownerSearchQuery && !ownerSearchLoading && ownerSearchResults.length === 0"
-                class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-[100]"
-              >
-                <p class="text-xs text-gray-400 text-center">No users found</p>
-              </div>
+            <div
+              v-else-if="showAssigneeDropdown && assigneeSearchQuery && !assigneeSearchLoading && assigneeSearchResults.length === 0"
+              class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-100"
+            >
+              <p class="text-xs text-gray-400 text-center">No users found</p>
             </div>
           </div>
+        </div>
+
+        <div class="space-y-1.5">
+          <label class="text-sm font-medium text-gray-700">Assignee Team</label>
+          <select
+            v-model="assigneeTeamId"
+            class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white outline-none focus:border-[#4857FE] focus:ring-1 focus:ring-[#4857FE]/20"
+          >
+            <option :value="null">No assignee team</option>
+            <option v-for="team in assigneeTeams" :key="team.id" :value="team.id">
+              {{ team.name }} ({{ team.key }})
+            </option>
+          </select>
+          <p class="text-[11px] text-gray-500">
+            Assign to a team instead of an individual member. Choosing a team clears individual assignee.
+          </p>
         </div>
 
         <DialogFooter class="gap-2">

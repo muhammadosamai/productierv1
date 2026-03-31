@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft, Loader2, Pencil, Check, X, Plus,
@@ -8,15 +8,17 @@ import {
 } from 'lucide-vue-next'
 import { useReleasesStore } from '@/stores/releases'
 import { useDeliveriesStore } from '@/stores/deliveries'
-import { useServersStore } from '@/stores/servers'
-import { useProductStore } from '@/stores/products'
-import { useAuthStore } from '@/stores/auth'
+import { usePagePermissions } from '@/lib/pagePermissions'
 import type { Release, ReleaseDeployment, TargetStatus, Environment } from '@/types/release'
 import {
   Popover,
   PopoverTrigger,
   PopoverContent,
 } from '@/components/ui/popover'
+import { useDomainOptions } from '@/composables/useDomainOptions'
+import { useDomainPresentation } from '@/composables/useDomainPresentation'
+import { formatDateWithYear } from '@/lib/locale'
+import { sanitizeHtml } from '@/lib/sanitizeHtml'
 import DeploymentEnvironmentCard from '@/components/release/DeploymentEnvironmentCard.vue'
 import AddServerDialog from '@/components/release/AddServerDialog.vue'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
@@ -25,9 +27,13 @@ const route = useRoute()
 const router = useRouter()
 const releasesStore = useReleasesStore()
 const deliveriesStore = useDeliveriesStore()
-const serversStore = useServersStore()
-const productStore = useProductStore()
-const authStore = useAuthStore()
+const releasePermissions = usePagePermissions('releases')
+const canEditReleases = computed(() => releasePermissions.canEdit.value)
+const {
+  releaseStatusValues: statusOptions,
+  releaseTypeValues: releaseTypeOptions,
+} = useDomainOptions()
+const domainPresentation = useDomainPresentation()
 
 const release = ref<Release | null>(null)
 const loading = ref(true)
@@ -38,6 +44,7 @@ const editingField = ref<string | null>(null)
 const editTitle = ref('')
 const editVersion = ref('')
 const editNotes = ref('')
+const sanitizedReleaseNotes = computed(() => sanitizeHtml(release.value?.releaseNotes || ''))
 
 // Add server dialog
 const showAddServerDialog = ref(false)
@@ -62,55 +69,25 @@ onMounted(() => {
   deliveriesStore.fetchDeliveries()
 })
 
-// Status styling
-function statusStyle(status: string) {
-  switch (status) {
-    case 'draft': return 'bg-gray-100 text-gray-600'
-    case 'planned': return 'bg-purple-50 text-purple-600'
-    case 'in_progress': return 'bg-orange-50 text-orange-600'
-    case 'completed': return 'bg-green-50 text-green-600'
-    case 'failed': return 'bg-red-50 text-red-600'
-    default: return 'bg-gray-50 text-gray-500'
-  }
-}
-
-function statusDotColor(status: string) {
-  switch (status) {
-    case 'draft': return 'bg-gray-400'
-    case 'planned': return 'bg-purple-500'
-    case 'in_progress': return 'bg-orange-500'
-    case 'completed': return 'bg-green-500'
-    case 'failed': return 'bg-red-500'
-    default: return 'bg-gray-400'
-  }
-}
-
-function typeStyle(type: string) {
-  switch (type) {
-    case 'feature': return 'bg-blue-50 text-blue-600'
-    case 'hotfix': return 'bg-red-50 text-red-600'
-    case 'patch': return 'bg-yellow-50 text-yellow-600'
-    default: return 'bg-gray-50 text-gray-500'
-  }
-}
-
-function statusLabel(s: string) { return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) }
-function typeLabel(t: string) { return t.replace(/\b\w/g, l => l.toUpperCase()) }
+function statusStyle(status: string) { return domainPresentation.releaseStatusStyle(status) }
+function statusDotColor(status: string) { return domainPresentation.releaseStatusDot(status) }
+function typeStyle(type: string) { return domainPresentation.releaseTypeStyle(type) }
+function statusLabel(value: string) { return domainPresentation.enumLabel(value) }
+function typeLabel(value: string) { return domainPresentation.enumLabel(value) }
 function formatDate(d: string | null) {
   if (!d) return '—'
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  return formatDateWithYear(d)
 }
 
-// Status options
-const statusOptions = ['draft', 'planned', 'in_progress', 'completed', 'failed']
-
 async function updateStatus(newStatus: string) {
+  if (!canEditReleases.value) return
   if (!release.value) return
   await releasesStore.updateRelease(release.value.id, { status: newStatus as any })
   await fetchRelease()
 }
 
 async function updateType(newType: string) {
+  if (!canEditReleases.value) return
   if (!release.value) return
   await releasesStore.updateRelease(release.value.id, { releaseType: newType as any })
   await fetchRelease()
@@ -118,6 +95,7 @@ async function updateType(newType: string) {
 
 // Inline editing
 function startEdit(field: string) {
+  if (!canEditReleases.value) return
   editingField.value = field
   if (field === 'title') editTitle.value = release.value?.title || ''
   if (field === 'version') editVersion.value = release.value?.version || ''
@@ -125,6 +103,7 @@ function startEdit(field: string) {
 }
 
 async function saveEdit(field: string) {
+  if (!canEditReleases.value) return
   if (!release.value) return
   const payload: any = {}
   if (field === 'title') payload.title = editTitle.value
@@ -160,6 +139,7 @@ const availableDeliveries = computed(() => {
 })
 
 async function attachDelivery(deliveryId: string) {
+  if (!canEditReleases.value) return
   if (!release.value) return
   const currentIds = (release.value.releaseDeliveries || []).map(rd => rd.deliveryId)
   await releasesStore.updateRelease(release.value.id, {
@@ -170,6 +150,7 @@ async function attachDelivery(deliveryId: string) {
 }
 
 async function detachDelivery(deliveryId: string) {
+  if (!canEditReleases.value) return
   if (!release.value) return
   const currentIds = (release.value.releaseDeliveries || []).map(rd => rd.deliveryId)
   await releasesStore.updateRelease(release.value.id, {
@@ -182,6 +163,7 @@ async function detachDelivery(deliveryId: string) {
 const generatingNotes = ref(false)
 
 async function generateNotes() {
+  if (!canEditReleases.value) return
   if (!release.value) return
   generatingNotes.value = true
 
@@ -257,6 +239,7 @@ async function generateNotes() {
 
 // Server management
 function openAddServer(deploymentId: string, environment: string) {
+  if (!canEditReleases.value) return
   addServerDeploymentId.value = deploymentId
   addServerEnvironment.value = environment as Environment
   const dep = deployments.value.find(d => d.id === deploymentId)
@@ -265,24 +248,28 @@ function openAddServer(deploymentId: string, environment: string) {
 }
 
 async function onServersSelected(serverIds: string[]) {
+  if (!canEditReleases.value) return
   if (!release.value) return
   await releasesStore.addDeploymentTargets(release.value.id, addServerDeploymentId.value, serverIds)
   await fetchRelease()
 }
 
 async function onUpdateTarget(deploymentId: string, targetId: string, status: TargetStatus) {
+  if (!canEditReleases.value) return
   if (!release.value) return
   await releasesStore.updateTargetStatus(release.value.id, deploymentId, targetId, status)
   await fetchRelease()
 }
 
 async function onRemoveTarget(deploymentId: string, targetId: string) {
+  if (!canEditReleases.value) return
   if (!release.value) return
   await releasesStore.removeDeploymentTarget(release.value.id, deploymentId, targetId)
   await fetchRelease()
 }
 
 async function onUpdateDeployment(deploymentId: string, payload: { status?: string; notes?: string | null }) {
+  if (!canEditReleases.value) return
   if (!release.value) return
   await releasesStore.updateDeployment(release.value.id, deploymentId, payload)
   await fetchRelease()
@@ -338,7 +325,11 @@ function deliveryStatusStyle(status: string) {
             <h1
               v-else
               @click="startEdit('title')"
-              class="text-xl font-semibold text-gray-900 cursor-pointer hover:text-[#4857FE] transition-colors truncate"
+              class="text-xl font-semibold transition-colors truncate"
+              :class="canEditReleases
+                ? 'text-gray-900 cursor-pointer hover:text-[#4857FE]'
+                : 'text-gray-900 cursor-not-allowed'"
+              :title="releasePermissions.deniedReason('edit', 'releases') || 'Edit title'"
             >
               {{ release.title }}
             </h1>
@@ -346,7 +337,7 @@ function deliveryStatusStyle(status: string) {
 
           <div class="flex items-center gap-2 flex-shrink-0">
             <!-- Status Dropdown -->
-            <Popover>
+            <Popover v-if="canEditReleases">
               <PopoverTrigger>
                 <span class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full cursor-pointer" :class="statusStyle(release.status)">
                   <span class="w-1.5 h-1.5 rounded-full" :class="statusDotColor(release.status)"></span>
@@ -365,9 +356,18 @@ function deliveryStatusStyle(status: string) {
                 </button>
               </PopoverContent>
             </Popover>
+            <span
+              v-else
+              class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full cursor-not-allowed"
+              :class="statusStyle(release.status)"
+              :title="releasePermissions.deniedReason('edit', 'releases') || 'Status'"
+            >
+              <span class="w-1.5 h-1.5 rounded-full" :class="statusDotColor(release.status)"></span>
+              {{ statusLabel(release.status) }}
+            </span>
 
             <!-- Type Dropdown -->
-            <Popover>
+            <Popover v-if="canEditReleases">
               <PopoverTrigger>
                 <span class="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-md cursor-pointer" :class="typeStyle(release.releaseType)">
                   {{ typeLabel(release.releaseType) }}
@@ -375,7 +375,7 @@ function deliveryStatusStyle(status: string) {
               </PopoverTrigger>
               <PopoverContent class="w-32 p-1" align="end">
                 <button
-                  v-for="t in ['feature', 'hotfix', 'patch']"
+                  v-for="t in releaseTypeOptions"
                   :key="t"
                   @click="updateType(t)"
                   class="w-full text-left px-3 py-1.5 text-sm rounded hover:bg-gray-50"
@@ -384,6 +384,14 @@ function deliveryStatusStyle(status: string) {
                 </button>
               </PopoverContent>
             </Popover>
+            <span
+              v-else
+              class="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-md cursor-not-allowed"
+              :class="typeStyle(release.releaseType)"
+              :title="releasePermissions.deniedReason('edit', 'releases') || 'Type'"
+            >
+              {{ typeLabel(release.releaseType) }}
+            </span>
           </div>
         </div>
 
@@ -392,7 +400,13 @@ function deliveryStatusStyle(status: string) {
           <!-- Version -->
           <div class="flex items-center gap-1.5">
             <Tag :size="14" class="text-gray-400" />
-            <span v-if="editingField !== 'version'" @click="startEdit('version')" class="cursor-pointer hover:text-[#4857FE]">
+            <span
+              v-if="editingField !== 'version'"
+              @click="startEdit('version')"
+              class="transition-colors"
+              :class="canEditReleases ? 'cursor-pointer hover:text-[#4857FE]' : 'cursor-not-allowed text-gray-400'"
+              :title="releasePermissions.deniedReason('edit', 'releases') || 'Edit version'"
+            >
               {{ release.version || 'No version' }}
             </span>
             <div v-else class="flex items-center gap-1">
@@ -450,6 +464,7 @@ function deliveryStatusStyle(status: string) {
             :key="dep.id"
             :deployment="dep"
             :release-id="release.id"
+            :readonly="!canEditReleases"
             @add-server="openAddServer"
             @update-target="onUpdateTarget"
             @remove-target="onRemoveTarget"
@@ -464,7 +479,12 @@ function deliveryStatusStyle(status: string) {
             <h3 class="text-sm font-semibold text-gray-700">Linked Deliveries</h3>
             <Popover v-model:open="showDeliveryPicker">
               <PopoverTrigger>
-                <button class="flex items-center gap-1.5 text-sm text-[#4857FE] hover:text-[#3a47e0] font-medium">
+                <button
+                  class="flex items-center gap-1.5 text-sm font-medium transition-colors"
+                  :class="canEditReleases ? 'text-[#4857FE] hover:text-[#3a47e0] cursor-pointer' : 'text-gray-300 cursor-not-allowed'"
+                  :disabled="!canEditReleases"
+                  :title="releasePermissions.deniedReason('edit', 'releases') || 'Attach delivery'"
+                >
                   <Plus :size="14" />
                   Attach Delivery
                 </button>
@@ -488,7 +508,9 @@ function deliveryStatusStyle(status: string) {
                     v-for="d in availableDeliveries"
                     :key="d.id"
                     @click="attachDelivery(d.id)"
-                    class="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-50 last:border-b-0"
+                    class="w-full text-left px-3 py-2 flex items-center gap-2 border-b border-gray-50 last:border-b-0"
+                    :class="canEditReleases ? 'hover:bg-gray-50 cursor-pointer' : 'text-gray-300 cursor-not-allowed'"
+                    :disabled="!canEditReleases"
                   >
                     <Package :size="13" class="text-gray-400" />
                     <span class="text-sm text-gray-700 truncate flex-1">{{ d.title }}</span>
@@ -533,7 +555,13 @@ function deliveryStatusStyle(status: string) {
                     </span>
                   </td>
                   <td class="px-4 py-3">
-                    <button @click="detachDelivery(d!.id)" class="text-gray-300 hover:text-red-500 transition-colors">
+                    <button
+                      @click="detachDelivery(d!.id)"
+                      class="transition-colors"
+                      :class="canEditReleases ? 'text-gray-300 hover:text-red-500 cursor-pointer' : 'text-gray-200 cursor-not-allowed'"
+                      :disabled="!canEditReleases"
+                      :title="releasePermissions.deniedReason('edit', 'releases') || 'Detach delivery'"
+                    >
                       <Trash2 :size="14" />
                     </button>
                   </td>
@@ -552,9 +580,9 @@ function deliveryStatusStyle(status: string) {
                 <button
                   v-if="editingField !== 'releaseNotes'"
                   @click="generateNotes"
-                  :disabled="generatingNotes"
+                  :disabled="generatingNotes || !canEditReleases"
                   class="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-                  :class="generatingNotes ? 'bg-gray-100 text-gray-400' : 'bg-[#4857FE]/10 text-[#4857FE] hover:bg-[#4857FE]/20'"
+                  :class="generatingNotes || !canEditReleases ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-[#4857FE]/10 text-[#4857FE] hover:bg-[#4857FE]/20'"
                 >
                   <Loader2 v-if="generatingNotes" :size="12" class="animate-spin" />
                   <Sparkles v-else :size="12" />
@@ -563,7 +591,10 @@ function deliveryStatusStyle(status: string) {
                 <button
                   v-if="editingField !== 'releaseNotes'"
                   @click="startEdit('releaseNotes')"
-                  class="flex items-center gap-1 text-xs text-[#4857FE] hover:text-[#3a47e0] font-medium"
+                  class="flex items-center gap-1 text-xs font-medium transition-colors"
+                  :class="canEditReleases ? 'text-[#4857FE] hover:text-[#3a47e0] cursor-pointer' : 'text-gray-300 cursor-not-allowed'"
+                  :disabled="!canEditReleases"
+                  :title="releasePermissions.deniedReason('edit', 'releases') || 'Edit release notes'"
                 >
                   <Pencil :size="12" />
                   Edit
@@ -577,7 +608,7 @@ function deliveryStatusStyle(status: string) {
             <div v-if="editingField === 'releaseNotes'">
               <RichTextEditor v-model="editNotes" placeholder="Write release notes..." />
             </div>
-            <div v-else-if="release.releaseNotes" class="prose prose-sm max-w-none text-gray-700" v-html="release.releaseNotes"></div>
+            <div v-else-if="release.releaseNotes" class="prose prose-sm max-w-none text-gray-700" v-html="sanitizedReleaseNotes"></div>
             <p v-else class="text-sm text-gray-400 italic">No release notes yet</p>
           </div>
         </div>

@@ -10,6 +10,8 @@ import { useReleasesStore } from '@/stores/releases'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { useRolesStore } from '@/stores/roles'
+import { usePagePermissions } from '@/lib/pagePermissions'
+import { STORAGE_KEYS } from '@/constants/storageKeys'
 import CreateReleaseDialog from '@/components/release/CreateReleaseDialog.vue'
 import type { Release } from '@/types/release'
 import FavoriteStar from '@/components/shared/FavoriteStar.vue'
@@ -19,24 +21,38 @@ const releasesStore = useReleasesStore()
 const productStore = useProductStore()
 const authStore = useAuthStore()
 const rolesStore = useRolesStore()
+const releasePermissions = usePagePermissions('releases')
+const canCreateReleases = computed(() => releasePermissions.canCreate.value)
+const RELEASES_VIEW_MODE_KEY = STORAGE_KEYS.views.releases.viewMode
 
 const searchQuery = ref('')
 const activeTab = ref<'all' | 'draft' | 'planned' | 'in_progress' | 'completed' | 'failed'>('all')
-const viewMode = ref<'table' | 'card'>(localStorage.getItem('releases-view-mode') as 'table' | 'card' || 'table')
+const viewMode = ref<'table' | 'card'>(localStorage.getItem(RELEASES_VIEW_MODE_KEY) as 'table' | 'card' || 'table')
 const showCreateDialog = ref(false)
 const sortField = ref<string>('createdAt')
 const sortDir = ref<'asc' | 'desc'>('desc')
 
 watch(viewMode, (v) => {
-  localStorage.setItem('releases-view-mode', v)
+  localStorage.setItem(RELEASES_VIEW_MODE_KEY, v)
 })
 
+async function refreshReleases() {
+  await releasesStore.fetchReleases(undefined, {
+    q: searchQuery.value.trim() || undefined,
+    limit: 60,
+  })
+}
+
 onMounted(() => {
-  releasesStore.fetchReleases()
+  refreshReleases()
 })
 
 watch(() => productStore.activeIndex, () => {
-  releasesStore.fetchReleases()
+  refreshReleases()
+})
+
+watch(searchQuery, () => {
+  refreshReleases()
 })
 
 // Group by status
@@ -179,7 +195,12 @@ const columns = [
         <div class="flex items-center gap-3">
           <button
             @click="showCreateDialog = true"
-            class="flex items-center gap-1.5 bg-[#4857FE] hover:bg-[#3E4BDE] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer"
+            class="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            :class="canCreateReleases
+              ? 'bg-[#4857FE] hover:bg-[#3E4BDE] text-white cursor-pointer'
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+            :disabled="!canCreateReleases"
+            :title="releasePermissions.deniedReason('create', 'releases') || 'New release'"
           >
             <Plus :size="15" />
             New Release
@@ -328,7 +349,7 @@ const columns = [
               <!-- Title with status dot -->
               <td class="px-5 py-3.5">
                 <div class="flex items-center gap-2">
-                  <FavoriteStar entity-type="release" :entity-id="release.id" :product-id="productStore.activeProduct.name" />
+                  <FavoriteStar entity-type="release" :entity-id="release.id" :product-id="productStore.activeProduct.id || ''" />
                   <span class="w-2 h-2 rounded-full flex-shrink-0" :class="statusDotColor(release.status)"></span>
                   <span class="text-sm font-medium text-gray-900">{{ release.title }}</span>
                 </div>
@@ -415,7 +436,7 @@ const columns = [
           <!-- Header: title + status badge -->
           <div class="flex items-start justify-between gap-3 mb-3">
             <div class="flex items-center gap-2 min-w-0">
-              <FavoriteStar entity-type="release" :entity-id="release.id" :product-id="productStore.activeProduct.name" />
+              <FavoriteStar entity-type="release" :entity-id="release.id" :product-id="productStore.activeProduct.id || ''" />
               <span class="w-2 h-2 rounded-full flex-shrink-0" :class="statusDotColor(release.status)"></span>
               <h3 class="text-sm font-semibold text-gray-900 truncate group-hover:text-[#4857FE] transition-colors">{{ release.title }}</h3>
             </div>

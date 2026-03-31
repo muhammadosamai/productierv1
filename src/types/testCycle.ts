@@ -12,10 +12,12 @@ export interface TestCycleIssue {
   storyId: string | null
   reportedByUserId: string
   assignedToUserId: string | null
+  assignedToTeamId?: string | null
   createdAt: string
   updatedAt: string
   reportedByUser?: { id: string; name: string; email: string; avatar: string | null }
   assignedToUser?: { id: string; name: string; email: string; avatar: string | null }
+  assignedToTeam?: { id: string; name: string; key: string } | null
   story?: { id: string; title: string } | null
 }
 
@@ -55,4 +57,5 @@ export interface CreateIssuePayload {
   status?: IssueStatus
   storyId?: string | null
   assignedToUserId?: string | null
+  assignedToTeamId?: string | null
 }

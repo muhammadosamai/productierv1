@@ -2,6 +2,9 @@
 import { ref, watch, nextTick } from 'vue'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
+import { useOnboardingStore } from '@/stores/onboarding'
+import { apiFetch } from '@/lib/apiClient'
+import { usersApi } from '@/lib/api'
 import {
   Dialog,
   DialogContent,
@@ -39,6 +42,7 @@ const emit = defineEmits<{
 
 const productStore = useProductStore()
 const authStore = useAuthStore()
+const onboardingStore = useOnboardingStore()
 
 const name = ref('')
 const description = ref('')
@@ -74,12 +78,14 @@ function removeLogo() {
 
 async function uploadLogo(): Promise<string | null> {
   if (!logoFile.value) return null
+  const organizationId = onboardingStore.activeOrganizationId?.trim() || ''
+  if (!organizationId) return null
   const formData = new FormData()
   formData.append('file', logoFile.value)
   try {
-    const res = await fetch('/api/products/upload-logo', {
+    const res = await apiFetch(`/organizations/${encodeURIComponent(organizationId)}/products/upload-logo`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${authStore.token}` },
+      token: authStore.token,
       body: formData,
     })
     if (res.ok) {
@@ -102,16 +108,14 @@ let memberSearchTimeout: ReturnType<typeof setTimeout> | null = null
 async function searchUsers(query: string) {
   memberSearchLoading.value = true
   try {
-    const res = await fetch(`/api/auth/users?q=${encodeURIComponent(query)}`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    if (res.ok) {
-      const results: UserResult[] = await res.json()
-      // Filter out already added members and the current user
-      memberSearchResults.value = results.filter(
-        u => !teamMembers.value.some(m => m.userId === u.id) && u.id !== authStore.user?.id
-      )
-    }
+    const payload = await usersApi.list({ q: query }, authStore.token)
+    const results: UserResult[] = Array.isArray(payload)
+      ? payload
+      : (Array.isArray(payload?.items) ? payload.items : [])
+    // Filter out already added members and the current user
+    memberSearchResults.value = results.filter(
+      u => !teamMembers.value.some(m => m.userId === u.id) && u.id !== authStore.user?.id
+    )
   } catch {
     memberSearchResults.value = []
   } finally {

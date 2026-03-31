@@ -31,10 +31,19 @@ const options = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   interaction: { mode: 'index' as const, intersect: false },
+  layout: { padding: { top: 4, right: 8, bottom: 0, left: 0 } },
   plugins: {
     legend: {
       position: 'top' as const,
-      labels: { usePointStyle: true, pointStyle: 'circle', padding: 16, font: { size: 10, family: 'Inter, system-ui, sans-serif' } },
+      align: 'start' as const,
+      labels: {
+        usePointStyle: true,
+        pointStyle: 'circle',
+        boxWidth: 8,
+        boxHeight: 8,
+        padding: 12,
+        font: { size: 10, family: 'Inter, system-ui, sans-serif' },
+      },
     },
     tooltip: {
       backgroundColor: '#1F2937',
@@ -47,7 +56,13 @@ const options = computed(() => ({
   scales: {
     x: {
       grid: { display: false },
-      ticks: { font: { size: 10, family: 'Inter, system-ui, sans-serif' }, color: '#9CA3AF' },
+      ticks: {
+        font: { size: 10, family: 'Inter, system-ui, sans-serif' },
+        color: '#9CA3AF',
+        maxRotation: 0,
+        autoSkip: true,
+        maxTicksLimit: 10,
+      },
     },
     y: {
       stacked: true,

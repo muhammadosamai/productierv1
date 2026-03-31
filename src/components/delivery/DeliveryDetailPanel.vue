@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, computed } from 'vue'
 import {
   X, Maximize2, Copy, Loader2, ChevronDown, Check,
   Clock, CalendarDays, FileText, Package, ListTodo,
+  Link2, ShieldCheck, Target,
 } from 'lucide-vue-next'
 import { useDeliveriesStore } from '@/stores/deliveries'
+import { useInitiativesStore } from '@/stores/initiatives'
+import { usePagePermissions } from '@/lib/pagePermissions'
+import { useDomainOptions } from '@/composables/useDomainOptions'
+import { useDomainPresentation } from '@/composables/useDomainPresentation'
 import type { Delivery, DeliveryStatus } from '@/types/delivery'
 
 const props = defineProps<{
@@ -19,6 +24,11 @@ const emit = defineEmits<{
 }>()
 
 const deliveriesStore = useDeliveriesStore()
+const initiativesStore = useInitiativesStore()
+const deliveryPermissions = usePagePermissions('deliveries')
+const canEditDeliveries = computed(() => deliveryPermissions.canEdit.value)
+const { deliveryStatusOptions: statusOptions } = useDomainOptions()
+const domainPresentation = useDomainPresentation()
 
 // Editing state
 const editingField = ref<string | null>(null)
@@ -28,33 +38,40 @@ const saving = ref(false)
 
 // Dropdown states
 const showStatusDropdown = ref(false)
+const editingInitiatives = ref(false)
+const initiativeSearch = ref('')
 
 // Edit fields
 const editDescription = ref('')
 const editStartDate = ref('')
 const editEndDate = ref('')
 
-// Options
-const statusOptions: { value: DeliveryStatus; label: string }[] = [
-  { value: 'initialized', label: 'Initialized' },
-  { value: 'in_progress', label: 'In Progress' },
-  { value: 'overdue', label: 'Overdue' },
-  { value: 'blocked', label: 'Blocked' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'archived', label: 'Archived' },
-]
-
 // Reset state when delivery changes
 watch(() => props.delivery?.id, () => {
   editingField.value = null
   closeAllDropdowns()
+  editingInitiatives.value = false
+  initiativeSearch.value = ''
+})
+
+watch(() => props.open, async (isOpen) => {
+  if (!isOpen) return
+  await initiativesStore.fetchInitiatives()
 })
 
 function closeAllDropdowns() {
   showStatusDropdown.value = false
 }
 
+const selectedInitiativeIds = computed(() => (props.delivery?.initiatives || []).map((initiative) => initiative.id))
+const filteredInitiativeOptions = computed(() => {
+  const query = initiativeSearch.value.trim().toLowerCase()
+  if (!query) return initiativesStore.initiatives
+  return initiativesStore.initiatives.filter((initiative) => initiative.title.toLowerCase().includes(query))
+})
+
 async function updateField(field: string, value: any) {
+  if (!canEditDeliveries.value) return
   if (!props.delivery) return
   saving.value = true
   try {
@@ -70,6 +87,7 @@ async function updateField(field: string, value: any) {
 
 // Title editing
 function startEditTitle() {
+  if (!canEditDeliveries.value) return
   if (!props.delivery) return
   editTitle.value = props.delivery.title
   editingField.value = 'title'
@@ -90,11 +108,13 @@ async function saveTitle() {
 
 // Status
 async function selectStatus(status: DeliveryStatus) {
+  if (!canEditDeliveries.value) return
   await updateField('status', status)
 }
 
 // Dates
 function startEditDates() {
+  if (!canEditDeliveries.value) return
   if (!props.delivery) return
   editStartDate.value = props.delivery.startDate || ''
   editEndDate.value = props.delivery.endDate || ''
@@ -102,6 +122,7 @@ function startEditDates() {
 }
 
 async function saveDates() {
+  if (!canEditDeliveries.value) return
   saving.value = true
   try {
     await deliveriesStore.updateDelivery(props.delivery!.id, {
@@ -118,18 +139,31 @@ async function saveDates() {
 
 // Description
 function startEditDescription() {
+  if (!canEditDeliveries.value) return
   if (!props.delivery) return
   editDescription.value = props.delivery.description || ''
   editingField.value = 'description'
 }
 
 async function saveDescription() {
+  if (!canEditDeliveries.value) return
   if (!props.delivery) return
   if (editDescription.value === (props.delivery.description || '')) {
     editingField.value = null
     return
   }
   await updateField('description', editDescription.value || null)
+}
+
+async function toggleInitiative(initiativeId: string) {
+  if (!canEditDeliveries.value || !props.delivery) return
+  const nextIds = new Set(selectedInitiativeIds.value)
+  if (nextIds.has(initiativeId)) {
+    nextIds.delete(initiativeId)
+  } else {
+    nextIds.add(initiativeId)
+  }
+  await updateField('initiativeIds', [...nextIds])
 }
 
 function onBackdropClick() {
@@ -139,31 +173,15 @@ function onBackdropClick() {
 // ============ STYLING ============
 
 function statusStyle(status: string) {
-  switch (status) {
-    case 'initialized': return 'bg-[#ff69b4]/15 text-[#ff69b4]'
-    case 'in_progress': return 'bg-[#fdab3d]/15 text-[#d48806]'
-    case 'overdue': return 'bg-[#e2445c]/15 text-[#e2445c]'
-    case 'blocked': return 'bg-[#a25ddc]/15 text-[#a25ddc]'
-    case 'completed': return 'bg-[#00c875]/15 text-[#00a65a]'
-    case 'archived': return 'bg-gray-100 text-gray-400'
-    default: return 'bg-gray-100 text-gray-500'
-  }
+  return domainPresentation.deliveryStatusStyle(status)
 }
 
 function statusDot(status: string) {
-  switch (status) {
-    case 'initialized': return 'bg-[#ff69b4]'
-    case 'in_progress': return 'bg-[#fdab3d]'
-    case 'overdue': return 'bg-[#e2445c]'
-    case 'blocked': return 'bg-[#a25ddc]'
-    case 'completed': return 'bg-[#00c875]'
-    case 'archived': return 'bg-gray-300'
-    default: return 'bg-gray-400'
-  }
+  return domainPresentation.deliveryStatusDot(status)
 }
 
 function label(s: string) {
-  return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return domainPresentation.enumLabel(s)
 }
 
 function formatDate(dateStr: string | null) {
@@ -179,6 +197,12 @@ function progressPercent() {
     return Math.round((props.delivery.completedTasks / props.delivery.totalTasks) * 100)
   }
   return 0
+}
+
+function healthBandStyle(band: string | undefined) {
+  if (band === 'high') return 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+  if (band === 'medium') return 'bg-amber-50 text-amber-700 border border-amber-200'
+  return 'bg-red-50 text-red-700 border border-red-200'
 }
 </script>
 
@@ -241,7 +265,9 @@ function progressPercent() {
             </div>
             <h2
               v-else
-              class="text-lg font-bold text-gray-900 leading-snug mb-4 cursor-pointer hover:text-[#4857FE] transition-colors group/title"
+              class="text-lg font-bold leading-snug mb-4 transition-colors group/title"
+              :class="canEditDeliveries ? 'text-gray-900 cursor-pointer hover:text-[#4857FE]' : 'text-gray-900 cursor-not-allowed'"
+              :title="deliveryPermissions.deniedReason('edit', 'deliveries') || 'Edit title'"
               @click.stop="startEditTitle"
             >
               {{ delivery.title }}
@@ -259,6 +285,8 @@ function progressPercent() {
                   <button
                     class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer hover:opacity-80 transition-opacity"
                     :class="statusStyle(delivery.status)"
+                    :disabled="!canEditDeliveries"
+                    :title="deliveryPermissions.deniedReason('edit', 'deliveries') || 'Update status'"
                     @click="showStatusDropdown = !showStatusDropdown"
                   >
                     <span class="w-2 h-2 rounded-full" :class="statusDot(delivery.status)"></span>
@@ -270,6 +298,7 @@ function progressPercent() {
                       v-for="opt in statusOptions" :key="opt.value"
                       class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
                       :class="delivery.status === opt.value ? 'text-[#4857FE] font-medium' : 'text-gray-600'"
+                      :disabled="!canEditDeliveries"
                       @click="selectStatus(opt.value)"
                     >
                       <span class="w-2 h-2 rounded-full" :class="statusDot(opt.value)"></span>
@@ -302,7 +331,9 @@ function progressPercent() {
                 </div>
                 <button
                   v-else
-                  class="text-sm text-gray-700 hover:text-[#4857FE] transition-colors cursor-pointer"
+                  class="text-sm transition-colors"
+                  :class="canEditDeliveries ? 'text-gray-700 hover:text-[#4857FE] cursor-pointer' : 'text-gray-400 cursor-not-allowed'"
+                  :title="deliveryPermissions.deniedReason('edit', 'deliveries') || 'Edit dates'"
                   @click.stop="startEditDates"
                 >
                   {{ delivery.startDate || delivery.endDate
@@ -373,10 +404,113 @@ function progressPercent() {
             </div>
             <div
               v-else
-              class="text-sm text-gray-600 whitespace-pre-wrap cursor-pointer hover:bg-gray-50 rounded-lg px-3 py-2 -mx-3 transition-colors min-h-[40px]"
+              class="text-sm whitespace-pre-wrap rounded-lg px-3 py-2 -mx-3 transition-colors min-h-[40px]"
+              :class="canEditDeliveries ? 'text-gray-600 cursor-pointer hover:bg-gray-50' : 'text-gray-400 cursor-not-allowed'"
+              :title="deliveryPermissions.deniedReason('edit', 'deliveries') || 'Edit description'"
               @click.stop="startEditDescription"
             >
               {{ delivery.description || 'Click to add a description...' }}
+            </div>
+          </div>
+
+          <div class="px-6 py-4 border-t border-gray-100 space-y-3">
+            <div class="rounded-lg border border-gray-200 p-3">
+              <div class="flex items-center justify-between mb-2">
+                <h4 class="text-xs font-semibold text-gray-600 uppercase tracking-wide flex items-center gap-1.5">
+                  <Target :size="12" class="text-gray-400" />
+                  Initiatives
+                </h4>
+                <button
+                  class="text-[11px] font-medium"
+                  :class="canEditDeliveries ? 'text-[#4857FE] hover:text-[#3E4BDE]' : 'text-gray-300 cursor-not-allowed'"
+                  :disabled="!canEditDeliveries"
+                  :title="deliveryPermissions.deniedReason('edit', 'deliveries') || 'Edit initiatives'"
+                  @click.stop="editingInitiatives = !editingInitiatives"
+                >
+                  {{ editingInitiatives ? 'Done' : 'Edit' }}
+                </button>
+              </div>
+              <div v-if="delivery.initiatives && delivery.initiatives.length > 0" class="flex flex-wrap gap-1.5 mb-2">
+                <router-link
+                  v-for="initiative in delivery.initiatives"
+                  :key="initiative.id"
+                  :to="`/initiatives/${initiative.id}`"
+                  class="inline-flex px-2 py-1 rounded-md text-[11px] bg-[#4857FE]/10 text-[#4857FE] hover:bg-[#4857FE]/15"
+                >
+                  {{ initiative.title }}
+                </router-link>
+              </div>
+              <p v-else class="text-xs text-gray-400 mb-2">No initiatives linked.</p>
+              <div v-if="editingInitiatives" class="space-y-2 border-t border-gray-100 pt-2 mt-2" @click.stop>
+                <input
+                  v-model="initiativeSearch"
+                  class="w-full text-xs border border-gray-200 rounded-md px-2 py-1.5 outline-none focus:border-[#4857FE]"
+                  placeholder="Filter initiatives..."
+                />
+                <div class="max-h-[120px] overflow-y-auto space-y-1">
+                  <button
+                    v-for="initiative in filteredInitiativeOptions"
+                    :key="initiative.id"
+                    class="w-full flex items-center justify-between text-left px-2 py-1.5 rounded-md text-xs"
+                    :class="selectedInitiativeIds.includes(initiative.id) ? 'bg-[#4857FE]/10 text-[#4857FE]' : 'text-gray-600 hover:bg-gray-50'"
+                    @click="toggleInitiative(initiative.id)"
+                  >
+                    <span class="truncate">{{ initiative.title }}</span>
+                    <Check v-if="selectedInitiativeIds.includes(initiative.id)" :size="12" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-gray-200 p-3">
+              <h4 class="text-xs font-semibold text-gray-600 uppercase tracking-wide flex items-center gap-1.5 mb-2">
+                <Link2 :size="12" class="text-gray-400" />
+                Linked Releases
+              </h4>
+              <div v-if="delivery.linkedReleases && delivery.linkedReleases.length > 0" class="space-y-1.5">
+                <router-link
+                  v-for="release in delivery.linkedReleases"
+                  :key="release.id"
+                  :to="`/releases/${release.id}`"
+                  class="flex items-center justify-between rounded-md border border-gray-100 px-2 py-1.5 hover:bg-gray-50"
+                >
+                  <span class="text-xs font-medium text-gray-700 truncate">{{ release.title }}</span>
+                  <span class="text-[10px] text-gray-500">{{ release.version || release.status }}</span>
+                </router-link>
+              </div>
+              <p v-else class="text-xs text-gray-400">No linked releases.</p>
+            </div>
+
+            <div class="rounded-lg border border-gray-200 p-3">
+              <h4 class="text-xs font-semibold text-gray-600 uppercase tracking-wide flex items-center gap-1.5 mb-2">
+                <ShieldCheck :size="12" class="text-gray-400" />
+                Health
+              </h4>
+              <div v-if="delivery.healthSummary" class="space-y-2">
+                <div class="inline-flex px-2 py-1 rounded-md text-[11px] font-semibold" :class="healthBandStyle(delivery.healthSummary.confidenceBand)">
+                  Confidence: {{ delivery.healthSummary.confidenceBand }}
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-[11px]">
+                  <div class="rounded bg-gray-50 px-2 py-1">
+                    <p class="text-gray-500">Blocked</p>
+                    <p class="font-semibold text-gray-700">{{ delivery.healthSummary.blockedTasks }}</p>
+                  </div>
+                  <div class="rounded bg-gray-50 px-2 py-1">
+                    <p class="text-gray-500">Overdue</p>
+                    <p class="font-semibold text-gray-700">{{ delivery.healthSummary.overdueTasks }}</p>
+                  </div>
+                  <div class="rounded bg-gray-50 px-2 py-1">
+                    <p class="text-gray-500">Variance</p>
+                    <p class="font-semibold" :class="delivery.healthSummary.scheduleVarianceDays > 0 ? 'text-red-600' : 'text-emerald-600'">
+                      {{ delivery.healthSummary.scheduleVarianceDays > 0 ? '+' : '' }}{{ delivery.healthSummary.scheduleVarianceDays }}d
+                    </p>
+                  </div>
+                </div>
+                <p v-if="delivery.healthSummary.riskReasons.length > 0" class="text-[11px] text-gray-600">
+                  {{ delivery.healthSummary.riskReasons.join(' · ') }}
+                </p>
+              </div>
+              <p v-else class="text-xs text-gray-400">Health summary unavailable.</p>
             </div>
           </div>
 

@@ -2,15 +2,14 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { useAuthStore } from './auth'
 import type { Favorite, FavoriteEntityType } from '@/types/favorite'
+import { assertPageAction, ensureOk } from '@/lib/storeAuthz'
+import { apiFetch } from '@/lib/apiClient'
+import { buildProductScopedPath, resolveProductScope } from '@/lib/productScopeApi'
 
 export const useFavoritesStore = defineStore('favorites', () => {
   const authStore = useAuthStore()
   const favorites = ref<Favorite[]>([])
   const loading = ref(false)
-
-  function authHeaders() {
-    return { Authorization: `Bearer ${authStore.token}` }
-  }
 
   const favoriteIds = computed(() => new Set(favorites.value.map(f => f.entityId)))
 
@@ -27,14 +26,19 @@ export const useFavoritesStore = defineStore('favorites', () => {
   }
 
   async function fetchFavorites(productId: string) {
+    assertPageAction('home', 'read', 'favorites')
+    const scope = resolveProductScope(productId)
+    if (!scope) {
+      favorites.value = []
+      return
+    }
     loading.value = true
     try {
-      const res = await fetch(`/api/favorites?productId=${encodeURIComponent(productId)}`, {
-        headers: authHeaders(),
+      const res = await apiFetch(buildProductScopedPath(scope, '/favorites'), {
+        token: authStore.token,
       })
-      if (res.ok) {
-        favorites.value = await res.json()
-      }
+      await ensureOk(res, 'Failed to fetch favorites')
+      favorites.value = await res.json()
     } catch {
       // silent
     } finally {
@@ -43,7 +47,11 @@ export const useFavoritesStore = defineStore('favorites', () => {
   }
 
   async function toggleFavorite(entityType: FavoriteEntityType, entityId: string, productId: string) {
+    const scope = resolveProductScope(productId)
+    if (!scope) return
+
     const wasFavorited = isFavorited(entityId)
+    assertPageAction('home', wasFavorited ? 'delete' : 'create', 'favorites')
 
     // Optimistic update
     if (wasFavorited) {
@@ -54,29 +62,29 @@ export const useFavoritesStore = defineStore('favorites', () => {
         userId: authStore.user?.id || '',
         entityType,
         entityId,
-        productId,
+        productId: scope.productId,
         createdAt: new Date().toISOString(),
       })
     }
 
     try {
       if (wasFavorited) {
-        await fetch(`/api/favorites/${entityType}/${entityId}`, {
+        const res = await apiFetch(buildProductScopedPath(scope, `/favorites/${entityType}/${entityId}`), {
           method: 'DELETE',
-          headers: authHeaders(),
+          token: authStore.token,
         })
+        await ensureOk(res, 'Failed to remove favorite')
       } else {
-        const res = await fetch('/api/favorites', {
+        const res = await apiFetch(buildProductScopedPath(scope, '/favorites'), {
           method: 'POST',
-          headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ entityType, entityId, productId }),
+          token: authStore.token,
+          json: { entityType, entityId, productId: scope.productId },
         })
-        if (res.ok) {
-          const created = await res.json()
-          // Replace temp with real record
-          const idx = favorites.value.findIndex(f => f.entityId === entityId && f.entityType === entityType)
-          if (idx !== -1) favorites.value[idx] = created
-        }
+        await ensureOk(res, 'Failed to save favorite')
+        const created = await res.json()
+        // Replace temp with real record
+        const idx = favorites.value.findIndex(f => f.entityId === entityId && f.entityType === entityType)
+        if (idx !== -1) favorites.value[idx] = created
       }
     } catch {
       // Rollback on error
@@ -86,7 +94,7 @@ export const useFavoritesStore = defineStore('favorites', () => {
           userId: authStore.user?.id || '',
           entityType,
           entityId,
-          productId,
+          productId: scope.productId,
           createdAt: new Date().toISOString(),
         })
       } else {

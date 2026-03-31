@@ -15,17 +15,25 @@ import { useBacklogStore } from '@/stores/backlog'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { useRolesStore } from '@/stores/roles'
+import { usePagePermissions } from '@/lib/pagePermissions'
 import type { Activity } from '@/stores/activities'
+import { STORAGE_KEYS } from '@/constants/storageKeys'
+import { useDomainOptions } from '@/composables/useDomainOptions'
+import { useDomainPresentation } from '@/composables/useDomainPresentation'
+import { useOrganizationMembers, type OrganizationMemberEntry } from '@/composables/useOrganizationMembers'
+import { useHybridSettings } from '@/composables/useHybridSettings'
+import { usePersistedViewMode } from '@/composables/usePersistedViewMode'
+import { useEntityActivityDropdown } from '@/composables/useEntityActivityDropdown'
+import { storageGetJson, storageRemove, storageSet, storageSetJson } from '@/lib/browserStorage'
 import FavoriteStar from '@/components/shared/FavoriteStar.vue'
 import AddStoryDialog from '@/components/backlog/AddStoryDialog.vue'
 import StoryDetailPanel from '@/components/backlog/StoryDetailPanel.vue'
 import type { Story, StoryStatus } from '@/types/backlog'
 
-interface TeamUser {
-  id: string
-  name: string
-  email: string
-  avatar: string | null
+type StoryStatusBuckets = {
+  all: Story[]
+  archived: Story[]
+  [status: string]: Story[]
 }
 
 const router = useRouter()
@@ -34,26 +42,48 @@ const backlogStore = useBacklogStore()
 const productStore = useProductStore()
 const authStore = useAuthStore()
 const rolesStore = useRolesStore()
+const storyPermissions = usePagePermissions('stories')
+const canCreateStories = computed(() => storyPermissions.canCreate.value)
+const canEditStories = computed(() => storyPermissions.canEdit.value)
+const {
+  storyStatusValues: storyStatusOptions,
+  storyPriorityValues: storyPriorityOptions,
+  storyTypeValues: storyTypeOptions,
+} = useDomainOptions()
+const domainPresentation = useDomainPresentation()
+const STORIES_VIEW_MODE_KEY = STORAGE_KEYS.views.stories.viewMode
+const STORIES_COLUMN_CONFIG_KEY = STORAGE_KEYS.views.stories.columnConfig
+const STORIES_COLUMN_WIDTHS_KEY = STORAGE_KEYS.views.stories.columnWidths
+const STORIES_FILTER_STATE_KEY = STORAGE_KEYS.views.stories.filterState
+const STORIES_SAVED_VIEWS_KEY = 'stories-saved-views'
+const {
+  saveSetting: saveUserSetting,
+  loadSettings: loadRemoteSettings,
+  cleanup: cleanupSettings,
+} = useHybridSettings(computed(() => authStore.token))
 
 const searchQuery = ref('')
-const activeTab = ref<'all' | 'backlog' | 'drafted' | 'initialized' | 'in_progress' | 'completed' | 'archived'>('all')
-const viewMode = ref<'table' | 'card'>(localStorage.getItem('stories-view-mode') as 'table' | 'card' || 'table')
+const activeTab = ref<string>('all')
+const viewMode = usePersistedViewMode(STORIES_VIEW_MODE_KEY, saveUserSetting)
 const showCreateDialog = ref(false)
+const rankingMode = ref(false)
+const selectedStoryIds = ref<string[]>([])
+const bulkStatus = ref<StoryStatus | ''>('')
+const bulkOwnerId = ref<string>('')
+const loadingMore = ref(false)
+const primaryStoryStatuses = computed(() => storyStatusOptions.value.filter((status) => status !== 'archived'))
 
 // Detail panel state
 const selectedStory = ref<Story | null>(null)
 const showStoryPanel = ref(false)
-const teamMembers = ref<TeamUser[]>([])
+const memberDirectory = useOrganizationMembers()
+const teamMembers = memberDirectory.members
 
 // Inline editing state
 const inlineEditMode = ref(false)
 const editingCell = ref<{ id: string; field: string } | null>(null)
 const editValue = ref('')
 const inlineOwnerSearch = ref('')
-
-const storyStatusOptions = ['backlog', 'drafted', 'initialized', 'in_progress', 'completed', 'archived'] as const
-const storyPriorityOptions = ['critical', 'high', 'medium', 'low'] as const
-const storyTypeOptions = ['feature', 'bug', 'improvement', 'technical_debt', 'research', 'infrastructure', 'testing', 'documentation'] as const
 
 const editableFields = new Set(['title', 'priority', 'type', 'owner', 'initiative'])
 
@@ -62,6 +92,7 @@ function isEditing(id: string, field: string) {
 }
 
 function startEditing(id: string, field: string, currentValue: string, event?: MouseEvent) {
+  if (!canEditStories.value) return
   if (!inlineEditMode.value || !editableFields.has(field)) return
   if (event) event.stopPropagation()
   editingCell.value = { id, field }
@@ -75,6 +106,7 @@ function startEditing(id: string, field: string, currentValue: string, event?: M
 }
 
 async function saveInlineEdit(id: string, field: string, value: any) {
+  if (!canEditStories.value) return
   const prev = editingCell.value
   editingCell.value = null
   if (prev && prev.id === id && prev.field === field) {
@@ -82,12 +114,13 @@ async function saveInlineEdit(id: string, field: string, value: any) {
   }
 }
 
-async function saveOwnerInline(id: string, member: TeamUser | null) {
+async function saveOwnerInline(id: string, member: OrganizationMemberEntry | null) {
+  if (!canEditStories.value) return
   editingCell.value = null
   if (member) {
-    await backlogStore.updateStory(id, { owner: member.name, ownerAvatar: member.avatar })
+    await backlogStore.updateStory(id, { ownerUserId: member.id })
   } else {
-    await backlogStore.updateStory(id, { owner: null, ownerAvatar: null })
+    await backlogStore.updateStory(id, { ownerUserId: null })
   }
 }
 
@@ -101,6 +134,9 @@ const filteredInlineOwners = computed(() => {
   if (!q) return teamMembers.value
   return teamMembers.value.filter(m => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q))
 })
+
+const selectedStoryIdSet = computed(() => new Set(selectedStoryIds.value))
+const hasSelectedStories = computed(() => selectedStoryIds.value.length > 0)
 
 function onEditClickOutside(event: MouseEvent) {
   const target = event.target as HTMLElement
@@ -118,22 +154,8 @@ watch(editingCell, (v) => {
 })
 
 async function fetchTeamMembers() {
-  try {
-    const res = await fetch(`/api/auth/users?q=`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    if (res.ok) {
-      teamMembers.value = await res.json()
-    }
-  } catch {
-    teamMembers.value = []
-  }
+  await memberDirectory.loadMembers('')
 }
-
-watch(viewMode, (v) => {
-  localStorage.setItem('stories-view-mode', v)
-  saveUserSetting('stories-view-mode', v)
-})
 
 function openStoryDetail(story: Story) {
   selectedStory.value = story
@@ -145,8 +167,7 @@ function closeStoryPanel() {
   selectedStory.value = null
 }
 
-async function onStoryUpdated() {
-  await backlogStore.fetchStories()
+function onStoryUpdated() {
   if (selectedStory.value) {
     const fresh = backlogStore.stories.find(s => s.id === selectedStory.value!.id)
     if (fresh) {
@@ -155,10 +176,29 @@ async function onStoryUpdated() {
   }
 }
 
+async function refreshStories(cursor: string | null = null) {
+  await backlogStore.fetchStories(undefined, {
+    q: searchQuery.value.trim() || undefined,
+    limit: 80,
+    cursor,
+    append: Boolean(cursor),
+  })
+}
+
+async function loadMoreStories() {
+  if (!backlogStore.hasMore || !backlogStore.nextCursor || loadingMore.value) return
+  loadingMore.value = true
+  try {
+    await refreshStories(backlogStore.nextCursor)
+  } finally {
+    loadingMore.value = false
+  }
+}
+
 onMounted(async () => {
-  await backlogStore.fetchStories()
-  fetchTeamMembers()
-  loadUserSettings()
+  await refreshStories()
+  await fetchTeamMembers()
+  await loadUserSettings()
   // Auto-open story from query param (e.g. navigating back from task detail)
   const storyId = route.query.story as string | undefined
   if (storyId) {
@@ -167,9 +207,17 @@ onMounted(async () => {
   }
 })
 
-watch(() => productStore.activeProduct.name, () => {
-  backlogStore.fetchStories()
+watch(() => productStore.activeProduct.id, () => {
+  refreshStories()
   fetchTeamMembers()
+})
+
+let searchDebounce: ReturnType<typeof setTimeout> | null = null
+watch(searchQuery, () => {
+  if (searchDebounce) clearTimeout(searchDebounce)
+  searchDebounce = setTimeout(() => {
+    refreshStories()
+  }, 200)
 })
 
 // Watch for story query param changes (e.g. back from task detail)
@@ -181,33 +229,34 @@ watch(() => route.query.story, (storyId) => {
 })
 
 // Status-filtered story groups
-const storiesByStatus = computed(() => {
+const storiesByStatus = computed<StoryStatusBuckets>(() => {
   let base = backlogStore.stories
   // Self-view-only: show only stories where user is the owner
   if (rolesStore.isSelfViewOnly('stories') && authStore.user) {
-    base = base.filter(s => s.owner === authStore.user!.name)
+    base = base.filter((story) => story.ownerUserId === authStore.user!.id)
   }
-  const all = base.filter(s => s.status !== 'archived')
-  return {
-    all,
-    backlog: all.filter(s => s.status === 'backlog'),
-    drafted: all.filter(s => s.status === 'drafted'),
-    initialized: all.filter(s => s.status === 'initialized'),
-    in_progress: all.filter(s => s.status === 'in_progress'),
-    completed: all.filter(s => s.status === 'completed'),
-    archived: base.filter(s => s.status === 'archived'),
+  const grouped: StoryStatusBuckets = {
+    all: [],
+    archived: [],
   }
+  for (const status of storyStatusOptions.value) {
+    grouped[status] = []
+  }
+  for (const story of base) {
+    const status = story.status
+    if (!grouped[status]) {
+      grouped[status] = []
+    }
+    grouped[status]!.push(story)
+    if (status !== 'archived') {
+      grouped.all.push(story)
+    }
+  }
+  return grouped
 })
 
-const filteredStories = computed(() => {
-  const list = storiesByStatus.value[activeTab.value]
-  const q = searchQuery.value.toLowerCase().trim()
-  if (!q) return list
-  return list.filter(s =>
-    s.title.toLowerCase().includes(q) ||
-    (s.description && s.description.toLowerCase().includes(q)) ||
-    (s.initiative && s.initiative.toLowerCase().includes(q))
-  )
+const filteredStories = computed<Story[]>(() => {
+  return storiesByStatus.value[activeTab.value] ?? storiesByStatus.value.all
 })
 
 // Sorting
@@ -215,7 +264,143 @@ type SortField = 'title' | 'status' | 'priority' | 'type' | 'initiative' | 'owne
 const sortField = ref<SortField | null>(null)
 const sortDirection = ref<'asc' | 'desc'>('asc')
 
+interface StoriesFilterState {
+  searchQuery: string
+  activeTab: string
+  sortField: SortField | null
+  sortDirection: 'asc' | 'desc'
+}
+
+const storySortFields = new Set<SortField>([
+  'title',
+  'status',
+  'priority',
+  'type',
+  'initiative',
+  'owner',
+  'tasks',
+  'estimate',
+  'delivery',
+  'description',
+  'acceptanceCriteria',
+  'createdAt',
+  'updatedAt',
+])
+
+function loadStoryFilterState(): StoriesFilterState | null {
+  const saved = storageGetJson<Partial<StoriesFilterState> | null>(STORIES_FILTER_STATE_KEY, null)
+  if (!saved || typeof saved !== 'object') return null
+  const nextSearch = typeof saved.searchQuery === 'string' ? saved.searchQuery : ''
+  const nextTab = typeof saved.activeTab === 'string' ? saved.activeTab : 'all'
+  const nextSortField = typeof saved.sortField === 'string' && storySortFields.has(saved.sortField as SortField)
+    ? saved.sortField as SortField
+    : null
+  const nextSortDirection = saved.sortDirection === 'desc' ? 'desc' : 'asc'
+  return {
+    searchQuery: nextSearch,
+    activeTab: nextTab,
+    sortField: nextSortField,
+    sortDirection: nextSortDirection,
+  }
+}
+
+function persistStoryFilterState() {
+  storageSetJson(STORIES_FILTER_STATE_KEY, {
+    searchQuery: searchQuery.value,
+    activeTab: activeTab.value,
+    sortField: sortField.value,
+    sortDirection: sortDirection.value,
+  } satisfies StoriesFilterState)
+}
+
+const persistedStoryFilterState = loadStoryFilterState()
+if (persistedStoryFilterState) {
+  searchQuery.value = persistedStoryFilterState.searchQuery
+  activeTab.value = persistedStoryFilterState.activeTab
+  sortField.value = persistedStoryFilterState.sortField
+  sortDirection.value = persistedStoryFilterState.sortDirection
+}
+
+interface SavedStoryView {
+  id: string
+  name: string
+  tab: string
+  search: string
+  sortField: SortField | null
+  sortDirection: 'asc' | 'desc'
+  viewMode: 'table' | 'card'
+}
+
+function loadSavedViews(): SavedStoryView[] {
+  const saved = storageGetJson<SavedStoryView[] | null>(STORIES_SAVED_VIEWS_KEY, null)
+  if (!Array.isArray(saved)) return []
+  return saved.filter((view) =>
+    typeof view.id === 'string' &&
+    typeof view.name === 'string' &&
+    typeof view.tab === 'string' &&
+    typeof view.search === 'string' &&
+    (view.sortField === null || typeof view.sortField === 'string') &&
+    (view.sortDirection === 'asc' || view.sortDirection === 'desc') &&
+    (view.viewMode === 'table' || view.viewMode === 'card'),
+  )
+}
+
+const savedViews = ref<SavedStoryView[]>(loadSavedViews())
+const selectedSavedViewId = ref<string>('')
+
+function persistSavedViews() {
+  storageSetJson(STORIES_SAVED_VIEWS_KEY, savedViews.value)
+  saveUserSetting(STORIES_SAVED_VIEWS_KEY, savedViews.value)
+}
+
+function saveCurrentView() {
+  const name = window.prompt('Saved view name')
+  if (!name) return
+  const trimmed = name.trim()
+  if (!trimmed) return
+  const nowId = `view_${Date.now()}`
+  const view: SavedStoryView = {
+    id: nowId,
+    name: trimmed,
+    tab: activeTab.value,
+    search: searchQuery.value,
+    sortField: sortField.value,
+    sortDirection: sortDirection.value,
+    viewMode: viewMode.value,
+  }
+  const existingIdx = savedViews.value.findIndex((entry) => entry.name.toLowerCase() === trimmed.toLowerCase())
+  if (existingIdx >= 0) {
+    savedViews.value.splice(existingIdx, 1, { ...view, id: savedViews.value[existingIdx]!.id })
+    selectedSavedViewId.value = savedViews.value[existingIdx]!.id
+  } else {
+    savedViews.value.push(view)
+    selectedSavedViewId.value = view.id
+  }
+  persistSavedViews()
+}
+
+function applySavedView(id: string) {
+  const view = savedViews.value.find((entry) => entry.id === id)
+  if (!view) return
+  activeTab.value = view.tab
+  searchQuery.value = view.search
+  sortField.value = view.sortField
+  sortDirection.value = view.sortDirection
+  viewMode.value = view.viewMode
+  selectedSavedViewId.value = view.id
+}
+
+function deleteSavedView() {
+  if (!selectedSavedViewId.value) return
+  savedViews.value = savedViews.value.filter((entry) => entry.id !== selectedSavedViewId.value)
+  selectedSavedViewId.value = ''
+  persistSavedViews()
+}
+
 function toggleSort(field: SortField) {
+  if (rankingMode.value) {
+    rankingMode.value = false
+  }
   if (sortField.value === field) {
     if (sortDirection.value === 'asc') {
       sortDirection.value = 'desc'
@@ -228,10 +413,6 @@ function toggleSort(field: SortField) {
     sortDirection.value = 'asc'
   }
 }
-
-const statusOrder: Record<string, number> = { backlog: 0, ready: 1, in_progress: 2, done: 3, archived: 4 }
-const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
-const typeOrder: Record<string, number> = { feature: 0, bug: 1, improvement: 2, technical_debt: 3, research: 4, infrastructure: 5, testing: 6, documentation: 7 }
 
 function compareStr(a: string | null | undefined, b: string | null | undefined): number {
   return (a || '').localeCompare(b || '')
@@ -261,13 +442,16 @@ const sortedStories = computed(() => {
         cmp = a.title.localeCompare(b.title)
         break
       case 'status':
-        cmp = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99)
+        cmp = domainPresentation.orderValue(domainPresentation.storyStatusOrder.value, a.status)
+          - domainPresentation.orderValue(domainPresentation.storyStatusOrder.value, b.status)
         break
       case 'priority':
-        cmp = (priorityOrder[a.priority] ?? 99) - (priorityOrder[b.priority] ?? 99)
+        cmp = domainPresentation.orderValue(domainPresentation.storyPriorityOrder.value, a.priority)
+          - domainPresentation.orderValue(domainPresentation.storyPriorityOrder.value, b.priority)
         break
       case 'type':
-        cmp = (typeOrder[a.type || ''] ?? 99) - (typeOrder[b.type || ''] ?? 99)
+        cmp = domainPresentation.orderValue(domainPresentation.storyTypeOrder.value, a.type || '')
+          - domainPresentation.orderValue(domainPresentation.storyTypeOrder.value, b.type || '')
         break
       case 'initiative':
         cmp = compareStr(a.initiative, b.initiative)
@@ -301,6 +485,108 @@ const sortedStories = computed(() => {
   })
   return list
 })
+
+function toggleStorySelection(storyId: string, checked: boolean) {
+  if (checked) {
+    if (!selectedStoryIdSet.value.has(storyId)) {
+      selectedStoryIds.value.push(storyId)
+    }
+    return
+  }
+  selectedStoryIds.value = selectedStoryIds.value.filter((id) => id !== storyId)
+}
+
+function toggleSelectVisibleStories() {
+  const visibleIds = sortedStories.value.map((story) => story.id)
+  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedStoryIdSet.value.has(id))
+  if (allSelected) {
+    selectedStoryIds.value = selectedStoryIds.value.filter((id) => !visibleIds.includes(id))
+    return
+  }
+  selectedStoryIds.value = [...new Set([...selectedStoryIds.value, ...visibleIds])]
+}
+
+function clearStorySelection() {
+  selectedStoryIds.value = []
+  bulkStatus.value = ''
+  bulkOwnerId.value = ''
+}
+
+async function applyBulkStatus() {
+  if (!canEditStories.value || !bulkStatus.value || selectedStoryIds.value.length === 0) return
+  await backlogStore.bulkUpdateStories(selectedStoryIds.value, { status: bulkStatus.value })
+  await refreshStories()
+  clearStorySelection()
+}
+
+async function applyBulkOwner() {
+  if (!canEditStories.value || selectedStoryIds.value.length === 0) return
+  const ownerUserId = bulkOwnerId.value || null
+  await backlogStore.bulkUpdateStories(selectedStoryIds.value, { ownerUserId })
+  await refreshStories()
+  clearStorySelection()
+}
+
+const canRankActiveTab = computed(() => (
+  activeTab.value !== 'all' && activeTab.value !== 'archived'
+))
+
+const activeTabRankedStories = computed(() => {
+  if (!canRankActiveTab.value) return []
+  const storiesForTab = storiesByStatus.value[activeTab.value] ?? []
+  return [...storiesForTab].sort((a, b) => a.sortOrder - b.sortOrder)
+})
+
+function storyRankIndex(storyId: string) {
+  return activeTabRankedStories.value.findIndex((story) => story.id === storyId)
+}
+
+async function moveStoryRank(storyId: string, direction: -1 | 1) {
+  if (!canEditStories.value || !canRankActiveTab.value) return
+  const ordered = [...activeTabRankedStories.value]
+  const index = ordered.findIndex((story) => story.id === storyId)
+  if (index < 0) return
+  const targetIndex = index + direction
+  if (targetIndex < 0 || targetIndex >= ordered.length) return
+  const [moved] = ordered.splice(index, 1)
+  if (!moved) return
+  ordered.splice(targetIndex, 0, moved)
+  await backlogStore.reorderStories(
+    ordered.map((story) => story.id),
+    activeTab.value as StoryStatus,
+  )
+}
+
+function toggleRankingMode() {
+  if (!canEditStories.value) return
+  rankingMode.value = !rankingMode.value
+  if (!rankingMode.value) return
+  if (activeTab.value === 'all' || activeTab.value === 'archived') {
+    activeTab.value = 'backlog'
+  }
+  sortField.value = null
+  sortDirection.value = 'asc'
+  searchQuery.value = ''
+}
+
+watch(sortedStories, (rows) => {
+  const ids = new Set(rows.map((story) => story.id))
+  selectedStoryIds.value = selectedStoryIds.value.filter((id) => ids.has(id))
+})
+
+watch(activeTab, (tab) => {
+  clearStorySelection()
+  if (tab === 'all' || tab === 'archived') {
+    rankingMode.value = false
+  }
+})
+
+watch(
+  () => [searchQuery.value, activeTab.value, sortField.value, sortDirection.value],
+  () => {
+    persistStoryFilterState()
+  },
+)
 
 // Column customization
 interface ColumnConfig {
@@ -336,64 +622,46 @@ function mergeWithDefaults(saved: ColumnConfig[]): ColumnConfig[] {
 }
 
 function loadColumnConfig(): ColumnConfig[] {
-  try {
-    const saved = localStorage.getItem('stories-column-config')
-    if (saved) return mergeWithDefaults(JSON.parse(saved) as ColumnConfig[])
-  } catch { /* ignore */ }
+  const saved = storageGetJson<ColumnConfig[] | null>(STORIES_COLUMN_CONFIG_KEY, null)
+  if (Array.isArray(saved)) return mergeWithDefaults(saved)
   return defaultColumns.map(c => ({ ...c }))
 }
 
 const columns = ref<ColumnConfig[]>(loadColumnConfig())
 const showColumnCustomizer = ref(false)
 
-// Debounced save to API
-let saveTimeout: ReturnType<typeof setTimeout> | null = null
-function saveUserSetting(key: string, value: any) {
-  if (!authStore.token) return
-  if (saveTimeout) clearTimeout(saveTimeout)
-  saveTimeout = setTimeout(async () => {
-    try {
-      await fetch(`/api/settings/${key}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authStore.token}`,
-        },
-        body: JSON.stringify({ value }),
-      })
-    } catch { /* silently fail */ }
-  }, 500)
-}
-
 watch(columns, (v) => {
-  localStorage.setItem('stories-column-config', JSON.stringify(v))
-  saveUserSetting('stories-column-config', v)
+  storageSetJson(STORIES_COLUMN_CONFIG_KEY, v)
+  saveUserSetting(STORIES_COLUMN_CONFIG_KEY, v)
 }, { deep: true })
 
 async function loadUserSettings() {
   if (!authStore.token) return
   try {
-    const res = await fetch('/api/settings/', {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    if (!res.ok) return
-    const settings = await res.json()
+    const settings = await loadRemoteSettings()
 
-    if (settings['stories-column-config']) {
-      const serverCols = mergeWithDefaults(settings['stories-column-config'] as ColumnConfig[])
+    if (settings[STORIES_COLUMN_CONFIG_KEY]) {
+      const serverCols = mergeWithDefaults(settings[STORIES_COLUMN_CONFIG_KEY] as ColumnConfig[])
       columns.value = serverCols
-      localStorage.setItem('stories-column-config', JSON.stringify(serverCols))
+      storageSetJson(STORIES_COLUMN_CONFIG_KEY, serverCols)
     }
-    if (settings['stories-view-mode']) {
-      viewMode.value = settings['stories-view-mode'] as 'table' | 'card'
-      localStorage.setItem('stories-view-mode', settings['stories-view-mode'])
+    if (settings[STORIES_VIEW_MODE_KEY]) {
+      viewMode.value = settings[STORIES_VIEW_MODE_KEY] as 'table' | 'card'
+      storageSet(STORIES_VIEW_MODE_KEY, settings[STORIES_VIEW_MODE_KEY] as string)
     }
-    if (settings['stories-column-widths']) {
-      const serverWidths = settings['stories-column-widths'] as Record<string, number>
+    if (settings[STORIES_COLUMN_WIDTHS_KEY]) {
+      const serverWidths = settings[STORIES_COLUMN_WIDTHS_KEY] as Record<string, number>
       for (const [k, v] of Object.entries(serverWidths)) {
         if (typeof v === 'number' && v >= 60) columnWidths[k] = v
       }
-      localStorage.setItem('stories-column-widths', JSON.stringify({ ...columnWidths }))
+      storageSetJson(STORIES_COLUMN_WIDTHS_KEY, { ...columnWidths })
+    }
+    if (settings[STORIES_SAVED_VIEWS_KEY]) {
+      const remoteViews = settings[STORIES_SAVED_VIEWS_KEY] as SavedStoryView[]
+      if (Array.isArray(remoteViews)) {
+        savedViews.value = remoteViews
+        storageSetJson(STORIES_SAVED_VIEWS_KEY, remoteViews)
+      }
     }
   } catch { /* fall back to localStorage */ }
 }
@@ -426,7 +694,7 @@ function resetColumns() {
   for (const col of defaultColumns) {
     columnWidths[col.field] = parseDefaultWidth(col.width)
   }
-  localStorage.removeItem('stories-column-widths')
+  storageRemove(STORIES_COLUMN_WIDTHS_KEY)
 }
 
 // --- Column resize ---
@@ -440,15 +708,12 @@ function loadColumnWidths(): Record<string, number> {
   for (const col of defaultColumns) {
     widths[col.field] = parseDefaultWidth(col.width)
   }
-  try {
-    const saved = localStorage.getItem('stories-column-widths')
-    if (saved) {
-      const parsed = JSON.parse(saved) as Record<string, number>
-      for (const [k, v] of Object.entries(parsed)) {
-        if (typeof v === 'number' && v >= 60) widths[k] = v
-      }
+  const saved = storageGetJson<Record<string, number> | null>(STORIES_COLUMN_WIDTHS_KEY, null)
+  if (saved && typeof saved === 'object') {
+    for (const [k, v] of Object.entries(saved)) {
+      if (typeof v === 'number' && v >= 60) widths[k] = v
     }
-  } catch { /* ignore */ }
+  }
   return widths
 }
 
@@ -483,13 +748,15 @@ function onResizeEnd() {
   document.removeEventListener('mousemove', onResizeMove)
   document.removeEventListener('mouseup', onResizeEnd)
   resizingCol.value = null
-  localStorage.setItem('stories-column-widths', JSON.stringify({ ...columnWidths }))
-  saveUserSetting('stories-column-widths', { ...columnWidths })
+  storageSetJson(STORIES_COLUMN_WIDTHS_KEY, { ...columnWidths })
+  saveUserSetting(STORIES_COLUMN_WIDTHS_KEY, { ...columnWidths })
 }
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onResizeMove)
   document.removeEventListener('mouseup', onResizeEnd)
+  if (searchDebounce) clearTimeout(searchDebounce)
+  cleanupSettings()
 })
 
 // Drag-and-drop reordering
@@ -517,6 +784,11 @@ function onDrop(idx: number) {
   }
   const arr = [...columns.value]
   const [moved] = arr.splice(dragIndex.value, 1)
+  if (!moved) {
+    dragIndex.value = null
+    dragOverIndex.value = null
+    return
+  }
   arr.splice(idx, 0, moved)
   columns.value = arr
   dragIndex.value = null
@@ -548,54 +820,36 @@ function toggleArchivedTab() {
 }
 
 async function restoreStory(storyId: string) {
+  if (!canEditStories.value) return
   await backlogStore.updateStory(storyId, { status: 'backlog' })
 }
 
+function toggleInlineEditMode() {
+  if (!canEditStories.value) return
+  inlineEditMode.value = !inlineEditMode.value
+  editingCell.value = null
+}
+
 // ===== Activity Timeline =====
-const showActivityDropdown = ref(false)
-const storyActivities = ref<Activity[]>([])
-const storyActivitiesLoading = ref(false)
-
-async function fetchStoryActivities() {
-  storyActivitiesLoading.value = true
-  try {
-    const p = productStore.activeProduct.name
-    const res = await fetch(`/api/activities?product=${encodeURIComponent(p)}&entityType=story&limit=50`)
-    if (res.ok) {
-      storyActivities.value = await res.json()
-    }
-  } catch (e) {
-    console.error('Failed to fetch story activities:', e)
-  } finally {
-    storyActivitiesLoading.value = false
-  }
-}
-
-function toggleActivityDropdown() {
-  showActivityDropdown.value = !showActivityDropdown.value
-  if (showActivityDropdown.value) {
-    fetchStoryActivities()
-  }
-}
-
-function onActivityClickOutside(event: MouseEvent) {
-  const target = event.target as HTMLElement
-  if (!target.closest('.activity-dropdown-container')) {
-    showActivityDropdown.value = false
-  }
-}
-watch(showActivityDropdown, (v) => {
-  if (v) {
-    setTimeout(() => document.addEventListener('click', onActivityClickOutside), 0)
-  } else {
-    document.removeEventListener('click', onActivityClickOutside)
-  }
+const {
+  showDropdown: showActivityDropdown,
+  activities: storyActivities,
+  loading: storyActivitiesLoading,
+  error: storyActivitiesError,
+  toggleDropdown: toggleActivityDropdown,
+  closeDropdown: closeActivityDropdown,
+  fetchActivities: fetchStoryActivities,
+} = useEntityActivityDropdown({
+  entityType: 'story',
+  token: computed(() => authStore.token),
+  productId: computed(() => productStore.activeProduct?.id || null),
+  fetchErrorMessage: 'Failed to fetch story activities.',
 })
 
 function openStoryFromActivity(entityId: string | null) {
   if (!entityId) return
-  showActivityDropdown.value = false
-  router.push(`/deliveries/${entityId}`)
+  closeActivityDropdown()
+  router.push(`/stories?story=${encodeURIComponent(entityId)}`)
 }
 
 function activityTimeAgo(dateStr: string) {
@@ -630,13 +884,13 @@ function activityUserInitials(name: string) {
 }
 
 const groupedStoryActivities = computed(() => {
-  const groups: { label: string; activities: Activity[] }[] = []
+  const groups: { label: string; activities: Array<(typeof storyActivities.value)[number]> }[] = []
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const weekStart = new Date(today)
   weekStart.setDate(today.getDate() - today.getDay())
   const lastWeekStart = new Date(weekStart.getTime() - 7 * 86400000)
-  const buckets = new Map<string, Activity[]>()
+  const buckets = new Map<string, Array<(typeof storyActivities.value)[number]>>()
   for (const activity of storyActivities.value) {
     const d = new Date(activity.createdAt)
     const day = new Date(d.getFullYear(), d.getMonth(), d.getDate())
@@ -655,15 +909,7 @@ const groupedStoryActivities = computed(() => {
 
 // ===== Styling =====
 function statusStyle(status: string) {
-  switch (status) {
-    case 'backlog': return 'bg-[#c4c4c4] text-white'
-    case 'drafted': return 'bg-[#a25ddc] text-white'
-    case 'initialized': return 'bg-[#579bfc] text-white'
-    case 'in_progress': return 'bg-[#fdab3d] text-white'
-    case 'completed': return 'bg-[#00c875] text-white'
-    case 'archived': return 'bg-gray-400 text-white'
-    default: return 'bg-gray-400 text-white'
-  }
+  return domainPresentation.storyStatusStyle(status)
 }
 
 function statusTabColor(status: string) {
@@ -679,13 +925,7 @@ function statusTabColor(status: string) {
 }
 
 function priorityStyle(priority: string) {
-  switch (priority) {
-    case 'critical': return 'bg-red-100 text-red-700 border border-red-200'
-    case 'high': return 'bg-orange-100 text-orange-700 border border-orange-200'
-    case 'medium': return 'bg-green-100 text-green-700 border border-green-200'
-    case 'low': return 'bg-blue-100 text-blue-700 border border-blue-200'
-    default: return 'bg-gray-100 text-gray-600 border border-gray-200'
-  }
+  return domainPresentation.storyPriorityStyle(priority)
 }
 
 function priorityDotStyle(priority: string) {
@@ -713,30 +953,20 @@ function typeIcon(type: string) {
 }
 
 function typeStyle(type: string | null) {
-  switch (type) {
-    case 'feature': return 'bg-blue-50/80 text-blue-600'
-    case 'bug': return 'bg-red-50/80 text-red-600'
-    case 'improvement': return 'bg-purple-50/80 text-purple-600'
-    case 'technical_debt': return 'bg-orange-50/80 text-orange-600'
-    case 'research': return 'bg-yellow-50/80 text-yellow-600'
-    case 'infrastructure': return 'bg-gray-100/80 text-gray-600'
-    case 'testing': return 'bg-green-50/80 text-green-600'
-    case 'documentation': return 'bg-gray-50/80 text-gray-500'
-    default: return 'bg-gray-50/80 text-gray-500'
-  }
+  return domainPresentation.storyTypeStyle(type || '')
 }
 
 function statusLabel(status: string) {
-  return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return domainPresentation.enumLabel(status)
 }
 
 function priorityLabel(priority: string) {
-  return priority.charAt(0).toUpperCase() + priority.slice(1)
+  return domainPresentation.enumLabel(priority)
 }
 
 function typeLabel(type: string | null) {
   if (!type) return '—'
-  return type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return domainPresentation.enumLabel(type)
 }
 
 function formatDate(dateStr: string | null) {
@@ -755,11 +985,16 @@ function formatDate(dateStr: string | null) {
           <div class="w-8 h-8 rounded-lg bg-[#4857FE]/10 flex items-center justify-center">
             <Book :size="18" class="text-[#4857FE]" />
           </div>
-          <h1 class="text-lg font-semibold text-gray-900">Stories <span class="text-gray-400 font-normal">({{ backlogStore.stories.length }})</span></h1>
+          <h1 class="text-lg font-semibold text-gray-900">Stories <span class="text-gray-400 font-normal">({{ backlogStore.totalApprox ?? backlogStore.stories.length }})</span></h1>
         </div>
         <div class="flex items-center gap-3">
           <button
-            class="flex items-center gap-1.5 bg-[#4857FE] hover:bg-[#3E4BDE] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer"
+            class="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            :class="canCreateStories
+              ? 'bg-[#4857FE] hover:bg-[#3E4BDE] text-white cursor-pointer'
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+            :disabled="!canCreateStories"
+            :title="storyPermissions.deniedReason('create', 'stories') || 'Create story'"
             @click="showCreateDialog = true"
           >
             <Plus :size="15" />
@@ -786,7 +1021,7 @@ function formatDate(dateStr: string | null) {
           </button>
           <!-- Status tabs -->
           <button
-            v-for="status in (['backlog', 'drafted', 'initialized', 'in_progress', 'completed'] as const)"
+            v-for="status in primaryStoryStatuses"
             :key="status"
             class="flex items-center gap-1.5 px-2.5 py-2.5 text-sm font-medium border-b-2 transition-colors cursor-pointer"
             :class="activeTab === status
@@ -795,7 +1030,7 @@ function formatDate(dateStr: string | null) {
             @click="activeTab = status"
           >
             {{ statusLabel(status) }}
-            <span class="text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[20px] text-center" :class="statusTabColor(status).badge">{{ storiesByStatus[status].length }}</span>
+            <span class="text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[20px] text-center" :class="statusTabColor(status).badge">{{ storiesByStatus[status]?.length || 0 }}</span>
           </button>
         </div>
 
@@ -806,6 +1041,7 @@ function formatDate(dateStr: string | null) {
             class="flex items-center gap-1.5 p-1.5 rounded-lg transition-colors cursor-pointer"
             :class="activeTab === 'archived' ? 'bg-[#4857FE]/10 text-[#4857FE]' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
             @click="toggleArchivedTab()"
+            aria-label="Toggle archived stories"
             title="Archived stories"
           >
             <Archive :size="16" />
@@ -818,6 +1054,7 @@ function formatDate(dateStr: string | null) {
               class="flex items-center gap-1.5 p-1.5 rounded-lg transition-colors cursor-pointer"
               :class="showActivityDropdown ? 'bg-[#4857FE]/10 text-[#4857FE]' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
               @click.stop="toggleActivityDropdown()"
+              aria-label="Open story activity timeline"
               title="Activity timeline"
             >
               <Clock :size="16" />
@@ -845,6 +1082,9 @@ function formatDate(dateStr: string | null) {
                 <div class="max-h-[480px] overflow-y-auto">
                   <div v-if="storyActivitiesLoading" class="flex items-center justify-center py-16">
                     <Loader2 :size="20" class="animate-spin text-gray-400" />
+                  </div>
+                  <div v-else-if="storyActivitiesError" class="text-center py-10 px-6">
+                    <p class="text-sm text-red-600">{{ storyActivitiesError }}</p>
                   </div>
                   <div v-else-if="storyActivities.length === 0" class="text-center py-16 px-6">
                     <Clock :size="32" class="text-gray-200 mx-auto mb-3" />
@@ -909,13 +1149,59 @@ function formatDate(dateStr: string | null) {
             </Transition>
           </div>
 
+          <!-- Saved Views -->
+          <div class="flex items-center gap-1.5 border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+            <select
+              v-model="selectedSavedViewId"
+              class="text-xs text-gray-600 bg-transparent outline-none"
+              @change="applySavedView(selectedSavedViewId)"
+            >
+              <option value="">Saved views</option>
+              <option v-for="view in savedViews" :key="view.id" :value="view.id">{{ view.name }}</option>
+            </select>
+            <button class="text-[11px] text-[#4857FE] hover:text-[#3E4BDE]" @click="saveCurrentView">Save</button>
+            <button
+              class="text-[11px] text-gray-400 hover:text-red-500 disabled:opacity-40"
+              :disabled="!selectedSavedViewId"
+              @click="deleteSavedView"
+            >
+              Delete
+            </button>
+          </div>
+
+          <!-- Bulk Actions -->
+          <div
+            v-if="hasSelectedStories"
+            class="flex items-center gap-2 border border-[#4857FE]/20 rounded-lg px-2 py-1.5 bg-[#4857FE]/5"
+          >
+            <span class="text-xs font-medium text-[#4857FE]">{{ selectedStoryIds.length }} selected</span>
+            <button class="text-[11px] text-[#4857FE] hover:text-[#3E4BDE]" @click="toggleSelectVisibleStories">Toggle visible</button>
+            <select v-model="bulkStatus" class="text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-600">
+              <option value="">Set status</option>
+              <option v-for="status in storyStatusOptions" :key="status" :value="status">{{ statusLabel(status) }}</option>
+            </select>
+            <button
+              class="text-[11px] text-[#4857FE] hover:text-[#3E4BDE] disabled:opacity-40"
+              :disabled="!bulkStatus"
+              @click="applyBulkStatus"
+            >
+              Apply
+            </button>
+            <select v-model="bulkOwnerId" class="text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-600 max-w-[140px]">
+              <option value="">Unassign owner</option>
+              <option v-for="member in teamMembers" :key="member.id" :value="member.id">{{ member.name }}</option>
+            </select>
+            <button class="text-[11px] text-[#4857FE] hover:text-[#3E4BDE]" @click="applyBulkOwner">Owner</button>
+            <button class="text-[11px] text-gray-400 hover:text-gray-600" @click="clearStorySelection">Clear</button>
+          </div>
+
           <!-- Search -->
           <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20">
             <Search :size="14" class="text-gray-400 shrink-0" />
             <input
               v-model="searchQuery"
               class="text-sm text-gray-700 bg-transparent outline-none w-44 placeholder-gray-400"
-              placeholder="Search stories..."
+              placeholder="Search backlog stories..."
             />
           </div>
 
@@ -1014,11 +1300,30 @@ function formatDate(dateStr: string | null) {
           <!-- Inline Edit Toggle -->
           <button
             class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+            :class="rankingMode
+              ? 'bg-[#4857FE]/10 text-[#4857FE]'
+              : canEditStories
+                ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                : 'text-gray-300 cursor-not-allowed'"
+            :disabled="!canEditStories"
+            @click="toggleRankingMode"
+            :title="storyPermissions.deniedReason('edit', 'stories') || 'Prioritize backlog'"
+          >
+            <GripVertical :size="15" />
+            <span v-if="rankingMode" class="text-xs">Prioritize</span>
+          </button>
+
+          <!-- Inline Edit Toggle -->
+          <button
+            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer"
             :class="inlineEditMode
               ? 'bg-[#4857FE]/10 text-[#4857FE]'
-              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
-            @click="inlineEditMode = !inlineEditMode; editingCell = null"
-            title="Inline editing"
+              : canEditStories
+                ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                : 'text-gray-300 cursor-not-allowed'"
+            :disabled="!canEditStories"
+            @click="toggleInlineEditMode"
+            :title="storyPermissions.deniedReason('edit', 'stories') || 'Inline editing'"
           >
             <PencilLine :size="15" />
             <span v-if="inlineEditMode" class="text-xs">Editing</span>
@@ -1033,6 +1338,9 @@ function formatDate(dateStr: string | null) {
       <div v-if="backlogStore.loading" class="flex items-center justify-center py-16">
         <Loader2 :size="24" class="animate-spin text-[#4857FE]" />
         <span class="ml-2 text-sm text-gray-500">Loading stories...</span>
+      </div>
+      <div v-else-if="backlogStore.error" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        {{ backlogStore.error }}
       </div>
 
       <!-- TABLE VIEW -->
@@ -1100,8 +1408,15 @@ function formatDate(dateStr: string | null) {
                   :class="inlineEditMode && !isEditing(story.id, 'title') ? 'hover:bg-gray-100/60 rounded px-1 -mx-1 cursor-text' : ''"
                   @click="startEditing(story.id, 'title', story.title, $event)"
                 >
+                  <input
+                    type="checkbox"
+                    class="h-3.5 w-3.5 rounded border-gray-300 text-[#4857FE] focus:ring-[#4857FE] shrink-0"
+                    :checked="selectedStoryIdSet.has(story.id)"
+                    @click.stop
+                    @change="toggleStorySelection(story.id, ($event.target as HTMLInputElement).checked)"
+                  />
                   <template v-if="isEditing(story.id, 'title')">
-                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProduct.name" />
+                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProduct.id || ''" />
                     <component :is="typeIcon(story.type)" :size="16" class="shrink-0" :class="{
                       'text-blue-500': story.type === 'feature',
                       'text-red-500': story.type === 'bug',
@@ -1122,7 +1437,7 @@ function formatDate(dateStr: string | null) {
                     />
                   </template>
                   <template v-else>
-                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProduct.name" />
+                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProduct.id || ''" />
                     <component :is="typeIcon(story.type)" :size="16" class="shrink-0" :class="{
                       'text-blue-500': story.type === 'feature',
                       'text-red-500': story.type === 'bug',
@@ -1133,7 +1448,7 @@ function formatDate(dateStr: string | null) {
                       'text-green-500': story.type === 'testing',
                       'text-gray-400': story.type === 'documentation',
                     }" />
-                    <span class="text-sm font-medium truncate" :class="(story.status === 'done' || story.status === 'archived') ? 'text-gray-400 line-through' : 'text-gray-800'">{{ story.title }}</span>
+                    <span class="text-sm font-medium truncate" :class="(story.status === 'completed' || story.status === 'archived') ? 'text-gray-400 line-through' : 'text-gray-800'">{{ story.title }}</span>
                     <ChevronRight v-if="!inlineEditMode" :size="14" class="text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                   </template>
                 </div>
@@ -1222,6 +1537,14 @@ function formatDate(dateStr: string | null) {
                     @keydown.escape.prevent="cancelEdit()"
                     @click.stop
                   />
+                  <router-link
+                    v-else-if="story.initiativeId"
+                    :to="`/initiatives/${story.initiativeId}`"
+                    class="text-sm text-[#4857FE] hover:text-[#3E4BDE] truncate block"
+                    @click.stop
+                  >
+                    {{ story.initiative || 'View initiative' }}
+                  </router-link>
                   <span v-else class="text-sm text-gray-500 truncate block">{{ story.initiative || '—' }}</span>
                 </div>
 
@@ -1316,11 +1639,40 @@ function formatDate(dateStr: string | null) {
                   <span class="text-sm text-gray-500">{{ formatDate(story.updatedAt) }}</span>
                 </div>
               </template>
+              <div
+                v-if="rankingMode && canRankActiveTab"
+                class="ml-auto mr-2 flex items-center gap-1 shrink-0"
+              >
+                <button
+                  class="p-1 rounded-md transition-colors"
+                  :class="storyRankIndex(story.id) <= 0
+                    ? 'text-gray-200 cursor-not-allowed'
+                    : 'text-gray-400 hover:text-[#4857FE] hover:bg-[#4857FE]/10'"
+                  :disabled="storyRankIndex(story.id) <= 0"
+                  @click.stop="moveStoryRank(story.id, -1)"
+                >
+                  <ArrowUp :size="13" />
+                </button>
+                <button
+                  class="p-1 rounded-md transition-colors"
+                  :class="storyRankIndex(story.id) >= activeTabRankedStories.length - 1
+                    ? 'text-gray-200 cursor-not-allowed'
+                    : 'text-gray-400 hover:text-[#4857FE] hover:bg-[#4857FE]/10'"
+                  :disabled="storyRankIndex(story.id) >= activeTabRankedStories.length - 1"
+                  @click.stop="moveStoryRank(story.id, 1)"
+                >
+                  <ArrowDown :size="13" />
+                </button>
+              </div>
               <!-- Restore button for archived -->
               <button
                 v-if="activeTab === 'archived'"
-                class="ml-auto p-1 rounded-md hover:bg-green-50 text-gray-300 hover:text-green-500 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                title="Restore story"
+                class="ml-auto p-1 rounded-md transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                :class="canEditStories
+                  ? 'hover:bg-green-50 text-gray-300 hover:text-green-500'
+                  : 'text-gray-200 cursor-not-allowed'"
+                :disabled="!canEditStories"
+                :title="storyPermissions.deniedReason('edit', 'stories') || 'Restore story'"
                 @click.stop="restoreStory(story.id)"
               >
                 <RotateCw :size="14" />
@@ -1355,14 +1707,23 @@ function formatDate(dateStr: string | null) {
               <!-- Row 1: Type icon + status badge -->
               <div class="flex items-center justify-between mb-3.5">
                 <div class="flex items-center gap-2">
-                  <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProduct.name" />
+                  <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProduct.id || ''" />
                   <div class="w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center">
                     <component :is="typeIcon(story.type)" :size="18" class="text-gray-400" />
                   </div>
                 </div>
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-semibold" :class="statusStyle(story.status)">
-                  {{ statusLabel(story.status) }}
-                </span>
+                <div class="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    class="h-3.5 w-3.5 rounded border-gray-300 text-[#4857FE] focus:ring-[#4857FE]"
+                    :checked="selectedStoryIdSet.has(story.id)"
+                    @click.stop
+                    @change="toggleStorySelection(story.id, ($event.target as HTMLInputElement).checked)"
+                  />
+                  <span class="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-semibold" :class="statusStyle(story.status)">
+                    {{ statusLabel(story.status) }}
+                  </span>
+                </div>
               </div>
 
               <!-- Title -->
@@ -1376,7 +1737,15 @@ function formatDate(dateStr: string | null) {
 
               <!-- Initiative + Priority -->
               <div class="flex items-center gap-2 mb-4">
-                <span v-if="story.initiative" class="text-sm text-gray-500 truncate flex-1">{{ story.initiative }}</span>
+                <router-link
+                  v-if="story.initiativeId"
+                  :to="`/initiatives/${story.initiativeId}`"
+                  class="text-sm text-[#4857FE] hover:text-[#3E4BDE] truncate flex-1"
+                  @click.stop
+                >
+                  {{ story.initiative || 'View initiative' }}
+                </router-link>
+                <span v-else-if="story.initiative" class="text-sm text-gray-500 truncate flex-1">{{ story.initiative }}</span>
                 <span v-else class="text-sm text-gray-400 italic flex-1">No initiative</span>
                 <span
                   class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-sm font-semibold shrink-0"
@@ -1416,6 +1785,17 @@ function formatDate(dateStr: string | null) {
           <p class="text-gray-400 text-xs mb-4">Create your first story to get started</p>
         </div>
       </template>
+
+      <div v-if="backlogStore.hasMore" class="flex justify-center pt-5">
+        <button
+          class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors"
+          :disabled="loadingMore"
+          @click="loadMoreStories"
+        >
+          <Loader2 v-if="loadingMore" :size="14" class="animate-spin" />
+          {{ loadingMore ? 'Loading more...' : 'Load more stories' }}
+        </button>
+      </div>
     </div>
 
     <!-- Add Story Dialog -->

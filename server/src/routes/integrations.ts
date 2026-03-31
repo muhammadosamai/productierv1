@@ -257,6 +257,39 @@ export const integrationsRoutes = new Elysia({ prefix: '/api/integrations' })
     }),
   })
 
+  // DELETE /api/integrations/:connectionId
+  .delete('/:connectionId', async ({ params, jwt: jwtInstance, headers, set }) => {
+    const actor = await requireAuth(jwtInstance.verify, headers, set)
+    if (!actor) return { error: 'Unauthorized' }
+
+    const connection = await db.query.integrationConnections.findFirst({
+      where: eq(integrationConnections.id, params.connectionId),
+    })
+    if (!connection) { set.status = 404; return { error: 'Connection not found' } }
+
+    const access = await requireProductPageAction(jwtInstance.verify, headers, set, {
+      productId: connection.productId,
+      page: 'integrations',
+      action: 'delete',
+    })
+    if (!access) return set.status === 401 ? { error: 'Unauthorized' } : { error: 'Forbidden' }
+
+    await db.delete(integrationConnections).where(eq(integrationConnections.id, connection.id))
+
+    logActivity({
+      productId: connection.productId,
+      userName: actor.name,
+      userAvatar: actor.avatar,
+      userId: actor.id,
+      action: 'deleted',
+      entityType: 'integration_connection',
+      entityId: connection.id,
+      entityTitle: connection.displayName || connection.connectorKey,
+    })
+
+    return { ok: true, id: connection.id }
+  })
+
   // POST /api/integrations/:connectionId/test
   .post('/:connector/test', async ({ params, jwt: jwtInstance, headers, set }) => {
     const actor = await requireAuth(jwtInstance.verify, headers, set)

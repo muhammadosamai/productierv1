@@ -4,5 +4,5 @@ ALTER TYPE item_status ADD VALUE IF NOT EXISTS 'initialized';
 ALTER TYPE item_status ADD VALUE IF NOT EXISTS 'completed';
 
 -- Migrate existing statuses to new ones
-UPDATE backlog_items SET status = 'completed' WHERE status = 'done';
-UPDATE backlog_items SET status = 'initialized' WHERE status = 'ready';
+UPDATE backlog_items SET status = 'completed' WHERE status::text = 'done';
+UPDATE backlog_items SET status = 'initialized' WHERE status::text = 'ready';

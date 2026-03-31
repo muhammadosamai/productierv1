@@ -42,6 +42,8 @@ export interface EndpointFixtures {
   testCycleId?: string
   testIssueId?: string
   issueId?: string
+  seededIssueId?: string
+  createdIssueId?: string
   featureRequestId?: string
   consumerFeedbackId?: string
   wikiTypeId?: string
@@ -50,6 +52,8 @@ export interface EndpointFixtures {
   wikiRevisionId?: string
   wikiRelationId?: string
   integrationConnectionId?: string
+  seededIntegrationConnectionId?: string
+  createdIntegrationConnectionId?: string
   integrationRunId?: string
   titleId?: string
   favoriteEntityType?: string
@@ -83,6 +87,7 @@ export interface EndpointRequestSpec {
   json?: unknown
   formData?: FormData
   headers?: Record<string, string>
+  preserveLegacyPath?: boolean
 }
 
 export interface EndpointResponse {
@@ -241,6 +246,18 @@ function asNonEmptyString(value: unknown): string {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : ''
 }
 
+function uniqueFixtureIds(values: Array<string | undefined>): string[] {
+  const seen = new Set<string>()
+  const resolved: string[] = []
+  for (const value of values) {
+    const id = asNonEmptyString(value)
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    resolved.push(id)
+  }
+  return resolved
+}
+
 function maybeProductIdFromPath(path: string): string {
   if (path.startsWith('/api/products/upload-logo')) return ''
   const match = path.match(/^\/api\/products\/([^/]+)/)
@@ -311,6 +328,7 @@ function toScopedSpec(
   ctx: EndpointRunContext,
   spec: EndpointRequestSpec,
 ): EndpointRequestSpec {
+  if (spec.preserveLegacyPath) return spec
   const path = spec.path
   if (!path.startsWith('/api/')) return spec
   if (path.startsWith('/api/organizations/')) return spec
@@ -900,7 +918,9 @@ export async function setupFixtures(ctx: EndpointRunContext): Promise<void> {
     },
   })
   ensureSuccess('create seeded issue', seededIssueRes)
-  ctx.fixtures.issueId = getIdField(seededIssueRes.data)
+  const seededIssueId = getIdField(seededIssueRes.data)
+  ctx.fixtures.issueId = seededIssueId
+  ctx.fixtures.seededIssueId = seededIssueId
 
   // Seed one integration connection so initial connection listing is non-empty.
   const seededIntegrationRes = await requestEndpoint(ctx, {
@@ -915,7 +935,9 @@ export async function setupFixtures(ctx: EndpointRunContext): Promise<void> {
     },
   })
   ensureSuccess('create seeded integration connection', seededIntegrationRes)
-  ctx.fixtures.integrationConnectionId = getIdField(seededIntegrationRes.data)
+  const seededIntegrationConnectionId = getIdField(seededIntegrationRes.data)
+  ctx.fixtures.integrationConnectionId = seededIntegrationConnectionId
+  ctx.fixtures.seededIntegrationConnectionId = seededIntegrationConnectionId
 
   const initiativeRes = await requestEndpoint(ctx, {
     method: 'POST',
@@ -1289,6 +1311,28 @@ export async function cleanupFixtures(ctx: EndpointRunContext): Promise<void> {
       method: 'DELETE',
       path: `/api/test-cycles/${f.testCycleId}`,
       auth: 'none',
+    })
+  }
+  for (const issueId of uniqueFixtureIds([
+    f.createdIssueId,
+    f.issueId,
+    f.seededIssueId,
+  ])) {
+    await bestEffort(ctx, {
+      method: 'DELETE',
+      path: `/api/issues/${issueId}`,
+      auth: 'superAdmin',
+    })
+  }
+  for (const connectionId of uniqueFixtureIds([
+    f.createdIntegrationConnectionId,
+    f.integrationConnectionId,
+    f.seededIntegrationConnectionId,
+  ])) {
+    await bestEffort(ctx, {
+      method: 'DELETE',
+      path: `/api/integrations/${encodeURIComponent(connectionId)}`,
+      auth: 'superAdmin',
     })
   }
   if (f.featureRequestId) {

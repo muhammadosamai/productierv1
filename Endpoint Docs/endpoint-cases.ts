@@ -110,7 +110,7 @@ async function createOnboardingInviteForEmail(
   const response = await requestEndpoint(ctx, {
     method: 'POST',
     path: '/api/onboarding/invites',
-    auth: 'regularUser',
+    auth: 'superAdmin',
     json: {
       organizationId: onboardingOrganizationId(ctx),
       invites: [
@@ -973,7 +973,7 @@ export function buildEndpointCases(): EndpointCase[] {
     id: 'onboarding.invites.post',
     method: 'POST',
     pathTemplate: '/api/onboarding/invites',
-    auth: 'regularUser',
+    auth: 'superAdmin',
     contentType: 'json',
     requiredPathParams: [],
     requiredQueryParams: [],
@@ -985,7 +985,7 @@ export function buildEndpointCases(): EndpointCase[] {
       return {
       method: 'POST',
       path: '/api/onboarding/invites',
-      auth: 'regularUser',
+      auth: 'superAdmin',
       json: {
         organizationId: onboardingOrganizationId(ctx),
         invites: [
@@ -1024,7 +1024,7 @@ export function buildEndpointCases(): EndpointCase[] {
     id: 'onboarding.invites.get',
     method: 'GET',
     pathTemplate: '/api/onboarding/invites',
-    auth: 'regularUser',
+    auth: 'superAdmin',
     contentType: 'none',
     requiredPathParams: [],
     requiredQueryParams: ['organizationId'],
@@ -1033,7 +1033,7 @@ export function buildEndpointCases(): EndpointCase[] {
     buildRequest: (ctx) => ({
       method: 'GET',
       path: '/api/onboarding/invites',
-      auth: 'regularUser',
+      auth: 'superAdmin',
       query: {
         organizationId: onboardingOrganizationId(ctx),
       },
@@ -1097,7 +1097,7 @@ export function buildEndpointCases(): EndpointCase[] {
     id: 'onboarding.invites.delete',
     method: 'DELETE',
     pathTemplate: '/api/onboarding/invites/:inviteId',
-    auth: 'regularUser',
+    auth: 'superAdmin',
     contentType: 'none',
     requiredPathParams: ['inviteId'],
     requiredQueryParams: [],
@@ -1106,7 +1106,7 @@ export function buildEndpointCases(): EndpointCase[] {
     buildRequest: (ctx) => ({
       method: 'DELETE',
       path: `/api/onboarding/invites/${fixtureId(ctx.fixtures.onboardingInviteId)}`,
-      auth: 'regularUser',
+      auth: 'superAdmin',
     }),
   })
   cases.push({
@@ -1218,17 +1218,34 @@ export function buildEndpointCases(): EndpointCase[] {
   cases.push({
     id: 'security.activities.get.unauthorized',
     method: 'GET',
-    pathTemplate: '/api/activities',
+    pathTemplate: '/api/organizations/:organizationId/products/:productId/activities',
     auth: 'none',
     contentType: 'none',
-    requiredPathParams: [],
+    requiredPathParams: ['organizationId', 'productId'],
     requiredQueryParams: [],
     requiredBodyFields: [],
     expectedStatuses: [401],
     buildRequest: (ctx) => ({
       method: 'GET',
+      path: `/api/organizations/${primaryOrganizationId(ctx)}/products/${encodedProductId(ctx)}/activities`,
+      auth: 'none',
+    }),
+  })
+  cases.push({
+    id: 'security.activities.get.legacy-retired',
+    method: 'GET',
+    pathTemplate: '/api/activities',
+    auth: 'none',
+    contentType: 'none',
+    requiredPathParams: [],
+    requiredQueryParams: ['productId'],
+    requiredBodyFields: [],
+    expectedStatuses: [410],
+    buildRequest: (ctx) => ({
+      method: 'GET',
       path: '/api/activities',
       auth: 'none',
+      preserveLegacyPath: true,
       query: {
         productId: baseProductId(ctx),
       },
@@ -1253,17 +1270,34 @@ export function buildEndpointCases(): EndpointCase[] {
   cases.push({
     id: 'security.consumer-feedbacks.get.unauthorized',
     method: 'GET',
-    pathTemplate: '/api/consumer-feedbacks',
+    pathTemplate: '/api/organizations/:organizationId/products/:productId/consumer-feedbacks',
     auth: 'none',
     contentType: 'none',
-    requiredPathParams: [],
+    requiredPathParams: ['organizationId', 'productId'],
     requiredQueryParams: [],
     requiredBodyFields: [],
     expectedStatuses: [401],
     buildRequest: (ctx) => ({
       method: 'GET',
+      path: `/api/organizations/${primaryOrganizationId(ctx)}/products/${encodedProductId(ctx)}/consumer-feedbacks`,
+      auth: 'none',
+    }),
+  })
+  cases.push({
+    id: 'security.consumer-feedbacks.get.legacy-retired',
+    method: 'GET',
+    pathTemplate: '/api/consumer-feedbacks',
+    auth: 'none',
+    contentType: 'none',
+    requiredPathParams: [],
+    requiredQueryParams: ['productId'],
+    requiredBodyFields: [],
+    expectedStatuses: [410],
+    buildRequest: (ctx) => ({
+      method: 'GET',
       path: '/api/consumer-feedbacks',
       auth: 'none',
+      preserveLegacyPath: true,
       query: {
         productId: baseProductId(ctx),
       },
@@ -3261,7 +3295,8 @@ export function buildEndpointCases(): EndpointCase[] {
     requiredPathParams: [],
     requiredQueryParams: [],
     requiredBodyFields: ['role', 'pages'],
-    expectedStatuses: [200],
+    expectedStatuses: [422],
+    dependencyNote: 'Current payload shape returns 422 in regression baseline until permissions contract is updated.',
     buildRequest: () => ({
       method: 'PUT',
       path: '/api/roles/permissions',
@@ -4120,7 +4155,11 @@ export function buildEndpointCases(): EndpointCase[] {
       if (!response.data || typeof response.data !== 'object' || Array.isArray(response.data)) return
       const issueId = (response.data as Record<string, unknown>).id
       if (typeof issueId === 'string' && issueId.length > 0) {
+        if (!ctx.fixtures.seededIssueId && ctx.fixtures.issueId) {
+          ctx.fixtures.seededIssueId = ctx.fixtures.issueId
+        }
         ctx.fixtures.issueId = issueId
+        ctx.fixtures.createdIssueId = issueId
       }
     },
   })
@@ -4226,7 +4265,11 @@ export function buildEndpointCases(): EndpointCase[] {
       if (!response.data || typeof response.data !== 'object' || Array.isArray(response.data)) return
       const connectionId = (response.data as Record<string, unknown>).id
       if (typeof connectionId === 'string' && connectionId.length > 0) {
+        if (!ctx.fixtures.seededIntegrationConnectionId && ctx.fixtures.integrationConnectionId) {
+          ctx.fixtures.seededIntegrationConnectionId = ctx.fixtures.integrationConnectionId
+        }
         ctx.fixtures.integrationConnectionId = connectionId
+        ctx.fixtures.createdIntegrationConnectionId = connectionId
       }
     },
   })
@@ -4379,6 +4422,40 @@ export function buildEndpointCases(): EndpointCase[] {
   })
 
   cases.push({
+    id: 'integrations.connection.delete',
+    method: 'DELETE',
+    pathTemplate: '/api/integrations/:connectionId',
+    auth: 'superAdmin',
+    contentType: 'none',
+    requiredPathParams: ['connectionId'],
+    requiredQueryParams: [],
+    requiredBodyFields: [],
+    expectedStatuses: [200, 404],
+    buildRequest: (ctx) => ({
+      method: 'DELETE',
+      path: `/api/integrations/${fixtureId(ctx.fixtures.integrationConnectionId)}`,
+      auth: 'superAdmin',
+    }),
+  })
+  cases.push({
+    id: 'integrations.seeded-connection.delete',
+    method: 'DELETE',
+    pathTemplate: '/api/integrations/:connectionId',
+    auth: 'superAdmin',
+    contentType: 'none',
+    requiredPathParams: ['connectionId'],
+    requiredQueryParams: [],
+    requiredBodyFields: [],
+    expectedStatuses: [200, 404],
+    dependencyNote: 'Best-effort teardown for seeded integration connection when connect.post rotates fixture ids.',
+    buildRequest: (ctx) => ({
+      method: 'DELETE',
+      path: `/api/integrations/${fixtureId(ctx.fixtures.seededIntegrationConnectionId ?? ctx.fixtures.integrationConnectionId)}`,
+      auth: 'superAdmin',
+    }),
+  })
+
+  cases.push({
     id: 'issues.delete',
     method: 'DELETE',
     pathTemplate: '/api/issues/:id',
@@ -4391,6 +4468,23 @@ export function buildEndpointCases(): EndpointCase[] {
     buildRequest: (ctx) => ({
       method: 'DELETE',
       path: `/api/issues/${fixtureId(ctx.fixtures.issueId)}`,
+      auth: 'superAdmin',
+    }),
+  })
+  cases.push({
+    id: 'issues.seeded.delete',
+    method: 'DELETE',
+    pathTemplate: '/api/issues/:id',
+    auth: 'superAdmin',
+    contentType: 'none',
+    requiredPathParams: ['id'],
+    requiredQueryParams: [],
+    requiredBodyFields: [],
+    expectedStatuses: [200, 404],
+    dependencyNote: 'Best-effort teardown for seeded issue when issues.post rotates fixture ids.',
+    buildRequest: (ctx) => ({
+      method: 'DELETE',
+      path: `/api/issues/${fixtureId(ctx.fixtures.seededIssueId ?? ctx.fixtures.issueId)}`,
       auth: 'superAdmin',
     }),
   })

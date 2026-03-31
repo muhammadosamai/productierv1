@@ -49,11 +49,32 @@ These should be triaged and either fixed in implementation or reflected in endpo
 - [ ] Confirm preflight has no unmatched owner/product references (including stale `EndpointDocs-*` values).
 - [ ] Confirm endpoint regression environment points to a fully migrated DB.
 
+## Safe Migration Execution (Stage / Production)
+
+Use the safe migration wrapper to avoid partial rollouts and silent schema drift.
+
+1. Create a fresh database backup/snapshot and record the restore point.
+2. Run migration status precheck:
+
+   ```bash
+   cd server
+   DATABASE_URL=postgresql://sarimalavi@postgres:5432/productier bun run db:migration:status
+   ```
+
+3. Apply safe migration flow (includes migrate + strict verify + post-cutover integrity checks):
+
+   ```bash
+   cd server
+   SAFE_MIGRATION_BACKUP_CONFIRMED=true DATABASE_URL=postgresql://sarimalavi@postgres:5432/productier bun run db:migrate:safe
+   ```
+
+4. If any step fails, stop rollout and follow the rollback procedure before promoting traffic.
+
 ## Cutover Steps (One-Pass)
 
 1. Put write-heavy jobs into maintenance-safe mode (pause schedulers/background sync).
 2. Run migration prechecks in target environment (data quality + referential readiness).
-3. Apply schema/data migration (`0009_data_consistency_cutover.sql`).
+3. Run `bun run db:migrate:safe` with backup confirmation in the target environment.
 4. Deploy backend with updated request/response contracts.
 5. Deploy frontend that sends/reads `productId`, `ownerUserId`, and `leaderUserId`.
 6. Resume schedulers/background jobs.
@@ -114,6 +135,16 @@ where p.id is null;
 
 Expected result for orphan checks: `0`.
 
+## Post-Migration Smoke Checks
+
+Run smoke checks immediately after safe migration and deployment:
+
+- `GET /api/health` returns `200`.
+- Home endpoints for key roles return `200` and no `INTERNAL_ERROR` payloads.
+- Metrics endpoints return `200` for at least one organization/product scope.
+- Notifications list and preferences endpoints return `200`.
+- Server logs contain no `42P01`, `42703`, or `42704` errors after traffic resumes.
+
 ## Rollback Runbook
 
 Use rollback if any of the following occurs:
@@ -121,7 +152,8 @@ Use rollback if any of the following occurs:
 - repeated 5xx responses on product-scoped endpoints,
 - authorization failures tied to product membership resolution,
 - widespread data access failures caused by missing UUID mappings,
-- integrity checks return non-zero orphan counts after attempted remediation.
+- integrity checks return non-zero orphan counts after attempted remediation,
+- safe migration flow (`db:migrate:safe`) fails strict status or post-cutover integrity checks.
 
 ### Rollback Procedure
 

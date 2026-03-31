@@ -60,6 +60,7 @@ const briefEnvKeys = [
   'HOME_DAILY_BRIEF_TIMEOUT_MS',
   'HOME_DAILY_BRIEF_RETRY_MODEL',
   'HOME_DAILY_BRIEF_RETRY_CONTEXT_MAX_CHARS',
+  'HOME_DAILY_BRIEF_REASONING_EFFORT',
 ] as const
 
 function withBriefEnv(overrides: Partial<Record<(typeof briefEnvKeys)[number], string>>) {
@@ -436,6 +437,58 @@ describe('home daily brief route', () => {
       expect(briefRes.status).toBe(200)
       expect(briefRes.body?.source).toBe('fallback')
       expect(briefRes.body?.fallbackReason).toBe('parse_error')
+    } finally {
+      invokeSpy.mockRestore()
+      restoreEnv()
+    }
+  })
+
+  it('extracts JSON payload from response metadata output when top-level content is empty', async () => {
+    const restoreEnv = withBriefEnv({
+      HOME_DAILY_BRIEF_ENABLED: 'true',
+      HOME_DAILY_BRIEF_PROVIDER: 'openai',
+      HOME_DAILY_BRIEF_API_KEY: 'test-brief-key',
+      SEARCH_EMBEDDING_API_KEY: '',
+      HOME_DAILY_BRIEF_FALLBACK_CACHE_TTL_MS: '15000',
+      HOME_DAILY_BRIEF_RETRY_MODEL: 'gpt-5.4-mini',
+      HOME_DAILY_BRIEF_REASONING_EFFORT: 'low',
+    })
+    const invokeSpy = vi.spyOn(ChatOpenAI.prototype as unknown as { invoke: (...args: unknown[]) => Promise<unknown> }, 'invoke')
+      .mockResolvedValue({
+        content: '',
+        response_metadata: {
+          output: [
+            {
+              type: 'message',
+              content: [
+                {
+                  type: 'output_text',
+                  text: '{"briefMarkdown":"### Metadata fallback parse\\n- Extracted from response metadata output.","sections":[]}',
+                },
+              ],
+            },
+          ],
+        },
+      })
+    try {
+      const app = await createTestApp()
+      const { token, user } = await registerAndLogin(app, 'super_admin')
+      const { productId, organizationId } = await createScopedProductForUser(user.id, 'Daily Brief Metadata Output Parse')
+
+      const briefRes = await apiRequest(
+        app,
+        `/api/organizations/${encodeURIComponent(organizationId)}/users/${encodeURIComponent(user.id)}/daily-brief?scope=product&productId=${encodeURIComponent(productId)}&view=executive`,
+        {
+          method: 'GET',
+          token,
+        },
+      )
+
+      expect(briefRes.status).toBe(200)
+      expect(briefRes.body?.source).toBe('ai')
+      expect(briefRes.body?.fallbackReason).toBeNull()
+      expect(typeof briefRes.body?.brief).toBe('string')
+      expect((briefRes.body?.brief as string).length).toBeGreaterThan(0)
     } finally {
       invokeSpy.mockRestore()
       restoreEnv()

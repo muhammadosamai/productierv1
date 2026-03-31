@@ -197,5 +197,14 @@ describe('OnboardingView', () => {
     expect(wrapper.findAll('input[placeholder="name@company.com"]')).toHaveLength(2)
     wrapper.unmount()
   })
+
+  it('renders invite submission controls for manual link workflow', async () => {
+    const wrapper = mount(OnboardingView)
+    await flushOnboardingInit()
+
+    expect(wrapper.text()).toContain('Create invite links')
+    expect(wrapper.text()).toContain('Pending invites')
+    wrapper.unmount()
+  })
 })
 

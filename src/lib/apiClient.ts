@@ -150,7 +150,11 @@ export interface OnboardingInviteRecord {
   id: string
   organizationId: string
   email: string
+  inviteeName?: string | null
   role: 'owner' | 'admin' | 'member' | 'viewer'
+  workspaceProductId?: string | null
+  organizationTeamId?: string | null
+  titleId?: string | null
   status: 'pending' | 'accepted' | 'expired' | 'cancelled'
   expiresAt: string
   acceptedAt: string | null

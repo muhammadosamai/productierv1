@@ -75,4 +75,16 @@ describe('DashboardPageTabs', () => {
     expect(buttonLabels).not.toContain('Load Template')
     expect(buttonLabels).not.toContain('Add Page')
   })
+
+  it('hides page actions menu when disabled', () => {
+    const wrapper = mount(DashboardPageTabs, {
+      props: {
+        pages: [basePage],
+        activePageId: 'page-1',
+        showPageActionsMenu: false,
+      },
+    })
+
+    expect(wrapper.findComponent(DashboardPageActionsMenu).exists()).toBe(false)
+  })
 })

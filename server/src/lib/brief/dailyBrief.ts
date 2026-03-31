@@ -1491,34 +1491,102 @@ function previewValue(value: unknown, maxChars = 180): string | undefined {
   }
 }
 
-function coerceAiResponseToString(value: unknown): string {
+function nonEmptyText(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? value : null
+}
+
+function tryStringifyJson(value: unknown): string {
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return ''
+  }
+}
+
+function coerceResponsesOutputToString(output: unknown): string {
+  if (!Array.isArray(output)) return ''
+  const fragments: string[] = []
+  for (const item of output) {
+    if (!item || typeof item !== 'object') continue
+    const row = item as Record<string, unknown>
+    if (row.type !== 'message' || !Array.isArray(row.content)) continue
+    for (const part of row.content) {
+      if (!part || typeof part !== 'object') continue
+      const piece = part as Record<string, unknown>
+      if (piece.type === 'output_text') {
+        const fromText = nonEmptyText(piece.text)
+        if (fromText) fragments.push(fromText)
+        continue
+      }
+      if (Object.prototype.hasOwnProperty.call(piece, 'parsed') && piece.parsed !== undefined && piece.parsed !== null) {
+        const serialized = tryStringifyJson(piece.parsed)
+        if (serialized.length > 0) fragments.push(serialized)
+      }
+    }
+  }
+  return fragments.join('\n').trim()
+}
+
+function coerceAiResponseToString(value: unknown, seen = new WeakSet<object>()): string {
   if (typeof value === 'string') return value
 
   if (Array.isArray(value)) {
     return value
-      .map((entry) => coerceAiResponseToString(entry))
+      .map((entry) => coerceAiResponseToString(entry, seen))
       .filter((entry) => entry.trim().length > 0)
       .join('\n')
       .trim()
   }
 
   if (value && typeof value === 'object') {
+    if (seen.has(value as object)) return ''
+    seen.add(value as object)
     const row = value as Record<string, unknown>
-    if (typeof row.content === 'string') return row.content
-    if (Array.isArray(row.content)) return coerceAiResponseToString(row.content)
-    if (typeof row.text === 'string') return row.text
+    const directContent = nonEmptyText(row.content)
+    if (directContent) return directContent
+    if (Array.isArray(row.content)) {
+      const nestedContent = coerceAiResponseToString(row.content, seen)
+      if (nestedContent.trim().length > 0) return nestedContent
+    }
+    const directText = nonEmptyText(row.text)
+    if (directText) return directText
     if (row.message && typeof row.message === 'object') {
       const message = row.message as Record<string, unknown>
-      if (typeof message.content === 'string') return message.content
-      if (Array.isArray(message.content)) return coerceAiResponseToString(message.content)
+      const messageContent = nonEmptyText(message.content)
+      if (messageContent) return messageContent
+      if (Array.isArray(message.content)) {
+        const nestedMessageContent = coerceAiResponseToString(message.content, seen)
+        if (nestedMessageContent.trim().length > 0) return nestedMessageContent
+      }
+    }
+    const responseMetadataCandidates = [row.response_metadata, row.responseMetadata]
+    for (const candidate of responseMetadataCandidates) {
+      if (!candidate || typeof candidate !== 'object') continue
+      const metadata = candidate as Record<string, unknown>
+      const outputText = coerceResponsesOutputToString(metadata.output)
+      if (outputText.trim().length > 0) return outputText
+      const directOutputText = nonEmptyText(metadata.output_text)
+      if (directOutputText) return directOutputText
+    }
+    const additionalKwargsCandidates = [row.additional_kwargs, row.additionalKwargs]
+    for (const candidate of additionalKwargsCandidates) {
+      if (!candidate || typeof candidate !== 'object') continue
+      const metadata = candidate as Record<string, unknown>
+      const parsed = metadata.parsed
+      if (parsed !== undefined && parsed !== null) {
+        const serializedParsed = tryStringifyJson(parsed)
+        if (serializedParsed.length > 0) return serializedParsed
+      }
+    }
+    if (row.kwargs && typeof row.kwargs === 'object') {
+      const kwargsText = coerceAiResponseToString(row.kwargs, seen)
+      if (kwargsText.trim().length > 0) return kwargsText
     }
     if (Object.prototype.hasOwnProperty.call(row, 'briefMarkdown')
       || Object.prototype.hasOwnProperty.call(row, 'sections')) {
-      try {
-        return JSON.stringify(value)
-      } catch {
-        return ''
-      }
+      return tryStringifyJson(value)
     }
   }
 
@@ -1529,6 +1597,20 @@ function compactContextForRetry(context: string, maxChars: number): string {
   const normalized = context.trim()
   if (normalized.length <= maxChars) return normalized
   return `${normalized.slice(0, maxChars)}\n\n[context truncated for retry]`
+}
+
+function resolveRetryMaxTokens(
+  mode: HomeBriefMode,
+  modeMaxTokens: number,
+  retryModel: string,
+): number {
+  if (!retryModel.startsWith('gpt-5')) return modeMaxTokens
+  const floor = mode === 'full' ? 1200 : 900
+  return Math.max(modeMaxTokens, floor)
+}
+
+function resolveModelTemperature(model: string, preferredTemperature: number): number {
+  return model.startsWith('gpt-5') ? 1 : preferredTemperature
 }
 
 async function attemptRetryAiBrief(
@@ -1543,14 +1625,21 @@ async function attemptRetryAiBrief(
   config: ReturnType<typeof getHomeBriefConfig>,
 ): Promise<Pick<AiBriefSuccess, 'brief' | 'sections'> | null> {
   const retryContext = compactContextForRetry(stuffedContext, config.retryContextMaxChars)
+  const retryTemperature = config.retryModel.startsWith('gpt-5')
+    ? 1
+    : Math.min(config.temperature, 0.1)
+  const retryReasoning = config.retryModel.startsWith('gpt-5')
+    ? { effort: config.reasoningEffort }
+    : undefined
   const retryLlm = new ChatOpenAI({
     apiKey,
     model: config.retryModel,
-    temperature: Math.min(config.temperature, 0.1),
-    maxTokens: modeMaxTokens,
+    temperature: retryTemperature,
+    maxTokens: resolveRetryMaxTokens(mode, modeMaxTokens, config.retryModel),
     configuration: {
       baseURL: config.baseUrl,
     },
+    ...(retryReasoning ? { reasoning: retryReasoning } : {}),
   })
   const retryChain = prompt.pipe(retryLlm)
   try {
@@ -1619,15 +1708,19 @@ async function requestAiBrief(
     const knownTaskIds = new Set([...knownTaskMap.keys()])
     const apiKey = config.apiKey
     const modeMaxTokens = mode === 'full' ? config.fullMaxTokens : config.summaryMaxTokens
+    const primaryReasoning = config.model.startsWith('gpt-5')
+      ? { effort: config.reasoningEffort }
+      : undefined
     const prompt = buildBriefPrompt(view, mode, scope, template, entityFocus, Boolean(product))
     const llm = new ChatOpenAI({
       apiKey,
       model: config.model,
-      temperature: config.temperature,
+      temperature: resolveModelTemperature(config.model, config.temperature),
       maxTokens: modeMaxTokens,
       configuration: {
         baseURL: config.baseUrl,
       },
+      ...(primaryReasoning ? { reasoning: primaryReasoning } : {}),
     })
     const chain = prompt.pipe(llm)
     const contextDocs = buildContextDocuments(view, mode, personal, product, {

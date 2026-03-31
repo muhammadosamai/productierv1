@@ -28,6 +28,7 @@ import {
   unauthorized,
   validationError,
 } from './lib/apiErrors'
+import { isSchemaMismatchError, schemaMismatchMessage } from './lib/schemaMismatch'
 import { getNetworkConfig } from './config/network'
 import { getStorageConfig } from './config/storage'
 import { getIntegrationsConfig } from './config/integrations'
@@ -251,6 +252,10 @@ export function createApp() {
       if (set.status === 403) return forbidden(set)
       if (set.status === 404) return notFound(set)
       if (set.status === 409) return conflict(set)
+
+      if (isSchemaMismatchError(error)) {
+        return apiError(set, 503, 'INTERNAL_ERROR', schemaMismatchMessage())
+      }
 
       console.error('[server] Unhandled error', error)
       return internalError(set)

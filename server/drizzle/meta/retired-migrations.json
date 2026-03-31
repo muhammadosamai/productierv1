@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "retired": [
+    {
+      "tag": "0001_update_story_types",
+      "reason": "Superseded by consolidated base schema in 0000_tense_stingray."
+    },
+    {
+      "tag": "0002_add_releases",
+      "reason": "Superseded by consolidated base schema in 0000_tense_stingray."
+    },
+    {
+      "tag": "0004_add_story_comments",
+      "reason": "Superseded by consolidated schema in 0001_next_yellow_claw."
+    },
+    {
+      "tag": "0005_add_test_cycles",
+      "reason": "Superseded by consolidated schema in 0001_next_yellow_claw."
+    },
+    {
+      "tag": "0006_add_favorites",
+      "reason": "Superseded by consolidated schema in 0001_next_yellow_claw."
+    },
+    {
+      "tag": "0006_add_wiki_assets",
+      "reason": "Superseded by consolidated schema in 0001_next_yellow_claw."
+    },
+    {
+      "tag": "0007_add_feature_requests",
+      "reason": "Superseded by consolidated schema in 0001_next_yellow_claw."
+    },
+    {
+      "tag": "0008_add_consumer_feedback",
+      "reason": "Superseded by consolidated schema in 0001_next_yellow_claw."
+    }
+  ]
+}

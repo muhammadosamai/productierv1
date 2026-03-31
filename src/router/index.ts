@@ -42,7 +42,7 @@ const router = createRouter({
       path: '/onboarding/accept-invite',
       name: 'onboarding-accept-invite',
       component: () => import('../views/OnboardingAcceptInviteView.vue'),
-      meta: { requiresAuth: true, standalone: true },
+      meta: { standalone: true },
     },
 
     // App pages (require auth)
@@ -239,7 +239,6 @@ router.beforeEach(async (to) => {
   }
 
   const isOnboardingRoute = to.name === 'onboarding' || to.name === 'onboarding-accept-invite'
-  const isInviteAcceptRoute = to.name === 'onboarding-accept-invite'
 
   if (!onboardingEnabled && isOnboardingRoute) {
     if (authStore.isAuthenticated) return '/home'
@@ -247,12 +246,6 @@ router.beforeEach(async (to) => {
   }
 
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    if (isInviteAcceptRoute) {
-      return {
-        path: '/login',
-        query: { redirect: to.fullPath },
-      }
-    }
     return '/login'
   }
 

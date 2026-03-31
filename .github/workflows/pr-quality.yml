@@ -23,12 +23,13 @@ jobs:
         run: npm ci
 
       - name: Frontend lint
-        continue-on-error: true
-        run: npm run lint
+        run: npm run lint:frontend
 
       - name: Frontend type-check
-        continue-on-error: true
         run: npm run type-check
+
+      - name: Frontend API guard
+        run: npm run check:no-hardcoded-api
 
       - name: Frontend tests
         run: npm run test
@@ -72,8 +73,11 @@ jobs:
       - name: Install backend dependencies
         run: bun install --frozen-lockfile
 
-      - name: Apply database schema
-        run: bun run db:push
+      - name: Apply database migrations
+        run: bun run db:migrate
+
+      - name: Verify migration status
+        run: bun run db:migration:status:strict
 
       - name: Backend lint
         run: bun run lint

@@ -96,6 +96,62 @@ async function resolveSharedTitleId(ctx: EndpointRunContext): Promise<string> {
   throw new Error('resolveSharedTitleId could not find the shared endpoint title.')
 }
 
+async function createOnboardingInviteForEmail(
+  ctx: EndpointRunContext,
+  invitedEmail: string,
+  options: {
+    name?: string
+    role?: 'owner' | 'admin' | 'member' | 'viewer'
+    workspaceProductId?: string
+    organizationTeamId?: string
+    titleId?: string
+  } = {},
+): Promise<{ inviteId: string; token: string }> {
+  const response = await requestEndpoint(ctx, {
+    method: 'POST',
+    path: '/api/onboarding/invites',
+    auth: 'regularUser',
+    json: {
+      organizationId: onboardingOrganizationId(ctx),
+      invites: [
+        {
+          email: invitedEmail,
+          name: options.name,
+          role: options.role || 'member',
+          workspaceProductId: options.workspaceProductId,
+          organizationTeamId: options.organizationTeamId,
+          titleId: options.titleId,
+        },
+      ],
+    },
+  })
+  if (response.status !== 200) {
+    throw new Error(`Failed to create onboarding invite fixture (status=${response.status})`)
+  }
+
+  const payload = response.data as Record<string, unknown> | null
+  const created = Array.isArray(payload?.created)
+    ? payload.created as Array<Record<string, unknown>>
+    : []
+  const first = created[0]
+  const inviteId = typeof first?.id === 'string' ? first.id : ''
+  const inviteLink = typeof first?.inviteLink === 'string' ? first.inviteLink : ''
+  if (!inviteId || !inviteLink) {
+    throw new Error('Failed to create onboarding invite fixture token')
+  }
+
+  try {
+    const parsed = new URL(inviteLink, 'http://localhost')
+    const token = parsed.searchParams.get('token') || ''
+    if (!token) {
+      throw new Error('missing token')
+    }
+    return { inviteId, token }
+  } catch {
+    throw new Error('Failed to parse onboarding invite fixture token')
+  }
+}
+
 function assertListEnvelope(response: EndpointResponse, caseId: string): void {
   const data = response.data as Record<string, unknown> | null
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
@@ -923,7 +979,10 @@ export function buildEndpointCases(): EndpointCase[] {
     requiredQueryParams: [],
     requiredBodyFields: ['organizationId', 'invites'],
     expectedStatuses: [200],
-    buildRequest: (ctx) => ({
+    buildRequest: (ctx) => {
+      const inviteEmail = `endpoint-onboarding-invite-${ctx.fixtures.runId}-${Date.now()}@productier.test`
+      ctx.fixtures.onboardingInviteEmail = inviteEmail
+      return {
       method: 'POST',
       path: '/api/onboarding/invites',
       auth: 'regularUser',
@@ -931,12 +990,14 @@ export function buildEndpointCases(): EndpointCase[] {
         organizationId: onboardingOrganizationId(ctx),
         invites: [
           {
-            email: ctx.credentials.email,
+            email: inviteEmail,
+            name: `Endpoint Invite ${ctx.fixtures.runId}`,
             role: 'member',
           },
         ],
       },
-    }),
+      }
+    },
     onSuccess: (ctx, response) => {
       const payload = response.data as Record<string, unknown> | null
       const created = Array.isArray(payload?.created)
@@ -988,14 +1049,49 @@ export function buildEndpointCases(): EndpointCase[] {
     requiredQueryParams: [],
     requiredBodyFields: ['token'],
     expectedStatuses: [200],
-    buildRequest: (ctx) => ({
-      method: 'POST',
-      path: '/api/onboarding/invites/accept',
-      auth: 'superAdmin',
-      json: {
-        token: ctx.fixtures.onboardingInviteToken || 'missing-invite-token',
-      },
-    }),
+    buildRequest: async (ctx) => {
+      const invite = await createOnboardingInviteForEmail(
+        ctx,
+        ctx.credentials.email,
+        { role: 'member' },
+      )
+      return {
+        method: 'POST',
+        path: '/api/onboarding/invites/accept',
+        auth: 'superAdmin',
+        json: {
+          token: invite.token,
+        },
+      }
+    },
+  })
+  cases.push({
+    id: 'onboarding.invites.activate.post',
+    method: 'POST',
+    pathTemplate: '/api/onboarding/invites/activate',
+    auth: 'none',
+    contentType: 'json',
+    requiredPathParams: [],
+    requiredQueryParams: [],
+    requiredBodyFields: ['token', 'password'],
+    expectedStatuses: [200],
+    buildRequest: async (ctx) => {
+      const invitedEmail = `endpoint-activate-invite-${ctx.fixtures.runId}-${Date.now()}@productier.test`
+      const invite = await createOnboardingInviteForEmail(ctx, invitedEmail, {
+        name: `Endpoint Activate ${ctx.fixtures.runId}`,
+        role: 'member',
+      })
+      return {
+        method: 'POST',
+        path: '/api/onboarding/invites/activate',
+        auth: 'none',
+        json: {
+          token: invite.token,
+          password: 'EndpointInvite-Activate1!',
+          name: `Endpoint Activated ${ctx.fixtures.runId}`,
+        },
+      }
+    },
   })
   cases.push({
     id: 'onboarding.invites.delete',

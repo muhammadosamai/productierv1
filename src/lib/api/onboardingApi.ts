@@ -1,4 +1,5 @@
 import { apiFetch, apiJson, toApiError } from '@/lib/api/core'
+import type { User } from '@/types/user'
 import type {
   ApiProduct,
   OnboardingInviteRecord,
@@ -107,7 +108,11 @@ export const onboardingApi = {
       organizationId: string
       invites: Array<{
         email: string
+        name?: string | null
         role?: 'owner' | 'admin' | 'member' | 'viewer'
+        workspaceProductId?: string | null
+        organizationTeamId?: string | null
+        titleId?: string | null
       }>
     },
     token?: string | null,
@@ -116,7 +121,11 @@ export const onboardingApi = {
       created: Array<{
         id: string
         email: string
+        inviteeName?: string | null
         role: 'owner' | 'admin' | 'member' | 'viewer'
+        workspaceProductId?: string | null
+        organizationTeamId?: string | null
+        titleId?: string | null
         status: 'pending'
         expiresAt: string
         inviteLink: string
@@ -145,6 +154,27 @@ export const onboardingApi = {
       membershipRole: 'owner' | 'admin' | 'member' | 'viewer'
       onboarding: { currentStep: OnboardingStep; isCompleted: boolean }
     }>('/onboarding/invites/accept', {
+      method: 'POST',
+      token,
+      json: payload,
+    })
+  },
+  activateInvite(
+    payload: {
+      token: string
+      password: string
+      name?: string | null
+    },
+    token?: string | null,
+  ) {
+    return apiJson<{
+      success: boolean
+      token: string
+      user: User
+      organization: { id: string; name: string; slug: string } | null
+      membershipRole: 'owner' | 'admin' | 'member' | 'viewer'
+      onboarding: { currentStep: OnboardingStep; isCompleted: boolean }
+    }>('/onboarding/invites/activate', {
       method: 'POST',
       token,
       json: payload,

@@ -20,6 +20,7 @@ import {
 } from '../lib/notifications'
 import { NOTIFICATION_CATEGORIES, NOTIFICATION_SEVERITIES, NOTIFICATION_URGENCIES } from '../lib/notificationContracts'
 import { authPlugin } from '../plugins/auth'
+import { isSchemaMismatchError } from '../lib/schemaMismatch'
 
 const REMINDER_CADENCE_VALUES = ['immediate', 'daily', 'weekly'] as const
 
@@ -49,18 +50,8 @@ function parseBoolean(value: unknown): boolean | undefined {
   return undefined
 }
 
-function isSchemaMismatchError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false
-  const code = (error as { code?: unknown }).code
-  return typeof code === 'string' && (
-    code === '42P01' // undefined_table
-    || code === '42703' // undefined_column
-    || code === '42704' // undefined_object
-  )
-}
-
 function schemaMismatchMessage(): string {
-  return 'Notification schema is out of date. Run `bun run db:migration:reconcile` and `bun run db:migrate` on the server.'
+  return 'Notification schema is out of date. Run `bun run db:migrate:safe` on the server.'
 }
 
 function isPreferenceValidationError(error: unknown): error is Error {

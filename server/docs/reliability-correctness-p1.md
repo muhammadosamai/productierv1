@@ -73,10 +73,9 @@ configuration error message.
 PR quality checks are defined in `.github/workflows/pr-quality.yml`:
 
 - Frontend: lint, type-check, and tests.
-- Backend: DB push, lint, type-check, integration tests.
+- Backend: DB migrate, strict migration status, lint, type-check, integration tests.
 
-Current compatibility guardrail: frontend lint/type-check steps are configured as
-non-blocking while existing baseline type issues are cleaned up incrementally.
+Frontend and backend quality steps are blocking in PR checks.
 
 The backend job provisions PostgreSQL and runs tests against an isolated
 `productier_test` database.

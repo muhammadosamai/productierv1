@@ -6,6 +6,7 @@ import { useProductStore } from '@/stores/products'
 import { useRolesStore } from '@/stores/roles'
 import { useAuthStore } from '@/stores/auth'
 import { usePagePermissions } from '@/lib/pagePermissions'
+import InviteMembersPanel from '@/components/users/InviteMembersPanel.vue'
 import type { UserRole } from '@/types/user'
 
 const usersStore = useUsersStore()
@@ -157,6 +158,13 @@ onBeforeUnmount(() => {
         Manage organization users, roles, titles, and product memberships.
       </p>
     </div>
+
+    <InviteMembersPanel
+      v-if="canEditUsers"
+      :can-invite="canEditUsers"
+      heading="Invite Organization Members"
+      description="Create manual invite links for POC onboarding and optionally pre-assign workspace, team, and title."
+    />
 
     <div class="flex flex-wrap items-center gap-3">
       <div class="relative w-full sm:max-w-sm">

@@ -41,7 +41,7 @@ const FALLBACK_PRODUCT_SECTIONS: ProductNavigationSection[] = [
     order: 1,
     items: [
       { id: 'initiatives', label: 'Initiatives', iconToken: 'initiatives', route: '/initiatives', pageKey: 'initiatives', expandable: true, hasAdd: true },
-      { id: 'stories', label: 'Backlog (Stories)', iconToken: 'stories', route: '/stories', pageKey: 'stories', expandable: true, hasAdd: true },
+      { id: 'stories', label: 'Stories', iconToken: 'stories', route: '/stories', pageKey: 'stories', expandable: true, hasAdd: true },
       { id: 'tasks', label: 'Tasks', iconToken: 'tasks', route: '/tasks', pageKey: 'tasks', expandable: true, hasAdd: true },
       { id: 'deliveries', label: 'Deliveries', iconToken: 'deliveries', route: '/deliveries', pageKey: 'deliveries', expandable: true, hasAdd: true },
       { id: 'releases', label: 'Releases', iconToken: 'releases', route: '/releases', pageKey: 'releases', expandable: true, hasAdd: true },
@@ -94,7 +94,7 @@ function sortByRouteLength<T extends { route: string }>(items: T[]): T[] {
 
 function normalizeProductItemLabel(item: ProductNavigationEntry): string {
   if (item.pageKey === 'overview') return 'Dashboard Metrics'
-  if (item.pageKey === 'stories') return 'Backlog (Stories)'
+  if (item.pageKey === 'stories') return 'Stories'
   return item.label
 }
 

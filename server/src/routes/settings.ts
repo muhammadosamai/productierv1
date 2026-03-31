@@ -4,13 +4,14 @@ import { userSettings } from '../db/schema'
 import { eq, and } from 'drizzle-orm'
 import { authPlugin } from '../plugins/auth'
 import { requireAuth } from '../lib/authz'
+import { isSchemaMismatchError } from '../lib/schemaMismatch'
 
 function isSettingsStorageUnavailable(error: unknown): boolean {
+  if (isSchemaMismatchError(error)) return true
   if (!error || typeof error !== 'object') return false
   const maybeErr = error as { code?: string; message?: string }
   const normalizedCode = (maybeErr.code || '').toUpperCase()
   if ([
-    '42P01', // relation does not exist
     'ECONNREFUSED',
     'ENOTFOUND',
     'ETIMEDOUT',

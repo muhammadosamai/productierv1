@@ -7,6 +7,11 @@ const { apiFetchMock } = vi.hoisted(() => ({
   apiFetchMock: vi.fn(),
 }))
 
+const { resolveProductScopeMock, buildProductScopedPathMock } = vi.hoisted(() => ({
+  resolveProductScopeMock: vi.fn(),
+  buildProductScopedPathMock: vi.fn(),
+}))
+
 vi.mock('@/lib/apiClient', () => ({
   ApiError: class ApiError extends Error {
     constructor(
@@ -21,9 +26,21 @@ vi.mock('@/lib/apiClient', () => ({
   apiFetch: apiFetchMock,
 }))
 
+vi.mock('@/lib/productScopeApi', () => ({
+  resolveProductScope: resolveProductScopeMock,
+  buildProductScopedPath: buildProductScopedPathMock,
+}))
+
 describe('useEntityActivityDropdown', () => {
   beforeEach(() => {
     apiFetchMock.mockReset()
+    resolveProductScopeMock.mockReset()
+    buildProductScopedPathMock.mockReset()
+    resolveProductScopeMock.mockReturnValue({
+      organizationId: 'org-1',
+      productId: 'product-1',
+    })
+    buildProductScopedPathMock.mockReturnValue('/organizations/org-1/products/product-1/activities')
   })
 
   it('fetches activities when opening the dropdown', async () => {
@@ -42,10 +59,14 @@ describe('useEntityActivityDropdown', () => {
 
     await activityDropdown.toggleDropdown()
 
-    expect(apiFetchMock).toHaveBeenCalledWith('/activities', {
+    expect(resolveProductScopeMock).toHaveBeenCalledWith('product-1')
+    expect(buildProductScopedPathMock).toHaveBeenCalledWith({
+      organizationId: 'org-1',
+      productId: 'product-1',
+    }, '/activities')
+    expect(apiFetchMock).toHaveBeenCalledWith('/organizations/org-1/products/product-1/activities', {
       token: 'token-1',
       query: {
-        productId: 'product-1',
         entityType: 'task',
         limit: 50,
       },
@@ -72,6 +93,8 @@ describe('useEntityActivityDropdown', () => {
   })
 
   it('skips fetch when there is no active product', async () => {
+    resolveProductScopeMock.mockReturnValueOnce(null)
+
     const activityDropdown = useEntityActivityDropdown({
       entityType: 'delivery',
       token: computed(() => 'token-1'),

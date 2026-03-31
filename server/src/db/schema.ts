@@ -317,6 +317,19 @@ export const productMembers = pgTable('product_members', {
   unique('product_user_unique').on(table.product, table.userId),
 ])
 
+export const inviteStatusEnum = pgEnum('invite_status', ['pending', 'accepted', 'expired'])
+
+export const productInvites = pgTable('product_invites', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  product: varchar('product', { length: 255 }).notNull(),
+  email: varchar('email', { length: 255 }).notNull(),
+  role: varchar('role', { length: 50 }).notNull().default('member'),
+  token: varchar('token', { length: 255 }).notNull().unique(),
+  status: inviteStatusEnum('status').notNull().default('pending'),
+  invitedByUserId: uuid('invited_by_user_id').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const favorites = pgTable('favorites', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

@@ -20,6 +20,7 @@ import AddStoryDialog from '@/components/backlog/AddStoryDialog.vue'
 import CreateTaskDialog from '@/components/delivery/CreateTaskDialog.vue'
 import CreateReleaseDialog from '@/components/release/CreateReleaseDialog.vue'
 import CreateTestCycleDialog from '@/components/testCycle/CreateTestCycleDialog.vue'
+import InviteMemberDialog from '@/components/team/InviteMemberDialog.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -79,6 +80,7 @@ const showCreateStoryDialog = ref(false)
 const showCreateTaskDialog = ref(false)
 const showCreateReleaseDialog = ref(false)
 const showCreateTestCycleDialog = ref(false)
+const showInviteMemberDialog = ref(false)
 
 // Resizable sidebar
 const SIDEBAR_STORAGE_KEY = 'sub-sidebar-width'
@@ -545,6 +547,8 @@ function handleAddClick(item: NavItem, event: Event) {
     showCreateReleaseDialog.value = true
   } else if (item.label === 'Testing Cycles') {
     showCreateTestCycleDialog.value = true
+  } else if (item.label === 'Team') {
+    showInviteMemberDialog.value = true
   }
 }
 
@@ -932,6 +936,7 @@ function onTestCycleCreated(id: string) {
     <!-- Create Release Dialog -->
     <CreateReleaseDialog v-model:open="showCreateReleaseDialog" @created="onReleaseCreated" />
     <CreateTestCycleDialog v-model:open="showCreateTestCycleDialog" @created="onTestCycleCreated" />
+    <InviteMemberDialog v-model:open="showInviteMemberDialog" />
 
     <!-- Context Menu -->
     <Teleport to="body">

@@ -18,6 +18,7 @@ import { wikiRoutes } from './routes/wiki'
 import { featureRequestRoutes } from './routes/featureRequests'
 import { consumerFeedbackRoutes } from './routes/consumerFeedback'
 import { rolesRoutes } from './routes/roles'
+import { inviteRoutes } from './routes/invites'
 
 const app = new Elysia()
   .use(cors({
@@ -44,6 +45,7 @@ const app = new Elysia()
   .use(featureRequestRoutes)
   .use(consumerFeedbackRoutes)
   .use(rolesRoutes)
+  .use(inviteRoutes)
   .get('/api/health', () => ({ status: 'ok' }))
   .listen(3001)
 

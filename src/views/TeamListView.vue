@@ -6,11 +6,12 @@ import {
   ChevronRight, LayoutList, LayoutGrid,
   ArrowUp, ArrowDown, SlidersHorizontal,
   GripVertical, Check, RotateCcw,
-  CalendarDays, ListChecks, CheckCircle2, User,
+  CalendarDays, ListChecks, CheckCircle2, User, Plus,
 } from 'lucide-vue-next'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import TeamMemberDetailPanel from '@/components/team/TeamMemberDetailPanel.vue'
+import InviteMemberDialog from '@/components/team/InviteMemberDialog.vue'
 
 interface TeamUser {
   id: string
@@ -28,10 +29,12 @@ const productStore = useProductStore()
 const authStore = useAuthStore()
 
 const teamMembers = ref<TeamUser[]>([])
+const pendingInvites = ref<{ id: string; email: string; role: string; status: string; createdAt: string }[]>([])
 const loading = ref(false)
 const searchQuery = ref('')
-const activeTab = ref<'all' | 'admin' | 'product_manager' | 'business_analyst' | 'developer' | 'viewer'>('all')
+const activeTab = ref<'all' | 'admin' | 'product_manager' | 'business_analyst' | 'developer' | 'viewer' | 'invited'>('all')
 const viewMode = ref<'table' | 'card'>(localStorage.getItem('team-view-mode') as 'table' | 'card' || 'table')
+const showInviteDialog = ref(false)
 
 // Save view mode to API + localStorage
 watch(viewMode, (v) => {
@@ -56,16 +59,59 @@ function closeDetailPanel() {
 async function fetchTeamMembers() {
   loading.value = true
   try {
-    const res = await fetch(`/api/auth/users?q=`, {
+    const productName = productStore.activeProduct?.name
+    if (!productName) {
+      teamMembers.value = []
+      return
+    }
+
+    const res = await fetch(`/api/products/${encodeURIComponent(productName)}/members`, {
       headers: { Authorization: `Bearer ${authStore.token}` },
     })
     if (res.ok) {
-      teamMembers.value = await res.json()
+      const members: any[] = await res.json()
+      teamMembers.value = members.map(m => ({
+        id: m.userId,
+        name: m.userName,
+        email: m.userEmail,
+        role: m.role,
+        avatar: m.userAvatar,
+        createdAt: m.addedAt,
+      }))
+    }
+
+    // Also fetch pending invites
+    const inviteRes = await fetch(`/api/invites/product/${encodeURIComponent(productName)}`, {
+      headers: { Authorization: `Bearer ${authStore.token}` },
+    })
+    if (inviteRes.ok) {
+      pendingInvites.value = await inviteRes.json()
     }
   } catch {
     teamMembers.value = []
   } finally {
     loading.value = false
+  }
+}
+
+function onInvited() {
+  fetchTeamMembers()
+}
+
+async function revokeInvite(inviteId: string) {
+  try {
+    const res = await fetch(`/api/invites/${inviteId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${authStore.token}` },
+    })
+    if (res.ok) {
+      pendingInvites.value = pendingInvites.value.filter(i => i.id !== inviteId)
+      if (pendingInvites.value.length === 0 && activeTab.value === 'invited') {
+        activeTab.value = 'all'
+      }
+    }
+  } catch {
+    // ignore
   }
 }
 
@@ -88,7 +134,7 @@ watch(() => route.query.member, (memberId) => {
   }
 })
 
-watch(() => productStore.activeProduct.name, () => {
+watch(() => productStore.activeProduct?.name, () => {
   fetchTeamMembers()
 })
 
@@ -486,6 +532,13 @@ function statusBadgeStyle(status: string) {
           </div>
           <h1 class="text-lg font-semibold text-gray-900">Team <span class="text-gray-400 font-normal">({{ teamMembers.length }})</span></h1>
         </div>
+        <button
+          class="flex items-center gap-1.5 bg-[#4857FE] hover:bg-[#3E4BDE] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer"
+          @click="showInviteDialog = true"
+        >
+          <Plus :size="16" />
+          Invite Member
+        </button>
       </div>
     </div>
 
@@ -516,6 +569,18 @@ function statusBadgeStyle(status: string) {
           >
             {{ roleTabLabel(role) }}
             <span class="text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[20px] text-center" :class="roleTabColor(role).badge">{{ membersByRole[role].length }}</span>
+          </button>
+          <!-- Invited tab -->
+          <button
+            v-if="pendingInvites.length > 0"
+            class="flex items-center gap-1.5 px-2.5 py-2.5 text-sm font-medium border-b-2 transition-colors cursor-pointer"
+            :class="activeTab === 'invited'
+              ? 'text-amber-600 border-amber-500'
+              : 'text-gray-500 border-transparent hover:text-gray-700'"
+            @click="activeTab = 'invited'"
+          >
+            Invited
+            <span class="text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[20px] text-center bg-amber-100 text-amber-700">{{ pendingInvites.length }}</span>
           </button>
         </div>
 
@@ -626,8 +691,48 @@ function statusBadgeStyle(status: string) {
       </div>
     </div>
 
+    <!-- Invited Tab Content -->
+    <div v-if="activeTab === 'invited'" class="flex-1 overflow-auto px-8 py-6">
+      <div class="bg-white rounded-xl border border-gray-200/80 overflow-hidden max-w-3xl">
+        <table class="w-full">
+          <thead>
+            <tr class="border-b border-gray-100 bg-gray-50/50">
+              <th class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Email</th>
+              <th class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Role</th>
+              <th class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Invited</th>
+              <th class="text-right text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="invite in pendingInvites" :key="invite.id" class="border-b border-gray-50 hover:bg-gray-50/50">
+              <td class="px-4 py-3">
+                <div class="flex items-center gap-2">
+                  <Mail :size="14" class="text-gray-400" />
+                  <span class="text-sm text-gray-900">{{ invite.email }}</span>
+                </div>
+              </td>
+              <td class="px-4 py-3">
+                <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                  {{ invite.role }}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-sm text-gray-500">{{ formatDate(invite.createdAt) }}</td>
+              <td class="px-4 py-3 text-right">
+                <button
+                  class="text-xs text-red-500 hover:text-red-700 font-medium"
+                  @click="revokeInvite(invite.id)"
+                >
+                  Revoke
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Content -->
-    <div class="flex-1 overflow-hidden px-8 py-6 flex flex-col min-h-0" :class="viewMode === 'card' ? 'overflow-y-auto' : ''">
+    <div v-else class="flex-1 overflow-hidden px-8 py-6 flex flex-col min-h-0" :class="viewMode === 'card' ? 'overflow-y-auto' : ''">
       <!-- Loading -->
       <div v-if="loading" class="flex items-center justify-center py-16">
         <Loader2 :size="24" class="animate-spin text-[#4857FE]" />
@@ -839,6 +944,12 @@ function statusBadgeStyle(status: string) {
       :member="selectedMember"
       :open="showDetailPanel"
       @close="closeDetailPanel"
+    />
+
+    <!-- Invite Dialog -->
+    <InviteMemberDialog
+      v-model:open="showInviteDialog"
+      @invited="onInvited"
     />
   </div>
 </template>

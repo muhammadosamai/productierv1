@@ -256,20 +256,20 @@ describe('runtime configuration', () => {
     expect(config.apiKeySource).toBe('none')
     expect(config.hasDedicatedApiKey).toBe(false)
     expect(config.hasSearchFallbackApiKey).toBe(false)
-    expect(config.model).toBe('gpt-4o-mini')
-    expect(config.maxTokens).toBe(220)
-    expect(config.summaryMaxTokens).toBe(220)
-    expect(config.fullMaxTokens).toBe(420)
-    expect(config.timeoutMs).toBe(4500)
+    expect(config.model).toBe('gpt-5.4-mini')
+    expect(config.maxTokens).toBe(500)
+    expect(config.summaryMaxTokens).toBe(500)
+    expect(config.fullMaxTokens).toBe(900)
+    expect(config.timeoutMs).toBe(15000)
     expect(config.fallbackCacheTtlMs).toBe(15000)
-    expect(config.retryModel).toBe('gpt-4o-mini')
+    expect(config.retryModel).toBe('gpt-5.4-mini')
     expect(config.retryContextMaxChars).toBe(4200)
   })
 
   it('supports explicit home daily brief provider overrides', () => {
     process.env.HOME_DAILY_BRIEF_ENABLED = 'true'
     process.env.HOME_DAILY_BRIEF_PROVIDER = 'openai'
-    process.env.HOME_DAILY_BRIEF_MODEL = 'gpt-4.1-mini'
+    process.env.HOME_DAILY_BRIEF_MODEL = 'gpt-5.4-mini'
     process.env.HOME_DAILY_BRIEF_API_KEY = 'brief-key'
     process.env.SEARCH_EMBEDDING_API_KEY = ''
     process.env.HOME_DAILY_BRIEF_TIMEOUT_MS = '3000'
@@ -279,7 +279,7 @@ describe('runtime configuration', () => {
     process.env.HOME_DAILY_BRIEF_TEMPERATURE = '0.4'
     process.env.HOME_DAILY_BRIEF_CACHE_TTL_MS = '120000'
     process.env.HOME_DAILY_BRIEF_FALLBACK_CACHE_TTL_MS = '5000'
-    process.env.HOME_DAILY_BRIEF_RETRY_MODEL = 'gpt-4.1-mini'
+    process.env.HOME_DAILY_BRIEF_RETRY_MODEL = 'gpt-5.4-mini'
     process.env.HOME_DAILY_BRIEF_RETRY_CONTEXT_MAX_CHARS = '3600'
 
     const config = getHomeBriefConfig()
@@ -290,7 +290,7 @@ describe('runtime configuration', () => {
     expect(config.apiKeySource).toBe('home_daily_brief')
     expect(config.hasDedicatedApiKey).toBe(true)
     expect(config.hasSearchFallbackApiKey).toBe(false)
-    expect(config.model).toBe('gpt-4.1-mini')
+    expect(config.model).toBe('gpt-5.4-mini')
     expect(config.timeoutMs).toBe(3000)
     expect(config.maxTokens).toBe(180)
     expect(config.summaryMaxTokens).toBe(240)
@@ -298,7 +298,7 @@ describe('runtime configuration', () => {
     expect(config.temperature).toBe(0.4)
     expect(config.cacheTtlMs).toBe(120000)
     expect(config.fallbackCacheTtlMs).toBe(5000)
-    expect(config.retryModel).toBe('gpt-4.1-mini')
+    expect(config.retryModel).toBe('gpt-5.4-mini')
     expect(config.retryContextMaxChars).toBe(3600)
   })
 
@@ -313,7 +313,7 @@ describe('runtime configuration', () => {
     const config = getHomeBriefConfig()
     expect(config.maxTokens).toBe(260)
     expect(config.summaryMaxTokens).toBe(260)
-    expect(config.fullMaxTokens).toBe(420)
+    expect(config.fullMaxTokens).toBe(900)
   })
 
   it('uses search embedding key as home brief key fallback when dedicated key is missing', () => {

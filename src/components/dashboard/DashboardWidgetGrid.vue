@@ -113,7 +113,7 @@ function emitReorder() {
   >
     <template #item="{ element: widget }">
       <div
-        class="self-start flex min-h-[160px] flex-col rounded-xl border border-gray-100 bg-white shadow-sm"
+        class="self-start flex min-h-0 flex-col overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm"
         :style="widgetStyle(widget)"
       >
         <div class="flex items-center justify-between border-b border-gray-100 px-3 py-2">
@@ -169,7 +169,7 @@ function emitReorder() {
     <div
       v-for="widget in sortedWidgets"
       :key="widget.id"
-      class="self-start flex min-h-[160px] flex-col rounded-xl border border-gray-100 bg-white shadow-sm"
+      class="self-start flex min-h-0 flex-col overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm"
       :style="widgetStyle(widget)"
     >
       <div class="flex items-center justify-between border-b border-gray-100 px-3 py-2">

@@ -96,7 +96,7 @@ function userInitials(name: string) {
 </script>
 
 <template>
-  <div class="h-full rounded-xl border border-gray-100 bg-white">
+  <div class="flex h-full min-h-0 flex-col bg-white">
     <div class="flex items-center justify-between border-b border-gray-100 px-4 py-3">
       <div class="flex items-center gap-2">
         <Users :size="17" class="text-gray-400" />
@@ -163,16 +163,16 @@ function userInitials(name: string) {
       </div>
     </div>
 
-    <div v-if="membersStore.loading" class="flex items-center justify-center py-8">
+    <div v-if="membersStore.loading" class="flex flex-1 items-center justify-center py-8">
       <Loader2 :size="16" class="animate-spin text-gray-400" />
     </div>
 
-    <div v-else-if="membersStore.members.length === 0" class="px-5 py-8 text-center">
+    <div v-else-if="membersStore.members.length === 0" class="flex flex-1 flex-col items-center justify-center px-5 py-8 text-center">
       <Users :size="24" class="mx-auto mb-2 text-gray-200" />
       <p class="text-xs text-gray-400">No team members yet</p>
     </div>
 
-    <div v-else class="divide-y divide-gray-50">
+    <div v-else class="min-h-0 flex-1 divide-y divide-gray-50 overflow-auto">
       <div
         v-for="member in membersStore.members"
         :key="member.id"

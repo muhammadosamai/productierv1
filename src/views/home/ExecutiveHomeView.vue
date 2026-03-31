@@ -35,7 +35,7 @@ import HomeEmptyState from '@/components/home/HomeEmptyState.vue'
 import HomeKpiCard from '@/components/home/HomeKpiCard.vue'
 import HomeSectionHeader from '@/components/home/HomeSectionHeader.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   organizationId: string | null
   homeScope: HomeScopeSelection
   dailyBriefEnabled: boolean
@@ -50,7 +50,10 @@ const props = defineProps<{
   briefTemplate: HomeBriefTemplate
   briefProducts: Array<{ id: string; name: string }>
   allowAllProductsBriefScope: boolean
-}>()
+  embedded?: boolean
+}>(), {
+  embedded: false,
+})
 
 const emit = defineEmits<{
   (event: 'update:brief-mode', value: HomeBriefMode): void
@@ -65,6 +68,10 @@ const authStore = useAuthStore()
 
 const loading = ref(false)
 const error = ref<string | null>(null)
+
+const containerClass = computed(() =>
+  props.embedded ? 'h-full p-2 sm:p-3 lg:p-4' : 'p-3 sm:p-4 lg:p-5',
+)
 
 const dashboard = ref<DashboardMetricsResponse | null>(null)
 const predictability = ref<PredictabilityMetricsResponse | null>(null)
@@ -404,7 +411,7 @@ function riskBadgeLabel(value: string): string {
 </script>
 
 <template>
-  <div class="p-3 sm:p-4 lg:p-5">
+  <div :class="containerClass">
     <div v-if="loading" class="flex items-center justify-center py-16 text-gray-400">
       <Loader2 :size="18" class="mr-2 animate-spin" />
       Loading executive overview...

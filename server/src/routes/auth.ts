@@ -97,6 +97,22 @@ function toNullableText(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
+function toIsoText(value: unknown, fallback = ''): string {
+  if (value instanceof Date) {
+    const ms = value.getTime()
+    return Number.isNaN(ms) ? fallback : value.toISOString()
+  }
+  return toText(value, fallback)
+}
+
+function toNullableIsoText(value: unknown): string | null {
+  if (value instanceof Date) {
+    const ms = value.getTime()
+    return Number.isNaN(ms) ? null : value.toISOString()
+  }
+  return toNullableText(value)
+}
+
 const PASSWORD_MIN_LENGTH = 12
 const PASSWORD_RESET_WINDOW_MS = 15 * 60 * 1000
 const passwordResetTokenStore = new Map<string, { userId: string; expiresAt: number }>()
@@ -197,12 +213,12 @@ function normalizeHomeTaskSummary(task: unknown): Record<string, unknown> {
     priority: toText(row.priority, 'medium'),
     productId: toText(row.productId),
     product: toText(row.product, 'Unassigned product'),
-    dueAt: toNullableText(row.dueAt),
+    dueAt: toNullableIsoText(row.dueAt),
     storyTitle: toText(row.storyTitle),
     blockedReason: toNullableText(row.blockedReason),
     assigneeCoverage: toText(row.assigneeCoverage, 'assigned') === 'unassigned' ? 'unassigned' : 'assigned',
     ageDays: toFiniteNumber(row.ageDays),
-    updatedAt: toText(row.updatedAt, new Date().toISOString()),
+    updatedAt: toIsoText(row.updatedAt, new Date().toISOString()),
   }
 }
 
@@ -392,10 +408,10 @@ function normalizeHomeDashboardPayload(payload: Record<string, unknown>): Record
             }
           })
           : null,
-        createdAt: toText(row.createdAt, new Date().toISOString()),
+        createdAt: toIsoText(row.createdAt, new Date().toISOString()),
       }
     }),
-    generatedAt: toText(payload.generatedAt, new Date().toISOString()),
+    generatedAt: toIsoText(payload.generatedAt, new Date().toISOString()),
   }
 }
 

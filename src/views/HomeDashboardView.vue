@@ -442,6 +442,7 @@ watch(visiblePages, (pages) => {
 
 function resolveWidgetProps(widget: DashboardWidget): Record<string, unknown> {
   const base = {
+    embedded: true,
     organizationId: resolvedOrganizationId.value,
     homeScope: homeScope.value,
     dailyBriefEnabled,

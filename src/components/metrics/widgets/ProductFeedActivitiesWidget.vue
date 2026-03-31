@@ -110,7 +110,7 @@ function userInitials(name: string) {
 </script>
 
 <template>
-  <div class="h-full bg-white">
+  <div class="flex h-full min-h-0 flex-col bg-white">
     <div class="flex items-center justify-between border-b border-gray-100 px-4 py-3">
       <div class="flex items-center gap-2">
         <Clock :size="17" class="text-gray-400" />
@@ -126,17 +126,17 @@ function userInitials(name: string) {
       </button>
     </div>
 
-    <div v-if="activitiesStore.loading" class="flex items-center justify-center py-14">
+    <div v-if="activitiesStore.loading" class="flex flex-1 items-center justify-center py-14">
       <Loader2 :size="18" class="animate-spin text-gray-400" />
     </div>
 
-    <div v-else-if="activitiesStore.activities.length === 0" class="px-4 py-14 text-center">
+    <div v-else-if="activitiesStore.activities.length === 0" class="flex flex-1 flex-col items-center justify-center px-4 py-14 text-center">
       <Clock :size="28" class="mx-auto mb-2 text-gray-200" />
       <p class="text-sm text-gray-400">No activity yet</p>
       <p class="mt-1 text-xs text-gray-300">Changes to stories and initiatives will appear here</p>
     </div>
 
-    <div v-else class="max-h-[540px] space-y-4 overflow-auto px-4 py-4">
+    <div v-else class="min-h-0 flex-1 space-y-4 overflow-auto px-4 py-4">
       <div v-for="group in groupedActivities" :key="group.label">
         <div class="pb-1">
           <span class="text-[11px] font-bold tracking-wider text-[#4857FE]">{{ group.label }}</span>

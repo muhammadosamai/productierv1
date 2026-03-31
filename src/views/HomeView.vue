@@ -61,7 +61,7 @@ type HomeViewData = HomeDashboardResponse & {
   blockedTasks: LocalHomeTask[]
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   organizationId: string | null
   homeScope: HomeScopeSelection
   dailyBriefEnabled: boolean
@@ -76,7 +76,10 @@ const props = defineProps<{
   briefTemplate: HomeBriefTemplate
   briefProducts: Array<{ id: string; name: string }>
   allowAllProductsBriefScope: boolean
-}>()
+  embedded?: boolean
+}>(), {
+  embedded: false,
+})
 
 const emit = defineEmits<{
   (event: 'update:brief-mode', value: HomeBriefMode): void
@@ -108,6 +111,14 @@ const currentDateLabel = computed(() =>
     day: 'numeric',
     year: 'numeric',
   }),
+)
+
+const shellClass = computed(() =>
+  props.embedded ? 'h-full bg-transparent' : 'h-full bg-[#F8FAFF]',
+)
+
+const contentClass = computed(() =>
+  props.embedded ? 'w-full space-y-4 p-2 sm:p-3 lg:p-4' : 'w-full space-y-4 p-3 sm:p-4 lg:p-5',
 )
 
 const filteredTasks = computed(() => {
@@ -246,12 +257,12 @@ function normalizeTaskSummary(task: unknown): HomeTaskSummary {
     priority: priority as HomeTaskSummary['priority'],
     productId: toText(row.productId),
     product: toText(row.product, 'Unassigned product'),
-    dueAt: toNullableText(row.dueAt),
+    dueAt: toNullableText(row.dueAt ?? row.dueDate ?? row.due_at),
     storyTitle: toText(row.storyTitle),
     blockedReason: toNullableText(row.blockedReason),
     assigneeCoverage: toText(row.assigneeCoverage, 'assigned') === 'unassigned' ? 'unassigned' : 'assigned',
     ageDays: toNumber(row.ageDays),
-    updatedAt: toText(row.updatedAt, new Date().toISOString()),
+    updatedAt: toText(row.updatedAt ?? row.updated_at, new Date().toISOString()),
   }
 }
 
@@ -653,8 +664,8 @@ watch(
 </script>
 
 <template>
-  <div class="h-full bg-[#F8FAFF]">
-    <div class="w-full space-y-4 p-3 sm:p-4 lg:p-5">
+  <div :class="shellClass">
+    <div :class="contentClass">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 class="text-xl font-bold text-gray-900">

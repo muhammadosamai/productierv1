@@ -34,7 +34,7 @@ import HomeEmptyState from '@/components/home/HomeEmptyState.vue'
 import HomeKpiCard from '@/components/home/HomeKpiCard.vue'
 import HomeSectionHeader from '@/components/home/HomeSectionHeader.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   organizationId: string | null
   homeScope: HomeScopeSelection
   selectedMemberIds: string[]
@@ -50,7 +50,10 @@ const props = defineProps<{
   briefTemplate: HomeBriefTemplate
   briefProducts: Array<{ id: string; name: string }>
   allowAllProductsBriefScope: boolean
-}>()
+  embedded?: boolean
+}>(), {
+  embedded: false,
+})
 
 const emit = defineEmits<{
   (event: 'update:selected-member-ids', value: string[]): void
@@ -245,6 +248,10 @@ const canManageAllTeams = computed(() => {
   const role = String(authStore.user?.role || '').toLowerCase()
   return role === 'super_admin' || role === 'admin' || role === 'product_admin' || role === 'product_manager'
 })
+
+const containerClass = computed(() =>
+  props.embedded ? 'h-full p-2 sm:p-3 lg:p-4' : 'p-3 sm:p-4 lg:p-5',
+)
 
 const teamScopeOptions = computed(() => {
   const userId = authStore.user?.id || ''
@@ -620,7 +627,7 @@ function loadRatioClass(value: number): string {
 </script>
 
 <template>
-  <div class="p-3 sm:p-4 lg:p-5">
+  <div :class="containerClass">
     <div v-if="loading" class="flex items-center justify-center py-16 text-gray-400">
       <Loader2 :size="18" class="mr-2 animate-spin" />
       Loading team KPIs...

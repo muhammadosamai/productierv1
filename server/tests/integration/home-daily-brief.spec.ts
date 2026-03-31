@@ -449,7 +449,7 @@ describe('home daily brief route', () => {
       HOME_DAILY_BRIEF_API_KEY: 'test-brief-key',
       SEARCH_EMBEDDING_API_KEY: '',
       HOME_DAILY_BRIEF_FALLBACK_CACHE_TTL_MS: '15000',
-      HOME_DAILY_BRIEF_RETRY_MODEL: 'gpt-4o-mini',
+      HOME_DAILY_BRIEF_RETRY_MODEL: 'gpt-5.4-mini',
       HOME_DAILY_BRIEF_RETRY_CONTEXT_MAX_CHARS: '3500',
     })
     const invokeSpy = vi.spyOn(ChatOpenAI.prototype as unknown as { invoke: (...args: unknown[]) => Promise<unknown> }, 'invoke')

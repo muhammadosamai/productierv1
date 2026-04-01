@@ -121,7 +121,7 @@ function handleLogout() {
           <!-- Settings -->
           <button
             class="flex items-center gap-2.5 w-full px-2 py-2 text-sm text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
-            @click="goToSettings"
+            @click="goToSettings()"
           >
             <Settings :size="15" class="text-gray-400" />
             Settings

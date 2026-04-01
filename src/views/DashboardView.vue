@@ -190,6 +190,10 @@ function onOwnerSearchBlur(_storyId: string) {
   }, 150)
 }
 
+function onTaskAssigneeBlur() {
+  setTimeout(() => { showTaskAssigneeDropdown.value = false }, 150)
+}
+
 function startOwnerEdit(storyId: string, currentOwner: string) {
   startEdit(storyId, 'owner', currentOwner)
   ownerSearchQuery.value = ''
@@ -818,7 +822,7 @@ function priorityBarColor(priority: string) {
         <div class="grid grid-cols-4 gap-4">
           <div class="bg-white rounded-xl border border-gray-100 p-5">
             <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Total Stories</p>
-            <p class="text-2xl font-semibold text-gray-900 mt-1">{{ backlogStore.itemCount }}</p>
+            <p class="text-2xl font-semibold text-gray-900 mt-1">{{ backlogStore.storyCount }}</p>
           </div>
           <div class="bg-white rounded-xl border border-gray-100 p-5">
             <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Total Tasks</p>
@@ -1472,7 +1476,7 @@ function priorityBarColor(priority: string) {
                 class="w-full text-sm bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#4857FE] placeholder:text-gray-400 transition-colors"
                 @input="onTaskAssigneeInput"
                 @focus="showTaskAssigneeDropdown = true; searchTaskAssignees(taskAssigneeSearch)"
-                @blur="setTimeout(() => showTaskAssigneeDropdown = false, 150)"
+                @blur="onTaskAssigneeBlur"
               />
               <div
                 v-if="showTaskAssigneeDropdown && (taskAssigneeResults.length > 0 || taskAssigneeLoading)"

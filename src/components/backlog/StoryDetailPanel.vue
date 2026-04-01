@@ -11,7 +11,7 @@ import {
 import { useRouter } from 'vue-router'
 import { useBacklogStore } from '@/stores/backlog'
 import { useAuthStore } from '@/stores/auth'
-import type { Story, StoryType, StoryStatus, StoryPriority, TaskComment } from '@/types/backlog'
+import type { Story, StoryType, StoryStatus, StoryPriority, TaskComment, CreateStoryPayload } from '@/types/backlog'
 import AddTaskInline from '@/components/backlog/AddTaskInline.vue'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import {
@@ -297,7 +297,8 @@ async function clearOwner() {
   showOwnerDropdown.value = false
   saving.value = true
   try {
-    await backlogStore.updateStory(props.story!.id, { owner: null, ownerAvatar: null })
+    const payload: Partial<CreateStoryPayload> = { owner: null, ownerAvatar: null }
+    await backlogStore.updateStory(props.story!.id, payload)
     emit('updated')
   } catch {}
   finally {

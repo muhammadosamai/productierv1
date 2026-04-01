@@ -114,6 +114,8 @@ async function submit() {
   if (!title.value.trim() || submitting.value) return
   submitting.value = true
   try {
+    const pid = productStore.activeProductName
+    if (!pid) return
     const result = await releasesStore.createRelease({
       title: title.value.trim(),
       version: version.value.trim() || null,
@@ -122,7 +124,7 @@ async function submit() {
       plannedAt: plannedAt.value || null,
       releaseManagerId: releaseManagerId.value,
       notes: notes.value || null,
-      productId: productStore.activeProduct.name,
+      productId: pid,
       deliveryIds: selectedDeliveryIds.value,
     })
     if (result) {

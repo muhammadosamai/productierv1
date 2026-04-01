@@ -77,6 +77,8 @@ watch(open, (val) => {
 
 async function handleSubmit() {
   if (!title.value.trim()) return
+  const activeProduct = productStore.activeProduct
+  if (!activeProduct) return
   submitting.value = true
   const created = await deliveriesStore.createDelivery({
     title: title.value.trim(),
@@ -84,7 +86,7 @@ async function handleSubmit() {
     status: status.value,
     startDate: startDate.value || undefined,
     endDate: endDate.value || undefined,
-    productId: productStore.activeProduct.name,
+    productId: activeProduct.name,
     initiativeIds: selectedInitiativeIds.value.length > 0 ? selectedInitiativeIds.value : undefined,
   })
   submitting.value = false

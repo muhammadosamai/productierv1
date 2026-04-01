@@ -43,10 +43,10 @@ const submitting = ref(false)
 watch(viewMode, (v) => localStorage.setItem('cf-view-mode', v))
 
 onMounted(() => {
-  store.fetchAll(productStore.activeProduct.name)
+  store.fetchAll(productStore.activeProductName)
 })
 
-watch(() => productStore.activeProduct.name, (p) => {
+watch(() => productStore.activeProductName, (p) => {
   store.fetchAll(p)
 })
 
@@ -111,7 +111,7 @@ async function handleCreate() {
   if (!newTitle.value.trim()) return
   submitting.value = true
   await store.create({
-    productId: productStore.activeProduct.name,
+    productId: productStore.activeProductName,
     title: newTitle.value.trim(),
     description: newDescription.value.trim() || null,
     type: newType.value,
@@ -303,7 +303,7 @@ function timeAgo(dateStr: string) {
           <tbody>
             <tr v-for="item in filteredItems" :key="item.id" class="border-b border-gray-50 hover:bg-gray-50/50 transition-colors group">
               <td class="px-5 py-3.5">
-                <FavoriteStar entity-type="consumer_feedback" :entity-id="item.id" :product-id="productStore.activeProduct.name" />
+                <FavoriteStar entity-type="consumer_feedback" :entity-id="item.id" :product-id="productStore.activeProductName" />
               </td>
               <td class="px-5 py-3.5">
                 <div class="flex items-center gap-2 min-w-0">

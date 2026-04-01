@@ -110,7 +110,7 @@ async function handleProductSave() {
       logoUrl = null // Logo was removed
     }
 
-    const currentName = productStore.activeProduct.name
+    const currentName = productStore.activeProductName
     const updates: Record<string, any> = {}
     if (productName.value.trim() !== currentName) updates.name = productName.value.trim()
     if (productDescription.value !== (productStore.activeProduct.description || '')) updates.description = productDescription.value || null
@@ -529,7 +529,7 @@ const userInitials = () => {
       <!-- Delete Product Dialog -->
       <DeleteProductDialog
         v-model:open="showDeleteProductDialog"
-        :product-name="productStore.activeProduct.name"
+        :product-name="productStore.activeProductName"
       />
     </div>
   </div>

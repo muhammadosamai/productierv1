@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { ChevronUp, ChevronDown, MoreHorizontal, Plus, Search, Filter } from 'lucide-vue-next'
-import type { Task, ItemType, TaskPriority, TaskStatus } from '@/types/backlog'
+import type { Task, TaskPriority, TaskStatus } from '@/types/backlog'
 
 interface TeamUser {
   id: string
@@ -26,7 +26,7 @@ function getUserById(id: string): TeamUser | undefined {
 // ============ STATUS GROUPS ============
 
 interface StatusGroup {
-  key: TaskStatus
+  key: 'todo' | 'in_progress' | 'review' | 'done'
   label: string
   color: string
 }
@@ -52,7 +52,7 @@ function toggleCollapse(key: string) {
 
 // Group tasks by status
 const tasksByStatus = computed(() => {
-  const map: Record<string, Task[]> = {
+  const map: Record<StatusGroup['key'], Task[]> = {
     todo: [],
     in_progress: [],
     review: [],
@@ -63,8 +63,10 @@ const tasksByStatus = computed(() => {
       map.todo.push(task)
     } else if (task.status === 'in_review') {
       map.review.push(task)
-    } else if (map[task.status]) {
-      map[task.status].push(task)
+    } else if (task.status === 'in_progress') {
+      map.in_progress.push(task)
+    } else if (task.status === 'done') {
+      map.done.push(task)
     }
   }
   return map

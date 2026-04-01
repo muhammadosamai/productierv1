@@ -72,6 +72,8 @@ const filteredStories = computed(() => {
   )
 })
 
+const activeProduct = computed(() => productStore.activeProduct)
+
 const selectedStory = computed(() => {
   if (!selectedStoryId.value) return null
   return backlogStore.stories.find(s => s.id === selectedStoryId.value) || null
@@ -143,6 +145,18 @@ function clearOwner() {
 function onOwnerFocus() {
   showOwnerDropdown.value = true
   if (!ownerUserId.value) searchOwners(ownerSearchQuery.value)
+}
+
+function hideStoryDropdownWithDelay() {
+  window.setTimeout(() => {
+    showStoryDropdown.value = false
+  }, 150)
+}
+
+function hideOwnerDropdownWithDelay() {
+  window.setTimeout(() => {
+    showOwnerDropdown.value = false
+  }, 150)
 }
 
 // Status colors for story dots
@@ -256,7 +270,7 @@ async function handleSubmit() {
                 class="text-sm text-gray-900 bg-transparent outline-none w-full placeholder-gray-400"
                 placeholder="Search stories..."
                 @focus="showStoryDropdown = true"
-                @blur="setTimeout(() => showStoryDropdown = false, 150)"
+                @blur="hideStoryDropdownWithDelay"
               />
             </div>
             <div
@@ -386,10 +400,10 @@ async function handleSubmit() {
           <div class="space-y-1.5">
             <label class="text-sm font-medium text-gray-700">Product</label>
             <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 bg-gray-50 text-sm text-gray-500 cursor-not-allowed">
-              <div v-if="productStore.activeProduct.logo" class="w-5 h-5 rounded overflow-hidden shrink-0">
-                <img :src="productStore.activeProduct.logo" class="w-full h-full object-cover" :alt="productStore.activeProduct.name" />
+              <div v-if="activeProduct?.logo" class="w-5 h-5 rounded overflow-hidden shrink-0">
+                <img :src="activeProduct.logo" class="w-full h-full object-cover" :alt="activeProduct.name" />
               </div>
-              <span class="truncate">{{ productStore.activeProduct.name }}</span>
+              <span class="truncate">{{ activeProduct?.name || 'Product' }}</span>
             </div>
           </div>
 
@@ -416,7 +430,7 @@ async function handleSubmit() {
                   placeholder="Search users..."
                   @input="onOwnerInput"
                   @focus="onOwnerFocus"
-                  @blur="setTimeout(() => showOwnerDropdown = false, 150)"
+                  @blur="hideOwnerDropdownWithDelay"
                 />
                 <Loader2 v-if="ownerSearchLoading" :size="14" class="text-gray-400 animate-spin shrink-0" />
               </div>

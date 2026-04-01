@@ -152,10 +152,12 @@ const membersByRole = computed(() => {
 })
 
 const filteredMembers = computed(() => {
-  const list = membersByRole.value[activeTab.value]
+  const list = activeTab.value === 'invited'
+    ? ([] as TeamUser[])
+    : membersByRole.value[activeTab.value as keyof typeof membersByRole.value]
   const q = searchQuery.value.toLowerCase().trim()
   if (!q) return list
-  return list.filter(m =>
+  return list.filter((m: TeamUser) =>
     m.name.toLowerCase().includes(q) ||
     m.email.toLowerCase().includes(q) ||
     m.role.toLowerCase().includes(q)
@@ -434,6 +436,11 @@ function onDrop(idx: number) {
   }
   const arr = [...columns.value]
   const [moved] = arr.splice(dragIndex.value, 1)
+  if (!moved) {
+    dragIndex.value = null
+    dragOverIndex.value = null
+    return
+  }
   arr.splice(idx, 0, moved)
   columns.value = arr
   dragIndex.value = null

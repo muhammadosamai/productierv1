@@ -80,7 +80,7 @@ async function onColumnChange(colKey: string, evt: any) {
 }
 
 onMounted(async () => {
-  backlogStore.fetchStories(productStore.activeProduct.name)
+  backlogStore.fetchStories(productStore.activeProductName)
   const data = await store.fetchCycle(route.params.id as string)
   cycle.value = data
   loading.value = false

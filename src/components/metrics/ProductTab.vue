@@ -19,6 +19,8 @@ const activitiesStore = useActivitiesStore()
 const membersStore = useProductMembersStore()
 const authStore = useAuthStore()
 
+const activeProductName = computed(() => productStore.activeProduct?.name ?? '')
+
 // Team member search
 const showAddMember = ref(false)
 const memberSearch = ref('')
@@ -32,12 +34,13 @@ onMounted(() => {
   loadData()
 })
 
-watch(() => productStore.activeProduct.name, () => {
+watch(activeProductName, () => {
   loadData()
 })
 
 function loadData() {
-  const product = productStore.activeProduct.name
+  const product = activeProductName.value
+  if (!product) return
   backlogStore.fetchStories(product)
   initiativesStore.fetchInitiatives()
   activitiesStore.fetchActivities(product)
@@ -48,7 +51,7 @@ function loadData() {
 const totalStories = computed(() => backlogStore.stories.length)
 const totalInitiatives = computed(() => initiativesStore.initiatives.length)
 const inProgressStories = computed(() => backlogStore.stories.filter(i => i.status === 'in_progress').length)
-const completedStories = computed(() => backlogStore.stories.filter(i => i.status === 'done').length)
+const completedStories = computed(() => backlogStore.stories.filter(i => i.status === 'completed').length)
 
 // Group activities by date
 const groupedActivities = computed(() => {
@@ -202,14 +205,18 @@ function onMemberSearchInput() {
 }
 
 async function addMember(user: { id: string; name: string }) {
-  await membersStore.addMember(productStore.activeProduct.name, user.id)
+  const product = activeProductName.value
+  if (!product) return
+  await membersStore.addMember(product, user.id)
   memberSearch.value = ''
   memberSearchResults.value = []
   showAddMember.value = false
 }
 
 async function removeMember(userId: string) {
-  await membersStore.removeMember(productStore.activeProduct.name, userId)
+  const product = activeProductName.value
+  if (!product) return
+  await membersStore.removeMember(product, userId)
 }
 
 function openAddMember() {
@@ -388,21 +395,21 @@ function userInitials(name: string) {
           <div class="p-5">
             <div class="flex items-center gap-3.5 mb-4">
               <img
-                v-if="productStore.activeProduct.logo"
+                v-if="productStore.activeProduct?.logo"
                 :src="productStore.activeProduct.logo"
-                :alt="productStore.activeProduct.name"
+                :alt="activeProductName || 'Product'"
                 class="w-12 h-12 rounded-xl object-cover border border-gray-100"
               />
               <div v-else class="w-12 h-12 rounded-xl bg-[#4857FE]/10 flex items-center justify-center text-lg font-bold text-[#4857FE]">
-                {{ productStore.activeProduct.name?.[0] }}
+                {{ activeProductName?.[0] || 'P' }}
               </div>
               <div class="min-w-0">
-                <h3 class="text-base font-semibold text-gray-900 truncate">{{ productStore.activeProduct.name }}</h3>
-                <span class="text-xs text-gray-400">{{ productStore.activeProduct.members }} members</span>
+                <h3 class="text-base font-semibold text-gray-900 truncate">{{ activeProductName || 'Product' }}</h3>
+                <span class="text-xs text-gray-400">{{ productStore.activeProduct?.members ?? 0 }} members</span>
               </div>
             </div>
             <p class="text-sm text-gray-500 leading-relaxed">
-              {{ productStore.activeProduct.description || 'No description added yet. Add a description to help your team understand this product.' }}
+              {{ productStore.activeProduct?.description || 'No description added yet. Add a description to help your team understand this product.' }}
             </p>
           </div>
         </div>

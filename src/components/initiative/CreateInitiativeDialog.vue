@@ -148,6 +148,8 @@ watch(open, (val) => {
 
 async function handleSubmit() {
   if (!title.value.trim()) return
+  const activeProduct = productStore.activeProduct
+  if (!activeProduct) return
   submitting.value = true
   const created = await initiativesStore.createInitiative({
     title: title.value.trim(),
@@ -158,7 +160,7 @@ async function handleSubmit() {
     leader: leader.value.trim() || undefined,
     leaderAvatar: leaderAvatar.value || undefined,
     priority: priority.value,
-    product: productStore.activeProduct.name,
+    product: activeProduct.name,
   })
   submitting.value = false
   submitted.value = true

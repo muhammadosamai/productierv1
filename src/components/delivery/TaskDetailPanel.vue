@@ -305,7 +305,7 @@ async function selectType(type: TaskType) {
 // Due date
 function startEditDueDate() {
   if (!props.task) return
-  editDueDate.value = props.task.dueAt ? new Date(props.task.dueAt).toISOString().split('T')[0] : ''
+  editDueDate.value = props.task.dueAt ? (new Date(props.task.dueAt).toISOString().split('T')[0] ?? '') : ''
   editingField.value = 'dueAt'
 }
 

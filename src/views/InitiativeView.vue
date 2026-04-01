@@ -195,11 +195,13 @@ function updatePriority(priority: InitiativePriority) {
   updateField('priority', priority)
 }
 
-function onPeriodChange(range: { start: string | null; end: string | null }) {
+function onPeriodChange(range: { start: string | null; end: string | null } | undefined) {
   if (!initiative.value) return
+  const start = range?.start || undefined
+  const end = range?.end || undefined
   initiativesStore.updateInitiative(initiative.value.id, {
-    periodStart: range.start || undefined,
-    periodEnd: range.end || undefined,
+    periodStart: start,
+    periodEnd: end,
   }).then(async () => {
     initiative.value = await initiativesStore.fetchInitiative(initiative.value!.id)
   })
@@ -655,7 +657,7 @@ function cycleTaskStatus(taskId: string, currentStatus: TaskStatus) {
                 <p class="text-xs text-gray-400 mt-1">In Progress</p>
               </div>
               <div class="text-center py-4">
-                <p class="text-2xl font-semibold text-green-600">{{ linkedStories.filter(i => i.status === 'done').length }}</p>
+                <p class="text-2xl font-semibold text-green-600">{{ linkedStories.filter(i => i.status === 'completed').length }}</p>
                 <p class="text-xs text-gray-400 mt-1">Completed</p>
               </div>
             </div>

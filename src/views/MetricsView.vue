@@ -58,7 +58,7 @@ provide('metricsPeriod', period)
           </div>
           <div>
             <h1 class="text-xl font-semibold text-gray-900">Overview</h1>
-            <p class="text-sm text-gray-400 mt-0.5">{{ productStore.activeProduct.name }}</p>
+              <p class="text-sm text-gray-400 mt-0.5">{{ productStore.activeProductName }}</p>
           </div>
         </div>
         <!-- Period Selector -->

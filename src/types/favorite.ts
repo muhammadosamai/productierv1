@@ -4,6 +4,8 @@ export type FavoriteEntityType =
   | 'task'
   | 'delivery'
   | 'release'
+  | 'feature_request'
+  | 'consumer_feedback'
   | 'test_cycle'
   | 'team_member'
 

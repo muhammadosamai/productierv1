@@ -23,6 +23,7 @@ export interface Story {
   updatedAt: string
   tasks: Task[]
   comments?: StoryComment[]
+  attachments?: StoryAttachment[]
 }
 
 export interface StoryComment {
@@ -76,6 +77,18 @@ export interface TaskComment {
 export interface TaskAttachment {
   id: string
   taskId: string
+  userId: string
+  fileName: string
+  fileSize: number
+  mimeType: string
+  filePath: string
+  createdAt: string
+  user?: { id: string; name: string; email: string; avatar: string | null }
+}
+
+export interface StoryAttachment {
+  id: string
+  storyId: string
   userId: string
   fileName: string
   fileSize: number

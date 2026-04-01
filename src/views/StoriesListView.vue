@@ -10,6 +10,7 @@ import {
   Users, User, UserCheck, Hourglass, Archive, RotateCw, X,
   Sparkles, Bug, Lightbulb, FlaskConical,
   FolderOpen, Target, PencilLine, Wrench, Server, TestTube2,
+  Columns3Cog,
 } from 'lucide-vue-next'
 import { useBacklogStore } from '@/stores/backlog'
 import { useProductStore } from '@/stores/products'
@@ -19,6 +20,7 @@ import type { Activity } from '@/stores/activities'
 import FavoriteStar from '@/components/shared/FavoriteStar.vue'
 import AddStoryDialog from '@/components/backlog/AddStoryDialog.vue'
 import StoryDetailPanel from '@/components/backlog/StoryDetailPanel.vue'
+import FormBuilderDialog from '@/components/forms/FormBuilderDialog.vue'
 import type { Story, StoryStatus } from '@/types/backlog'
 
 interface TeamUser {
@@ -39,6 +41,7 @@ const searchQuery = ref('')
 const activeTab = ref<'all' | 'backlog' | 'drafted' | 'initialized' | 'in_progress' | 'completed' | 'archived'>('all')
 const viewMode = ref<'table' | 'card'>(localStorage.getItem('stories-view-mode') as 'table' | 'card' || 'table')
 const showCreateDialog = ref(false)
+const showFormBuilder = ref(false)
 
 // Detail panel state
 const selectedStory = ref<Story | null>(null)
@@ -1023,6 +1026,15 @@ function formatDate(dateStr: string | null) {
             <PencilLine :size="15" />
             <span v-if="inlineEditMode" class="text-xs">Editing</span>
           </button>
+
+          <!-- Form Builder -->
+          <button
+            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer"
+            @click="showFormBuilder = true"
+            title="Form Builder"
+          >
+            <Columns3Cog :size="15" />
+          </button>
         </div>
       </div>
     </div>
@@ -1429,5 +1441,7 @@ function formatDate(dateStr: string | null) {
       @close="closeStoryPanel"
       @updated="onStoryUpdated"
     />
+
+    <FormBuilderDialog v-model:open="showFormBuilder" entity-type="story" />
   </div>
 </template>

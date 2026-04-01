@@ -66,6 +66,30 @@ export const issueStatusEnum = pgEnum('issue_status', [
   'open', 'in_progress', 'resolved', 'closed', 'deferred'
 ])
 
+export const issueTypeEnum = pgEnum('issue_type', [
+  'bug', 'ui_issue', 'performance', 'crash', 'security', 'data_loss', 'other'
+])
+
+export const issueReproducibilityEnum = pgEnum('issue_reproducibility', [
+  'always', 'sometimes', 'rarely', 'once', 'unable_to_reproduce'
+])
+
+export const issuePriorityEnum = pgEnum('issue_priority', [
+  'critical', 'high', 'medium', 'low'
+])
+
+export const issueEnvironmentEnum = pgEnum('issue_environment', [
+  'production', 'staging', 'development', 'testing'
+])
+
+export const issueBrowserEnum = pgEnum('issue_browser', [
+  'chrome', 'firefox', 'safari', 'edge', 'other'
+])
+
+export const issueOsEnum = pgEnum('issue_os', [
+  'windows', 'macos', 'linux', 'ios', 'android', 'other'
+])
+
 export const userRoleEnum = pgEnum('user_role', [
   'super_admin', 'admin', 'product_admin', 'product_manager',
   'business_analyst', 'developer', 'viewer'
@@ -105,6 +129,64 @@ export const storyComments = pgTable('story_comments', {
   content: text('content').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+})
+
+export const storyAttachments = pgTable('story_attachments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  storyId: uuid('story_id').notNull().references(() => stories.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  fileName: varchar('file_name', { length: 500 }).notNull(),
+  fileSize: integer('file_size').notNull(),
+  mimeType: varchar('mime_type', { length: 255 }).notNull(),
+  filePath: varchar('file_path', { length: 1000 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const issues = pgTable('issues', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  title: varchar('title', { length: 255 }).notNull(),
+  description: text('description'),
+  type: issueTypeEnum('type').notNull().default('bug'),
+  module: varchar('module', { length: 255 }),
+  stepsToReproduce: text('steps_to_reproduce'),
+  expectedBehavior: text('expected_behavior'),
+  actualBehavior: text('actual_behavior'),
+  reproducibility: issueReproducibilityEnum('reproducibility'),
+  severity: issueSeverityEnum('severity').notNull().default('minor'),
+  priority: issuePriorityEnum('priority').notNull().default('medium'),
+  status: issueStatusEnum('status').notNull().default('open'),
+  assignedToUserId: uuid('assigned_to_user_id').references(() => users.id),
+  reportedByUserId: uuid('reported_by_user_id').notNull().references(() => users.id),
+  appVersion: varchar('app_version', { length: 50 }),
+  environment: issueEnvironmentEnum('environment'),
+  browser: issueBrowserEnum('browser'),
+  operatingSystem: issueOsEnum('operating_system'),
+  product: varchar('product', { length: 255 }).notNull(),
+  storyId: uuid('story_id').references(() => stories.id, { onDelete: 'set null' }),
+  taskId: uuid('task_id'),
+  testCycleId: uuid('test_cycle_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+})
+
+export const issueComments = pgTable('issue_comments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  issueId: uuid('issue_id').notNull().references(() => issues.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  content: text('content').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+})
+
+export const issueAttachments = pgTable('issue_attachments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  issueId: uuid('issue_id').notNull().references(() => issues.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  fileName: varchar('file_name', { length: 500 }).notNull(),
+  fileSize: integer('file_size').notNull(),
+  mimeType: varchar('mime_type', { length: 255 }).notNull(),
+  filePath: varchar('file_path', { length: 1000 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const tasks = pgTable('tasks', {
@@ -436,6 +518,37 @@ export const assetRelationsRelations = relations(assetRelations_table, ({ one })
 export const storiesRelations = relations(stories, ({ many }) => ({
   tasks: many(tasks),
   comments: many(storyComments),
+  attachments: many(storyAttachments),
+}))
+
+export const storyAttachmentsRelations = relations(storyAttachments, ({ one }) => ({
+  story: one(stories, {
+    fields: [storyAttachments.storyId],
+    references: [stories.id],
+  }),
+  user: one(users, {
+    fields: [storyAttachments.userId],
+    references: [users.id],
+  }),
+}))
+
+export const issuesRelations = relations(issues, ({ one, many }) => ({
+  reportedBy: one(users, { fields: [issues.reportedByUserId], references: [users.id] }),
+  assignedTo: one(users, { fields: [issues.assignedToUserId], references: [users.id] }),
+  story: one(stories, { fields: [issues.storyId], references: [stories.id] }),
+  testCycle: one(testCycles, { fields: [issues.testCycleId], references: [testCycles.id] }),
+  comments: many(issueComments),
+  attachments: many(issueAttachments),
+}))
+
+export const issueCommentsRelations = relations(issueComments, ({ one }) => ({
+  issue: one(issues, { fields: [issueComments.issueId], references: [issues.id] }),
+  user: one(users, { fields: [issueComments.userId], references: [users.id] }),
+}))
+
+export const issueAttachmentsRelations = relations(issueAttachments, ({ one }) => ({
+  issue: one(issues, { fields: [issueAttachments.issueId], references: [issues.id] }),
+  user: one(users, { fields: [issueAttachments.userId], references: [users.id] }),
 }))
 
 export const storyCommentsRelations = relations(storyComments, ({ one }) => ({
@@ -606,6 +719,7 @@ export const testCyclesRelations = relations(testCycles, ({ one, many }) => ({
     references: [users.id],
   }),
   issues: many(testCycleIssues),
+  linkedIssues: many(issues),
 }))
 
 export const testCycleIssuesRelations = relations(testCycleIssues, ({ one }) => ({
@@ -884,3 +998,29 @@ export const rolePermissions = pgTable('role_permissions', {
 
 export type RolePermissionRecord = typeof rolePermissions.$inferSelect
 export type NewRolePermission = typeof rolePermissions.$inferInsert
+
+// ============ FORM BUILDER ============
+
+export const formConfigs = pgTable('form_configs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  product: varchar('product', { length: 255 }).notNull(),
+  entityType: varchar('entity_type', { length: 50 }).notNull(),
+  config: json('config').notNull(),
+  updatedByUserId: uuid('updated_by_user_id').references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+}, (table) => [
+  unique('form_config_product_entity_unique').on(table.product, table.entityType),
+])
+
+export const customFieldValues = pgTable('custom_field_values', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  entityType: varchar('entity_type', { length: 50 }).notNull(),
+  entityId: uuid('entity_id').notNull(),
+  fieldKey: varchar('field_key', { length: 100 }).notNull(),
+  value: json('value'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+}, (table) => [
+  unique('cfv_entity_field_unique').on(table.entityType, table.entityId, table.fieldKey),
+])

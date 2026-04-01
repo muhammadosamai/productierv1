@@ -6,6 +6,7 @@ export type FavoriteEntityType =
   | 'release'
   | 'test_cycle'
   | 'team_member'
+  | 'issue'
 
 export interface Favorite {
   id: string

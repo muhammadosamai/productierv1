@@ -19,12 +19,12 @@ const route = useRoute()
 type TabType = 'profile' | 'roles' | 'product'
 const initialTab = (): TabType => {
   const tab = route.query.tab as string
-  if (tab === 'roles' && authStore.user?.role === 'super_admin') return 'roles'
+  if (tab === 'roles' && ['super_admin', 'admin', 'product_admin'].includes(authStore.user?.role || '')) return 'roles'
   if (tab === 'product') return 'product'
   return 'profile'
 }
 const activeTab = ref<TabType>(initialTab())
-const isSuperAdmin = computed(() => authStore.user?.role === 'super_admin')
+const canViewRoles = computed(() => ['super_admin', 'admin', 'product_admin'].includes(authStore.user?.role || ''))
 
 // Product settings
 const showDeleteProductDialog = ref(false)
@@ -271,7 +271,7 @@ const userInitials = () => {
         />
       </button>
       <button
-        v-if="isSuperAdmin"
+        v-if="canViewRoles"
         class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors relative"
         :class="activeTab === 'roles'
           ? 'text-[#7C5CFC]'
@@ -416,7 +416,7 @@ const userInitials = () => {
     </div>
 
     <!-- Roles Tab -->
-    <div v-if="activeTab === 'roles' && isSuperAdmin">
+    <div v-if="activeTab === 'roles' && canViewRoles">
       <RolesSettings />
     </div>
 

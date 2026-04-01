@@ -218,7 +218,7 @@ async function handleSubmit() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-[520px] !overflow-visible">
+    <DialogContent class="sm:max-w-[520px] !overflow-x-hidden !overflow-y-visible">
       <DialogHeader>
         <DialogTitle>Create Task</DialogTitle>
         <DialogDescription>Create a new task under a story.</DialogDescription>
@@ -228,9 +228,9 @@ async function handleSubmit() {
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
       </button>
 
-      <form @submit.prevent="handleSubmit" class="space-y-4">
+      <form @submit.prevent="handleSubmit" class="w-full min-w-0 space-y-4 overflow-x-hidden">
         <!-- Title -->
-        <div class="space-y-1.5">
+        <div class="space-y-1.5 min-w-0">
           <label class="text-sm font-medium text-gray-700">Title *</label>
           <input
             v-model="title"
@@ -254,9 +254,9 @@ async function handleSubmit() {
         <div class="space-y-1.5">
           <label class="text-sm font-medium text-gray-700">Story *</label>
           <!-- Selected story display -->
-          <div v-if="selectedStory" class="flex items-center gap-2 border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white">
+          <div v-if="selectedStory" class="flex w-full max-w-full items-center gap-2 overflow-hidden border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white">
             <span class="w-2 h-2 rounded-full shrink-0" :class="storyStatusDot(selectedStory.status)"></span>
-            <span class="text-sm font-medium text-gray-900 flex-1 truncate">{{ selectedStory.title }}</span>
+            <span class="block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm font-medium text-gray-900">{{ selectedStory.title }}</span>
             <button type="button" class="text-gray-400 hover:text-gray-600 shrink-0" @click="clearStory">
               <X :size="14" />
             </button>

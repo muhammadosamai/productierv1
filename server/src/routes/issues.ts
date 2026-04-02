@@ -225,13 +225,15 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
     const product = body.product || 'Product'
-    const publicId = await generatePublicIdForProduct(product)
     const assignedToUserId = optionalUuid(body.assignedToUserId)
     const storyId = optionalUuid(body.storyId)
     const taskId = optionalUuid(body.taskId)
     const testCycleId = optionalUuid(body.testCycleId)
 
-    const [issue] = await db.insert(issues).values({
+    let issue: typeof issues.$inferSelect | null = null
+
+    const publicId = await generatePublicIdForProduct(product)
+    const [inserted] = await db.insert(issues).values({
       publicId,
       title: body.title,
       description: body.description,
@@ -255,22 +257,28 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       taskId,
       testCycleId,
     }).returning()
+    issue = inserted || null
+
+    if (!issue) {
+      set.status = 500
+      return { error: 'Failed to create issue' }
+    }
 
     logActivity({
-      product: issue!.product,
+      product: issue.product,
       userName: user.name,
       userAvatar: user.avatar,
       userId: user.id,
       action: 'created',
       entityType: 'issue' as any,
-      entityId: issue!.id,
-      entityTitle: issue!.title,
+      entityId: issue.id,
+      entityTitle: issue.title,
       changes: null,
     })
 
     // Return with relations
     const full = await db.query.issues.findFirst({
-      where: eq(issues.id, issue!.id),
+      where: eq(issues.id, issue.id),
       with: {
         reportedBy: { columns: { id: true, name: true, email: true, avatar: true } },
         assignedTo: { columns: { id: true, name: true, email: true, avatar: true } },

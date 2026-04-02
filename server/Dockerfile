@@ -1,8 +1,18 @@
-FROM oven/bun:latest
+FROM oven/bun:1 AS base
 WORKDIR /app
+
+# Install all deps (including devDependencies so drizzle-kit is available for migrations)
 COPY package.json bun.lock ./
-RUN bun install --production
+RUN bun install --frozen-lockfile
+
 COPY . .
 
+# Drop to non-root user provided by the base image
+USER bun
+
 EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:3001/api/health || exit 1
+
 CMD ["sh", "-c", "if [ \"${RUN_DB_MIGRATIONS:-false}\" = \"true\" ]; then bun run ${MIGRATION_COMMAND:-db:migrate}; fi; exec bun src/index.ts"]

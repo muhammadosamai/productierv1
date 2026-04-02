@@ -106,6 +106,7 @@ export const assetVisibilityEnum = pgEnum('asset_visibility', [
 // Tables (SQL table/column names kept unchanged for DB compatibility)
 export const stories = pgTable('backlog_items', {
   id: uuid('id').primaryKey().defaultRandom(),
+  publicId: varchar('public_id', { length: 32 }),
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description'),
   type: storyTypeEnum('type').notNull().default('feature'),
@@ -144,6 +145,7 @@ export const storyAttachments = pgTable('story_attachments', {
 
 export const issues = pgTable('issues', {
   id: uuid('id').primaryKey().defaultRandom(),
+  publicId: varchar('public_id', { length: 32 }),
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description'),
   type: issueTypeEnum('type').notNull().default('bug'),
@@ -191,6 +193,7 @@ export const issueAttachments = pgTable('issue_attachments', {
 
 export const tasks = pgTable('tasks', {
   id: uuid('id').primaryKey().defaultRandom(),
+  publicId: varchar('public_id', { length: 32 }),
   productId: varchar('product_id', { length: 255 }).notNull(),
   initiativeId: uuid('initiative_id'),
   storyId: uuid('item_id').notNull().references(() => stories.id, { onDelete: 'cascade' }),
@@ -382,10 +385,17 @@ export const activities = pgTable('activities', {
 export const products = pgTable('products', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: varchar('name', { length: 255 }).notNull().unique(),
+  projectKey: varchar('project_key', { length: 16 }),
   logo: varchar('logo', { length: 500 }),
   description: text('description'),
   createdByUserId: uuid('created_by_user_id').notNull().references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+})
+
+export const productCounters = pgTable('product_counters', {
+  productId: uuid('product_id').primaryKey().references(() => products.id, { onDelete: 'cascade' }),
+  nextValue: integer('next_value').notNull().default(1),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 })
 
@@ -967,6 +977,8 @@ export type TaskAttachment = typeof taskAttachments.$inferSelect
 export type NewTaskAttachment = typeof taskAttachments.$inferInsert
 export type ProductRecord = typeof products.$inferSelect
 export type NewProduct = typeof products.$inferInsert
+export type ProductCounterRecord = typeof productCounters.$inferSelect
+export type NewProductCounter = typeof productCounters.$inferInsert
 export type TaskStatusHistory = typeof taskStatusHistory.$inferSelect
 export type NewTaskStatusHistory = typeof taskStatusHistory.$inferInsert
 export type ReleaseRecord = typeof releases.$inferSelect

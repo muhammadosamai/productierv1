@@ -4,6 +4,7 @@ import { stories, storyComments, storyAttachments, users } from '../db/schema'
 import { eq } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
+import { generatePublicIdForProduct } from '../lib/publicIds'
 import { mkdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
@@ -59,7 +60,13 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
 
   // POST /api/stories
   .post('/', async ({ body, jwt, headers }) => {
-    const [story] = await db.insert(stories).values(body).returning()
+    const product = body.product || 'Product'
+    const publicId = await generatePublicIdForProduct(product)
+    const [story] = await db.insert(stories).values({
+      ...body,
+      product,
+      publicId,
+    }).returning()
     const user = await getUserFromHeader(jwt.verify, headers)
     logActivity({
       product: story!.product,

@@ -1,7 +1,7 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { products, productMembers, users, stories, tasks, initiatives, deliveries, releases, servers, testCycles, favorites, assetTypes, assets, featureRequests, consumerFeedbacks, taskStatusHistory, activities } from '../db/schema'
-import { eq, and, desc } from 'drizzle-orm'
+import { eq, and, desc, inArray } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -16,6 +16,27 @@ async function getUserFromHeader(jwtVerify: any, headers: Record<string, string 
   if (!payload?.userId) return null
   const user = await db.query.users.findFirst({ where: eq(users.id, payload.userId as string) })
   return user || null
+}
+
+function normalizeProjectKeyBase(input: string) {
+  const base = input.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 5)
+  return base || 'PRD'
+}
+
+async function generateUniqueProjectKey(name: string) {
+  const base = normalizeProjectKeyBase(name)
+  let candidate = base
+  let suffix = 2
+
+  while (true) {
+    const existing = await db.query.products.findFirst({
+      where: eq(products.projectKey, candidate),
+      columns: { id: true },
+    })
+    if (!existing) return candidate
+    candidate = `${base.slice(0, 4)}${suffix}`
+    suffix += 1
+  }
 }
 
 export const productRoutes = new Elysia({ prefix: '/api/products' })
@@ -57,8 +78,10 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     }
 
     try {
+      const projectKey = await generateUniqueProjectKey(body.name)
       const [product] = await db.insert(products).values({
         name: body.name,
+        projectKey,
         logo: body.logo || null,
         description: body.description || null,
         createdByUserId: user.id,
@@ -292,19 +315,21 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       return { error: 'Only the product owner or super admin can delete this product' }
     }
 
+    const productScope = [name, product.id]
+
     // Delete all related data (no FK constraints, must clean up manually)
     // Tables with `productId` field (varchar matching product name)
-    await db.delete(taskStatusHistory).where(eq(taskStatusHistory.productId, name))
-    await db.delete(tasks).where(eq(tasks.productId, name))
-    await db.delete(testCycles).where(eq(testCycles.productId, name))
-    await db.delete(featureRequests).where(eq(featureRequests.productId, name))
-    await db.delete(consumerFeedbacks).where(eq(consumerFeedbacks.productId, name))
-    await db.delete(assets).where(eq(assets.productId, name))
-    await db.delete(assetTypes).where(eq(assetTypes.productId, name))
-    await db.delete(deliveries).where(eq(deliveries.productId, name))
-    await db.delete(releases).where(eq(releases.productId, name))
-    await db.delete(servers).where(eq(servers.productId, name))
-    await db.delete(favorites).where(eq(favorites.productId, name))
+    await db.delete(taskStatusHistory).where(inArray(taskStatusHistory.productId, productScope))
+    await db.delete(tasks).where(inArray(tasks.productId, productScope))
+    await db.delete(testCycles).where(inArray(testCycles.productId, productScope))
+    await db.delete(featureRequests).where(inArray(featureRequests.productId, productScope))
+    await db.delete(consumerFeedbacks).where(inArray(consumerFeedbacks.productId, productScope))
+    await db.delete(assets).where(inArray(assets.productId, productScope))
+    await db.delete(assetTypes).where(inArray(assetTypes.productId, productScope))
+    await db.delete(deliveries).where(inArray(deliveries.productId, productScope))
+    await db.delete(releases).where(inArray(releases.productId, productScope))
+    await db.delete(servers).where(inArray(servers.productId, productScope))
+    await db.delete(favorites).where(inArray(favorites.productId, productScope))
 
     // Tables with `product` field (varchar matching product name)
     await db.delete(stories).where(eq(stories.product, name))

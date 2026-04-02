@@ -129,6 +129,7 @@ async function submit() {
     })
     if (result) {
       emit('created', result.id)
+      open.value = false
     }
   } finally {
     submitting.value = false

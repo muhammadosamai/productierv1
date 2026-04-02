@@ -21,6 +21,7 @@ import { rolesRoutes } from './routes/roles'
 import { inviteRoutes } from './routes/invites'
 import { issueRoutes } from './routes/issues'
 import { formConfigRoutes, customFieldRoutes } from './routes/formConfigs'
+import { searchRoutes } from './routes/search'
 
 const app = new Elysia()
   .use(cors({
@@ -49,6 +50,7 @@ const app = new Elysia()
   .use(rolesRoutes)
   .use(inviteRoutes)
   .use(issueRoutes)
+  .use(searchRoutes)
   .use(formConfigRoutes)
   .use(customFieldRoutes)
   .get('/api/health', () => ({ status: 'ok' }))

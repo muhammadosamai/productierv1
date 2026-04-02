@@ -7,7 +7,6 @@ import path from 'path'
 import { eq } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
-import { generatePublicIdForProduct } from '../lib/publicIds'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -221,20 +220,24 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
       columns: { id: true },
     })
     const normalizedProductId = product?.id || story.product
-    const publicId = await generatePublicIdForProduct(normalizedProductId)
 
     const [task] = await db.insert(tasks)
       .values({
         ...rest,
         status: rest.status || effectiveStatus,
         storyId,
-        publicId,
+        publicId: null,
         productId: normalizedProductId,
-        initiativeId: null, // auto-derive later when initiatives have proper FK
+        initiativeId: null,
         createdByUserId: user.id,
         dueAt: dueAt ? new Date(dueAt) : null,
       })
       .returning()
+
+    if (!task) {
+      set.status = 500
+      return { error: 'Failed to create task' }
+    }
 
     logActivity({
       product: story.product,
@@ -243,22 +246,22 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
       userId: user.id,
       action: 'created',
       entityType: 'task',
-      entityId: task!.id,
-      entityTitle: task!.title,
+      entityId: task.id,
+      entityTitle: task.title,
     })
 
     // Record initial status in history
     await db.insert(taskStatusHistory).values({
-      taskId: task!.id,
-      productId: task!.productId,
+      taskId: task.id,
+      productId: task.productId,
       fromStatus: null,
-      toStatus: task!.status,
+      toStatus: task.status,
       changedByUserId: user.id,
     })
 
     // Auto-update delivery status if task is linked to one
-    if (task!.deliveryId) {
-      await autoUpdateDeliveryStatus(task!.deliveryId)
+    if (task.deliveryId) {
+      await autoUpdateDeliveryStatus(task.deliveryId)
     }
 
     // Auto-update parent story estimate & delivery from child tasks

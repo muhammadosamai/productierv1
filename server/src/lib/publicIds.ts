@@ -60,15 +60,67 @@ export async function generatePublicIdForProduct(productRef: string): Promise<st
 
   const projectKey = product.projectKey || await ensureProjectKey(product.id, product.name)
 
-  const result = await db.execute(sql`
-    insert into product_counters (product_id, next_value)
-    values (${product.id}::uuid, 2)
-    on conflict (product_id)
-    do update set next_value = product_counters.next_value + 1
-    returning next_value - 1 as seq
-  `)
+  // --- Step 1: Compute the max existing suffix OUTSIDE the transaction ---
+  // Each query is independent so a schema difference (wrong table name, wrong column type)
+  // only results in 0 for that entity rather than aborting the whole transaction.
+  async function safeMaxSuffix(q: ReturnType<typeof sql>): Promise<number> {
+    try {
+      const r = await db.execute(q)
+      return Number(((r as any).rows ?? [])[0]?.n ?? 0)
+    } catch { return 0 }
+  }
 
-  const rows = (result as any).rows ?? []
-  const seq = Number(rows[0]?.seq ?? 1)
+  const [maxTask, maxStory, maxIssue] = await Promise.all([
+    // tasks.product_id is varchar — compare with plain string, no ::uuid cast
+    safeMaxSuffix(sql`
+      select coalesce(max((regexp_match(public_id, '-([0-9]+)$'))[1]::int), 0) as n
+      from tasks where product_id = ${product.id} and public_id is not null
+    `),
+    // stories Drizzle model maps to table 'backlog_items'
+    safeMaxSuffix(sql`
+      select coalesce(max((regexp_match(public_id, '-([0-9]+)$'))[1]::int), 0) as n
+      from backlog_items where product = ${product.name} and public_id is not null
+    `),
+    // issues.product is varchar
+    safeMaxSuffix(sql`
+      select coalesce(max((regexp_match(public_id, '-([0-9]+)$'))[1]::int), 0) as n
+      from issues where product = ${product.name} and public_id is not null
+    `),
+  ])
+
+  const globalMax = Math.max(maxTask, maxStory, maxIssue)
+
+  // --- Step 2: Lock the counter row and allocate the next sequence atomically ---
+  const seq = await db.transaction(async (tx) => {
+    // Ensure the counter row exists
+    await tx.execute(sql`
+      insert into product_counters (product_id, next_value)
+      values (${product.id}::uuid, 1)
+      on conflict (product_id) do nothing
+    `)
+
+    // Exclusive row lock — concurrent allocations for this product wait here
+    const lockResult = await tx.execute(sql`
+      select next_value from product_counters
+      where product_id = ${product.id}::uuid
+      for update
+    `)
+    const currentCounter = Number(((lockResult as any).rows ?? [])[0]?.next_value ?? 1)
+
+    // Must be strictly above every existing suffix AND the stored counter
+    const allocatedSeq = Math.max(currentCounter, globalMax + 1)
+
+    await tx.execute(sql`
+      update product_counters
+      set next_value = ${allocatedSeq + 1}
+      where product_id = ${product.id}::uuid
+    `)
+
+    return allocatedSeq
+  })
+
   return `${projectKey}-${seq}`
 }
+
+/** No-op kept for call-site compatibility. */
+export async function resyncProductCounterFromTasks(_productRef: string): Promise<void> {}

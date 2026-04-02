@@ -61,22 +61,28 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
   // POST /api/stories
   .post('/', async ({ body, jwt, headers }) => {
     const product = body.product || 'Product'
+
     const publicId = await generatePublicIdForProduct(product)
     const [story] = await db.insert(stories).values({
       ...body,
       product,
       publicId,
     }).returning()
+
+    if (!story) {
+      throw new Error('Failed to create story')
+    }
+
     const user = await getUserFromHeader(jwt.verify, headers)
     logActivity({
-      product: story!.product,
+      product: story.product,
       userName: user?.name || 'System',
       userAvatar: user?.avatar,
       userId: user?.id,
       action: 'created',
       entityType: 'story',
-      entityId: story!.id,
-      entityTitle: story!.title,
+      entityId: story.id,
+      entityTitle: story.title,
     })
     return story
   }, { body: storyBody })

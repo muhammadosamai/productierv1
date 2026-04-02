@@ -1,9 +1,12 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
-import { stories, storyComments, users } from '../db/schema'
+import { stories, storyComments, storyAttachments, users } from '../db/schema'
 import { eq } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
+import { mkdir } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import path from 'node:path'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -170,5 +173,103 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
       .where(eq(storyComments.id, params.commentId))
       .returning()
     if (!deleted) { set.status = 404; return { error: 'Comment not found' } }
+    return { success: true }
+  })
+
+  // ============ ATTACHMENTS ============
+
+  // GET /api/stories/:id/attachments
+  .get('/:id/attachments', async ({ params: { id } }) => {
+    const results = await db.query.storyAttachments.findMany({
+      where: eq(storyAttachments.storyId, id),
+      with: { user: true },
+      orderBy: (a, { desc }) => [desc(a.createdAt)],
+    })
+    return results
+  })
+
+  // POST /api/stories/:id/attachments (multipart file upload)
+  .post('/:id/attachments', async ({ params: { id }, body, set, jwt, headers }) => {
+    const user = await getUserFromHeader(jwt.verify, headers)
+    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+
+    const file = (body as any).file as File
+    if (!file) { set.status = 400; return { error: 'No file provided' } }
+
+    const uploadsDir = path.join(process.cwd(), 'uploads', 'attachments')
+    await mkdir(uploadsDir, { recursive: true })
+
+    const ext = path.extname(file.name) || ''
+    const uniqueName = `${randomUUID()}${ext}`
+    const filePath = path.join(uploadsDir, uniqueName)
+
+    const arrayBuffer = await file.arrayBuffer()
+    await Bun.write(filePath, arrayBuffer)
+
+    const [attachment] = await db.insert(storyAttachments).values({
+      storyId: id,
+      userId: user.id,
+      fileName: file.name,
+      fileSize: file.size,
+      mimeType: file.type || 'application/octet-stream',
+      filePath: `/uploads/attachments/${uniqueName}`,
+    }).returning()
+
+    // Log activity
+    const story = await db.query.stories.findFirst({ where: eq(stories.id, id) })
+    if (story) {
+      logActivity({
+        product: story.product,
+        userName: user.name,
+        userAvatar: user.avatar,
+        userId: user.id,
+        action: 'updated',
+        entityType: 'story',
+        entityId: story.id,
+        entityTitle: story.title,
+        changes: [{ field: 'attachment', from: null, to: file.name }],
+      })
+    }
+
+    const result = await db.query.storyAttachments.findFirst({
+      where: eq(storyAttachments.id, attachment!.id),
+      with: { user: true },
+    })
+    return result
+  })
+
+  // DELETE /api/stories/attachments/:attachmentId
+  .delete('/attachments/:attachmentId', async ({ params: { attachmentId }, set, jwt, headers }) => {
+    const user = await getUserFromHeader(jwt.verify, headers)
+    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+
+    const [deleted] = await db.delete(storyAttachments)
+      .where(eq(storyAttachments.id, attachmentId))
+      .returning()
+    if (!deleted) { set.status = 404; return { error: 'Attachment not found' } }
+
+    // Log activity
+    const story = await db.query.stories.findFirst({ where: eq(stories.id, deleted.storyId) })
+    if (story) {
+      logActivity({
+        product: story.product,
+        userName: user.name,
+        userAvatar: user.avatar,
+        userId: user.id,
+        action: 'updated',
+        entityType: 'story',
+        entityId: story.id,
+        entityTitle: story.title,
+        changes: [{ field: 'attachment', from: deleted.fileName, to: null }],
+      })
+    }
+
+    // Remove file from disk
+    try {
+      const fullPath = path.join(process.cwd(), deleted.filePath)
+      const { unlink } = await import('fs/promises')
+      await unlink(fullPath)
+    } catch {}
+
     return { success: true }
   })

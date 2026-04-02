@@ -21,6 +21,8 @@ import CreateTaskDialog from '@/components/delivery/CreateTaskDialog.vue'
 import CreateReleaseDialog from '@/components/release/CreateReleaseDialog.vue'
 import CreateTestCycleDialog from '@/components/testCycle/CreateTestCycleDialog.vue'
 import InviteMemberDialog from '@/components/team/InviteMemberDialog.vue'
+import CreateIssueDialog from '@/components/issue/CreateIssueDialog.vue'
+import { useIssuesStore } from '@/stores/issues'
 
 const router = useRouter()
 const route = useRoute()
@@ -34,6 +36,7 @@ const testCyclesStore = useTestCyclesStore()
 const activitiesStore = useActivitiesStore()
 const favoritesStore = useFavoritesStore()
 const rolesStore = useRolesStore()
+const issuesStore = useIssuesStore()
 
 const hasProducts = computed(() => productStore.products.length > 0)
 const activeProduct = computed(() => productStore.activeProduct)
@@ -86,6 +89,7 @@ const showCreateTaskDialog = ref(false)
 const showCreateReleaseDialog = ref(false)
 const showCreateTestCycleDialog = ref(false)
 const showInviteMemberDialog = ref(false)
+const showCreateIssueDialog = ref(false)
 
 // Resizable sidebar
 const SIDEBAR_STORAGE_KEY = 'sub-sidebar-width'
@@ -206,6 +210,15 @@ const storyChildren = computed(() =>
     id: s.id,
     status: s.status,
     type: s.type,
+  }))
+)
+
+const issueChildren = computed(() =>
+  issuesStore.issues.map(i => ({
+    label: i.title,
+    id: i.id,
+    status: i.status,
+    type: i.type,
   }))
 )
 
@@ -354,6 +367,13 @@ const managementItems = computed<NavItem[]>(() => [
     children: favoritedOrRecent(storyChildren.value, 'story'),
   },
   {
+    label: 'Issues',
+    expandable: true,
+    hasAdd: true,
+    totalCount: issueChildren.value.length,
+    children: favoritedOrRecent(issueChildren.value, 'issue'),
+  },
+  {
     label: 'Tasks',
     expandable: true,
     hasAdd: true,
@@ -438,7 +458,7 @@ function getActiveItemFromRoute(): string {
   if (path === '/metrics' || path.startsWith('/metrics/')) return 'Overview'
   if (path === '/releases' || path.startsWith('/releases/')) return 'Releases'
   if (path === '/test-cycles' || path.startsWith('/test-cycles/')) return 'Testing Cycles'
-  if (path === '/issues' || path.startsWith('/issues/')) return 'Performance Cycles'
+  if (path === '/issues' || path.startsWith('/issues/')) return 'Issues'
   if (path === '/feedbacks' || path.startsWith('/feedbacks/')) return 'Consumer Feedback'
   if (path === '/feature-requests' || path.startsWith('/feature-requests/')) return 'Feature Requests'
   if (path === '/wiki' || path.startsWith('/wiki/')) return 'Wiki'
@@ -456,29 +476,27 @@ watch(() => route.path, () => {
 })
 
 onMounted(() => {
-  if (activeProductName.value) {
-    initiativesStore.fetchInitiatives()
-    backlogStore.fetchStories()
-    deliveriesStore.fetchDeliveries()
-    releasesStore.fetchReleases()
-    testCyclesStore.fetchCycles()
-    favoritesStore.fetchFavorites(activeProductName.value)
-  }
+  initiativesStore.fetchInitiatives()
+  backlogStore.fetchStories()
+  deliveriesStore.fetchDeliveries()
+  releasesStore.fetchReleases()
+  testCyclesStore.fetchCycles()
+  issuesStore.fetchIssues(productStore.activeProduct?.name)
   fetchTeamMembers()
+  favoritesStore.fetchFavorites(productStore.activeProduct?.name)
   document.addEventListener('click', onDocumentClick)
 })
 
 // When active product changes, refetch all data and navigate home
 watch(() => productStore.activeIndex, () => {
-  if (activeProductName.value) {
-    initiativesStore.fetchInitiatives()
-    backlogStore.fetchStories()
-    deliveriesStore.fetchDeliveries()
-    releasesStore.fetchReleases()
-    testCyclesStore.fetchCycles()
-    favoritesStore.fetchFavorites(activeProductName.value)
-  }
+  initiativesStore.fetchInitiatives()
+  backlogStore.fetchStories()
+  deliveriesStore.fetchDeliveries()
+  releasesStore.fetchReleases()
+  testCyclesStore.fetchCycles()
+  issuesStore.fetchIssues(productStore.activeProduct?.name)
   fetchTeamMembers()
+  favoritesStore.fetchFavorites(productStore.activeProduct?.name)
   // Navigate to overview if on a detail page (it may belong to another product)
   if (route.params.id && (route.path.startsWith('/initiatives/') || route.path.startsWith('/deliveries/') || route.path.startsWith('/releases/'))) {
     router.push('/metrics')
@@ -493,6 +511,7 @@ function toggleItem(label: string) {
 
 const labelToRoute: Record<string, string> = {
   'Stories': '/stories',
+  'Issues': '/issues',
   'Tasks': '/tasks',
   'Initiatives': '/initiatives',
   'Deliveries': '/deliveries',
@@ -513,6 +532,7 @@ const labelToPageKey: Record<string, string> = {
   'Team': 'team',
   'Initiatives': 'initiatives',
   'Stories': 'stories',
+  'Issues': 'issues',
   'Tasks': 'tasks',
   'Deliveries': 'deliveries',
   'Releases': 'releases',
@@ -558,6 +578,8 @@ function handleAddClick(item: NavItem, event: Event) {
     showCreateTestCycleDialog.value = true
   } else if (item.label === 'Team') {
     showInviteMemberDialog.value = true
+  } else if (item.label === 'Issues') {
+    showCreateIssueDialog.value = true
   }
 }
 
@@ -573,6 +595,10 @@ function handleChildClick(parentLabel: string, child: NavChild, event: Event) {
     activeItem.value = 'Stories'
     activeChildId.value = child.id
     router.push({ path: '/stories', query: { story: child.id } })
+  } else if (parentLabel === 'Issues' && child.id) {
+    activeItem.value = 'Issues'
+    activeChildId.value = child.id
+    router.push({ path: '/issues', query: { issue: child.id } })
   } else if (parentLabel === 'Tasks' && child.id) {
     activeItem.value = 'Tasks'
     activeChildId.value = child.id
@@ -625,6 +651,12 @@ function onTestCycleCreated(id: string) {
   activeItem.value = 'Testing Cycles'
   testCyclesStore.fetchCycles()
   router.push(`/test-cycles/${id}`)
+}
+
+function onIssueCreated() {
+  activeItem.value = 'Issues'
+  issuesStore.fetchIssues(productStore.activeProduct?.name)
+  router.push('/issues')
 }
 </script>
 
@@ -745,6 +777,7 @@ function onTestCycleCreated(id: string) {
               <!-- Icon -->
               <span class="flex items-center shrink-0" :class="activeItem === item.label ? 'text-[#4857FE]' : 'text-gray-400'">
                 <svg v-if="item.label === 'Stories'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+                <Bug v-if="item.label === 'Issues'" :size="20" />
                 <svg v-if="item.label === 'Tasks'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
                 <svg v-if="item.label === 'Initiatives'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg>
                 <svg v-if="item.label === 'Deliveries'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
@@ -950,6 +983,7 @@ function onTestCycleCreated(id: string) {
     <CreateReleaseDialog v-model:open="showCreateReleaseDialog" @created="onReleaseCreated" />
     <CreateTestCycleDialog v-model:open="showCreateTestCycleDialog" @created="onTestCycleCreated" />
     <InviteMemberDialog v-model:open="showInviteMemberDialog" />
+    <CreateIssueDialog v-model:open="showCreateIssueDialog" @created="onIssueCreated" />
 
     <!-- Context Menu -->
     <Teleport to="body">

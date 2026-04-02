@@ -7,11 +7,12 @@ import {
   ListChecks, Target, History, Search,
   Signal, Type, Tag, CalendarClock, Hourglass, User,
   MessageSquare, Plus, Send, Trash2,
+  Upload, Download, ImageIcon, FileIcon, Paperclip,
 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useBacklogStore } from '@/stores/backlog'
 import { useAuthStore } from '@/stores/auth'
-import type { Story, StoryType, StoryStatus, StoryPriority, TaskComment, CreateStoryPayload } from '@/types/backlog'
+import type { Story, StoryType, StoryStatus, StoryPriority, StoryAttachment } from '@/types/backlog'
 import AddTaskInline from '@/components/backlog/AddTaskInline.vue'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import {
@@ -65,7 +66,7 @@ const backlogStore = useBacklogStore()
 const authStore = useAuthStore()
 
 // Active tab
-const activeTab = ref<'description' | 'tasks' | 'comments' | 'activities'>('description')
+const activeTab = ref<'description' | 'tasks' | 'comments' | 'activities' | 'attachments'>('description')
 
 // Editing state
 const editingField = ref<string | null>(null)
@@ -151,10 +152,97 @@ watch(() => props.story?.id, async (id) => {
   newComment.value = ''
 }, { immediate: true })
 
-// Lazy-load activities on tab switch
+// Attachments state
+const attachments = ref<StoryAttachment[]>([])
+const attachmentsLoading = ref(false)
+const uploadingFiles = ref(false)
+const isDragging = ref(false)
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const deletingAttachmentId = ref<string | null>(null)
+
+async function loadAttachments(storyId: string) {
+  attachmentsLoading.value = true
+  try {
+    const res = await fetch(`/api/stories/${storyId}/attachments`)
+    if (res.ok) attachments.value = await res.json()
+  } catch { attachments.value = [] }
+  finally { attachmentsLoading.value = false }
+}
+
+async function uploadFiles(files: FileList | File[]) {
+  if (!props.story || files.length === 0) return
+  uploadingFiles.value = true
+  try {
+    for (const file of files) {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch(`/api/stories/${props.story.id}/attachments`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authStore.token}` },
+        body: formData,
+      })
+      if (res.ok) {
+        const att = await res.json()
+        attachments.value.unshift(att)
+      }
+    }
+  } finally { uploadingFiles.value = false }
+}
+
+async function deleteAttachment(attachmentId: string) {
+  deletingAttachmentId.value = attachmentId
+  try {
+    const res = await fetch(`/api/stories/attachments/${attachmentId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${authStore.token}` },
+    })
+    if (res.ok) attachments.value = attachments.value.filter(a => a.id !== attachmentId)
+  } finally { deletingAttachmentId.value = null }
+}
+
+function onDragOver(e: DragEvent) { e.preventDefault(); isDragging.value = true }
+function onDragLeave() { isDragging.value = false }
+function onDrop(e: DragEvent) {
+  e.preventDefault()
+  isDragging.value = false
+  if (e.dataTransfer?.files) uploadFiles(e.dataTransfer.files)
+}
+function onFileSelect(e: Event) {
+  const target = e.target as HTMLInputElement
+  if (target.files) uploadFiles(target.files)
+  target.value = ''
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+function isImageFile(mimeType: string): boolean { return mimeType.startsWith('image/') }
+function fileIcon(mimeType: string) { return mimeType.startsWith('image/') ? ImageIcon : FileIcon }
+
+function formatRelativeTime(dateStr: string) {
+  const d = new Date(dateStr)
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+  if (diffMins < 1) return 'Just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  if (diffHours < 24) return `${diffHours}h ago`
+  if (diffDays < 7) return `${diffDays}d ago`
+  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
+}
+
+// Lazy-load activities/attachments on tab switch
 watch(activeTab, (tab) => {
   if (tab === 'activities' && props.story) {
     loadActivities(props.story.id)
+  }
+  if (tab === 'attachments' && props.story) {
+    loadAttachments(props.story.id)
   }
 })
 
@@ -421,21 +509,6 @@ function formatDate(dateStr: string | null) {
   if (!dateStr) return '—'
   const d = new Date(dateStr)
   return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
-}
-
-function formatRelativeTime(dateStr: string) {
-  const d = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - d.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-  const diffHours = Math.floor(diffMs / 3600000)
-  const diffDays = Math.floor(diffMs / 86400000)
-
-  if (diffMins < 1) return 'Just now'
-  if (diffMins < 60) return `${diffMins}m ago`
-  if (diffHours < 24) return `${diffHours}h ago`
-  if (diffDays < 7) return `${diffDays}d ago`
-  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
 }
 
 function taskProgress() {
@@ -1070,6 +1143,7 @@ async function deleteComment(comment: UnifiedComment) {
                   { key: 'description', label: 'Description', icon: FileText, count: 0 },
                   { key: 'tasks', label: 'Tasks', icon: ListChecks, count: story.tasks.length },
                   { key: 'comments', label: 'Comments', icon: MessageSquare, count: allComments.length },
+                  { key: 'attachments', label: 'Attachments', icon: Paperclip, count: attachments.length },
                   { key: 'activities', label: 'Activities', icon: History, count: 0 },
                 ] as const)"
                 :key="tab.key"
@@ -1077,7 +1151,7 @@ async function deleteComment(comment: UnifiedComment) {
                 :class="activeTab === tab.key
                   ? 'text-[#F97316] border-[#F97316]'
                   : 'text-gray-400 border-transparent hover:text-gray-600'"
-                @click="activeTab = tab.key as any; tab.key === 'activities' && story && loadActivities(story.id)"
+                @click="activeTab = tab.key as any; tab.key === 'activities' && story && loadActivities(story.id); tab.key === 'attachments' && story && loadAttachments(story.id)"
               >
                 <span class="flex items-center gap-1.5">
                   <component :is="tab.icon" :size="14" />
@@ -1272,6 +1346,110 @@ async function deleteComment(comment: UnifiedComment) {
             </template>
 
             <!-- ═══ Activities Tab ═══ -->
+            <!-- Attachments Tab -->
+            <template v-if="activeTab === 'attachments'">
+              <div>
+                <!-- Drop zone -->
+                <div
+                  class="border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer mb-4"
+                  :class="isDragging
+                    ? 'border-[#4857FE] bg-[#4857FE]/5'
+                    : 'border-gray-200 hover:border-gray-300 bg-gray-50/50 hover:bg-gray-50'"
+                  @dragover="onDragOver"
+                  @dragleave="onDragLeave"
+                  @drop="onDrop"
+                  @click="fileInputRef?.click()"
+                >
+                  <input
+                    ref="fileInputRef"
+                    type="file"
+                    multiple
+                    class="hidden"
+                    @change="onFileSelect"
+                  />
+                  <div v-if="uploadingFiles" class="flex flex-col items-center gap-2">
+                    <Loader2 :size="24" class="animate-spin text-[#4857FE]" />
+                    <p class="text-sm text-[#4857FE] font-medium">Uploading...</p>
+                  </div>
+                  <div v-else class="flex flex-col items-center gap-2">
+                    <div class="w-10 h-10 rounded-full flex items-center justify-center" :class="isDragging ? 'bg-[#4857FE]/10' : 'bg-gray-100'">
+                      <Upload :size="20" :class="isDragging ? 'text-[#4857FE]' : 'text-gray-400'" />
+                    </div>
+                    <div>
+                      <p class="text-sm font-medium" :class="isDragging ? 'text-[#4857FE]' : 'text-gray-600'">
+                        {{ isDragging ? 'Drop files here' : 'Drop files or click to upload' }}
+                      </p>
+                      <p class="text-xs text-gray-400 mt-0.5">Images, documents, or any file type</p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Loading -->
+                <div v-if="attachmentsLoading" class="flex items-center justify-center py-6">
+                  <Loader2 :size="18" class="animate-spin text-gray-400" />
+                </div>
+
+                <!-- Attachment list -->
+                <div v-else-if="attachments.length > 0" class="space-y-2">
+                  <div
+                    v-for="att in attachments"
+                    :key="att.id"
+                    class="bg-gray-50 rounded-lg border border-gray-100 p-3 flex items-center gap-3 group/att hover:bg-gray-100/70 transition-colors"
+                  >
+                    <div class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 overflow-hidden"
+                      :class="isImageFile(att.mimeType) ? 'bg-gray-200' : 'bg-blue-50'"
+                    >
+                      <img
+                        v-if="isImageFile(att.mimeType)"
+                        :src="att.filePath"
+                        :alt="att.fileName"
+                        class="w-10 h-10 object-cover rounded-lg"
+                      />
+                      <component v-else :is="fileIcon(att.mimeType)" :size="18" class="text-blue-500" />
+                    </div>
+
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-medium text-gray-800 truncate">{{ att.fileName }}</p>
+                      <div class="flex items-center gap-2 mt-0.5">
+                        <span class="text-[10px] text-gray-400">{{ formatFileSize(att.fileSize) }}</span>
+                        <span class="text-[10px] text-gray-300">·</span>
+                        <span class="text-[10px] text-gray-400">{{ att.user?.name || 'Unknown' }}</span>
+                        <span class="text-[10px] text-gray-300">·</span>
+                        <span class="text-[10px] text-gray-400">{{ formatRelativeTime(att.createdAt) }}</span>
+                      </div>
+                    </div>
+
+                    <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover/att:opacity-100 transition-opacity">
+                      <a
+                        :href="att.filePath"
+                        target="_blank"
+                        download
+                        class="p-1.5 rounded-md hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
+                        title="Download"
+                        @click.stop
+                      >
+                        <Download :size="13" />
+                      </a>
+                      <button
+                        class="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+                        title="Delete"
+                        @click="deleteAttachment(att.id)"
+                        :disabled="deletingAttachmentId === att.id"
+                      >
+                        <Loader2 v-if="deletingAttachmentId === att.id" :size="13" class="animate-spin" />
+                        <Trash2 v-else :size="13" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Empty state -->
+                <div v-else class="text-center py-4">
+                  <p class="text-xs text-gray-400">No attachments yet</p>
+                </div>
+              </div>
+            </template>
+
             <template v-if="activeTab === 'activities'">
             <div v-if="activitiesLoading" class="flex items-center justify-center py-8">
               <Loader2 :size="18" class="animate-spin text-gray-400" />

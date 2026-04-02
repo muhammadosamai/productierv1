@@ -8,6 +8,7 @@ export type FavoriteEntityType =
   | 'consumer_feedback'
   | 'test_cycle'
   | 'team_member'
+  | 'issue'
 
 export interface Favorite {
   id: string

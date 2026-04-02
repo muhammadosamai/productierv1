@@ -9,6 +9,7 @@ import {
   Signal, FileText, Type, Tag, CalendarClock, Link,
   Users, User, UserCheck, ShieldAlert, Hourglass, Archive, RotateCw, X, MessageSquare, Paperclip, ListTree,
   PencilLine, FolderOpen, Palette, Code2, TestTube2, Eye, FlaskConical, Wrench, Rocket,
+  Columns3Cog,
 } from 'lucide-vue-next'
 import { useBacklogStore } from '@/stores/backlog'
 import { useProductStore } from '@/stores/products'
@@ -19,6 +20,7 @@ import FavoriteStar from '@/components/shared/FavoriteStar.vue'
 import TaskDetailPanel from '@/components/delivery/TaskDetailPanel.vue'
 import TaskStatusIcon from '@/components/shared/TaskStatusIcon.vue'
 import CreateTaskDialog from '@/components/delivery/CreateTaskDialog.vue'
+import FormBuilderDialog from '@/components/forms/FormBuilderDialog.vue'
 import type { Task } from '@/types/backlog'
 
 interface TeamUser {
@@ -38,6 +40,7 @@ const searchQuery = ref('')
 const activeTab = ref<'all' | 'created' | 'assigned' | 'in_progress' | 'in_review' | 'done' | 'overdue' | 'blocked' | 'archived'>('all')
 const viewMode = ref<'table' | 'card'>(localStorage.getItem('tasks-view-mode') as 'table' | 'card' || 'table')
 const showCreateDialog = ref(false)
+const showFormBuilder = ref(false)
 
 // Save view mode to API + localStorage
 watch(viewMode, (v) => {
@@ -1425,6 +1428,15 @@ function renderUserAvatar(userId: string | null) {
             <PencilLine :size="15" />
             <span v-if="inlineEditMode" class="text-xs">Editing</span>
           </button>
+
+          <!-- Form Builder -->
+          <button
+            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer"
+            @click="showFormBuilder = true"
+            title="Form Builder"
+          >
+            <Columns3Cog :size="15" />
+          </button>
         </div>
       </div>
     </div>
@@ -1995,5 +2007,7 @@ function renderUserAvatar(userId: string | null) {
 
     <!-- Create Task Dialog -->
     <CreateTaskDialog v-model:open="showCreateDialog" @created="onTaskCreated" />
+
+    <FormBuilderDialog v-model:open="showFormBuilder" entity-type="task" />
   </div>
 </template>

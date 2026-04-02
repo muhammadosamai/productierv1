@@ -10,8 +10,10 @@ import { useTestCyclesStore } from '@/stores/testCycles'
 import { useBacklogStore } from '@/stores/backlog'
 import { useAuthStore } from '@/stores/auth'
 import { useProductStore } from '@/stores/products'
+import { useIssuesStore } from '@/stores/issues'
 import draggable from 'vuedraggable'
-import type { TestCycle, TestCycleIssue, IssueSeverity, IssueStatus } from '@/types/testCycle'
+import type { TestCycle, IssueSeverity, IssueStatus } from '@/types/testCycle'
+import type { Issue } from '@/types/issue'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,10 +21,12 @@ const store = useTestCyclesStore()
 const backlogStore = useBacklogStore()
 const authStore = useAuthStore()
 const productStore = useProductStore()
+const issuesStore = useIssuesStore()
 
 const cycle = ref<TestCycle | null>(null)
 const loading = ref(true)
 const activeView = ref<'kanban' | 'list'>('kanban')
+const cycleIssues = ref<Issue[]>([])
 
 // Add issue form
 const showAddIssue = ref(false)
@@ -47,7 +51,7 @@ const columnDefs: ColumnMeta[] = [
   { key: 'deferred', label: 'Deferred', color: '#a25ddc', statuses: ['deferred'] },
 ]
 
-const columnIssues = ref<Record<string, TestCycleIssue[]>>({
+const columnIssues = ref<Record<string, Issue[]>>({
   open: [],
   in_progress: [],
   resolved: [],
@@ -57,8 +61,8 @@ const columnIssues = ref<Record<string, TestCycleIssue[]>>({
 
 const isDragging = ref(false)
 
-watch(() => cycle.value?.issues, (issues) => {
-  const all = (issues || []) as TestCycleIssue[]
+watch(() => cycleIssues.value, (issues) => {
+  const all = (issues || []) as Issue[]
   columnIssues.value = {
     open: all.filter(i => i.status === 'open'),
     in_progress: all.filter(i => i.status === 'in_progress'),
@@ -68,48 +72,65 @@ watch(() => cycle.value?.issues, (issues) => {
   }
 }, { immediate: true, deep: true })
 
+async function fetchCycleIssues(cycleId: string) {
+  try {
+    const res = await fetch('/api/issues?testCycleId=' + cycleId)
+    if (res.ok) {
+      cycleIssues.value = await res.json()
+    }
+  } catch {
+    // silently fail
+  }
+}
+
 async function onColumnChange(colKey: string, evt: any) {
   if (!evt.added || !cycle.value) return
-  const issue = evt.added.element as TestCycleIssue
+  const issue = evt.added.element as Issue
   const col = columnDefs.find(c => c.key === colKey)
   if (!col) return
   const newStatus = col.statuses[0]
   if (issue.status === newStatus) return
-  await store.updateIssue(cycle.value.id, issue.id, { status: newStatus })
-  cycle.value = await store.fetchCycle(cycle.value.id)
+  await issuesStore.updateIssue(issue.id, { status: newStatus })
+  await fetchCycleIssues(cycle.value.id)
 }
 
 onMounted(async () => {
-  backlogStore.fetchStories(productStore.activeProductName)
-  const data = await store.fetchCycle(route.params.id as string)
+  if (productStore.activeProduct) {
+    backlogStore.fetchStories(productStore.activeProduct.name)
+  }
+  const id = route.params.id as string
+  const data = await store.fetchCycle(id)
   cycle.value = data
+  await fetchCycleIssues(id)
   loading.value = false
 })
 
 async function addIssue() {
   if (!issueTitle.value.trim() || !cycle.value) return
   addingIssue.value = true
-  await store.addIssue(cycle.value.id, {
+  await issuesStore.createIssue({
     title: issueTitle.value.trim(),
-    severity: issueSeverity.value,
+    severity: issueSeverity.value || 'minor',
+    product: productStore.activeProduct?.name || '',
+    testCycleId: cycle.value.id,
   })
+  await fetchCycleIssues(cycle.value.id)
   issueTitle.value = ''
   issueSeverity.value = 'minor'
   showAddIssue.value = false
   addingIssue.value = false
-  cycle.value = await store.fetchCycle(cycle.value.id)
 }
 
-async function updateIssueStatus(issue: TestCycleIssue, status: IssueStatus) {
+async function updateIssueStatus(issue: Issue, status: IssueStatus) {
   if (!cycle.value) return
-  await store.updateIssue(cycle.value.id, issue.id, { status })
-  cycle.value = await store.fetchCycle(cycle.value.id)
+  await issuesStore.updateIssue(issue.id, { status })
+  await fetchCycleIssues(cycle.value.id)
 }
 
-async function deleteIssue(issue: TestCycleIssue) {
+async function deleteIssue(issue: Issue) {
   if (!cycle.value) return
-  await store.deleteIssue(cycle.value.id, issue.id)
-  cycle.value = await store.fetchCycle(cycle.value.id)
+  await issuesStore.deleteIssue(issue.id)
+  await fetchCycleIssues(cycle.value.id)
 }
 
 function parsePrefix(title: string) {
@@ -150,9 +171,9 @@ function formatDate(d: string | null) {
 
 const issueStatuses: IssueStatus[] = ['open', 'in_progress', 'resolved', 'closed', 'deferred']
 
-const totalIssues = computed(() => cycle.value?.issues?.length || 0)
-const openIssues = computed(() => cycle.value?.issues?.filter(i => i.status === 'open').length || 0)
-const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status === 'resolved' || i.status === 'closed').length || 0)
+const totalIssues = computed(() => cycleIssues.value?.length || 0)
+const openIssues = computed(() => cycleIssues.value?.filter(i => i.status === 'open').length || 0)
+const resolvedIssues = computed(() => cycleIssues.value?.filter(i => i.status === 'resolved' || i.status === 'closed').length || 0)
 </script>
 
 <template>
@@ -322,16 +343,16 @@ const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status 
                     <p class="text-sm font-medium text-gray-900 leading-snug mb-2">{{ issue.title }}</p>
 
                     <!-- Story tag -->
-                    <div v-if="issue.story" class="mb-2">
-                      <span class="text-[10px] text-[#4857FE] bg-[#4857FE]/8 px-1.5 py-0.5 rounded truncate inline-block max-w-full">{{ issue.story.title }}</span>
+                    <div v-if="issue.storyId" class="mb-2">
+                      <span class="text-[10px] text-[#4857FE] bg-[#4857FE]/8 px-1.5 py-0.5 rounded truncate inline-block max-w-full">{{ issue.storyId }}</span>
                     </div>
 
                     <!-- Footer: reporter + date -->
                     <div class="flex items-center justify-between pt-2 border-t border-gray-100">
-                      <div v-if="issue.reportedByUser" class="flex items-center gap-1.5">
-                        <img v-if="issue.reportedByUser.avatar" :src="issue.reportedByUser.avatar" class="w-5 h-5 rounded-full object-cover" />
-                        <div v-else class="w-5 h-5 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[8px] font-semibold text-[#4857FE]">{{ issue.reportedByUser.name[0] }}</div>
-                        <span class="text-[10px] text-gray-500">{{ issue.reportedByUser.name.split(' ')[0] }}</span>
+                      <div v-if="issue.reportedBy" class="flex items-center gap-1.5">
+                        <img v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-5 h-5 rounded-full object-cover" />
+                        <div v-else class="w-5 h-5 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[8px] font-semibold text-[#4857FE]">{{ issue.reportedBy.name[0] }}</div>
+                        <span class="text-[10px] text-gray-500">{{ issue.reportedBy.name.split(' ')[0] }}</span>
                       </div>
                       <span class="text-[10px] text-gray-400">{{ formatDate(issue.createdAt) }}</span>
                     </div>
@@ -345,7 +366,7 @@ const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status 
 
       <!-- ═══ List View ═══ -->
       <div v-else-if="activeView === 'list'" class="flex-1 overflow-auto px-8 py-6">
-        <div v-if="!cycle.issues?.length" class="flex flex-col items-center justify-center py-16">
+        <div v-if="!cycleIssues?.length" class="flex flex-col items-center justify-center py-16">
           <div class="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mb-4">
             <FlaskConical :size="24" class="text-gray-400" />
           </div>
@@ -368,7 +389,7 @@ const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status 
             </thead>
             <tbody>
               <tr
-                v-for="issue in cycle.issues"
+                v-for="issue in cycleIssues"
                 :key="issue.id"
                 class="border-b border-gray-50 hover:bg-gray-50/50 transition-colors group"
               >
@@ -391,14 +412,14 @@ const resolvedIssues = computed(() => cycle.value?.issues?.filter(i => i.status 
                   </select>
                 </td>
                 <td class="px-5 py-3.5">
-                  <div v-if="issue.reportedByUser" class="flex items-center gap-2">
-                    <img v-if="issue.reportedByUser.avatar" :src="issue.reportedByUser.avatar" class="w-5 h-5 rounded-full object-cover" />
-                    <div v-else class="w-5 h-5 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[8px] font-semibold text-[#4857FE]">{{ issue.reportedByUser.name[0] }}</div>
-                    <span class="text-sm text-gray-600">{{ issue.reportedByUser.name }}</span>
+                  <div v-if="issue.reportedBy" class="flex items-center gap-2">
+                    <img v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-5 h-5 rounded-full object-cover" />
+                    <div v-else class="w-5 h-5 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[8px] font-semibold text-[#4857FE]">{{ issue.reportedBy.name[0] }}</div>
+                    <span class="text-sm text-gray-600">{{ issue.reportedBy.name }}</span>
                   </div>
                 </td>
                 <td class="px-5 py-3.5">
-                  <span v-if="issue.story" class="text-xs text-[#4857FE] bg-[#4857FE]/8 px-1.5 py-0.5 rounded truncate max-w-[120px] inline-block">{{ issue.story.title }}</span>
+                  <span v-if="issue.storyId" class="text-xs text-[#4857FE] bg-[#4857FE]/8 px-1.5 py-0.5 rounded truncate max-w-[120px] inline-block">{{ issue.storyId }}</span>
                   <span v-else class="text-sm text-gray-400">—</span>
                 </td>
                 <td class="px-5 py-3.5">

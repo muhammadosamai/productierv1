@@ -19,6 +19,8 @@ import { featureRequestRoutes } from './routes/featureRequests'
 import { consumerFeedbackRoutes } from './routes/consumerFeedback'
 import { rolesRoutes } from './routes/roles'
 import { inviteRoutes } from './routes/invites'
+import { issueRoutes } from './routes/issues'
+import { formConfigRoutes, customFieldRoutes } from './routes/formConfigs'
 
 const app = new Elysia()
   .use(cors({
@@ -46,6 +48,9 @@ const app = new Elysia()
   .use(consumerFeedbackRoutes)
   .use(rolesRoutes)
   .use(inviteRoutes)
+  .use(issueRoutes)
+  .use(formConfigRoutes)
+  .use(customFieldRoutes)
   .get('/api/health', () => ({ status: 'ok' }))
   .listen(3001)
 

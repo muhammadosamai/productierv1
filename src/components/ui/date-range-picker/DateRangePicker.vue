@@ -21,7 +21,7 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
-  'update:modelValue': [value: DateRange]
+  'update:modelValue': [value: DateRange | undefined]
 }>()
 
 const open = ref(false)
@@ -63,6 +63,12 @@ function onUpdate(val: { start: DateValue; end: DateValue } | undefined) {
       end: calendarDateToIso(val.end),
     })
   }
+}
+
+// Adapter to satisfy external RangeCalendar emit signature
+function onRangeUpdate(val: any) {
+  // forward the value to the typed onUpdate
+  onUpdate(val as { start: DateValue; end: DateValue } | undefined)
 }
 
 // Format display
@@ -162,7 +168,7 @@ function applyPreset(preset: string) {
           <RangeCalendar
             :model-value="internalValue"
             :number-of-months="numberOfMonths"
-            @update:model-value="onUpdate"
+            @update:model-value="onRangeUpdate"
           />
         </div>
       </div>

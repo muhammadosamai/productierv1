@@ -152,6 +152,8 @@ const typeColors: Record<string, string> = {
   documentation: 'text-[#a1a1aa]',
 }
 
+const activeProduct = computed(() => productStore.activeProduct)
+
 // ---- Owner search methods ----
 async function searchOwners(query: string) {
   ownerSearchLoading.value = true
@@ -219,10 +221,10 @@ function onOwnerFocus() {
 
 function onOwnerBlur() {
   // Don't close if user is clicking on the dropdown
-  if (ownerMouseDownOnDropdown.value) {
-    ownerMouseDownOnDropdown.value = false
-    return
-  }
+  // if (ownerMouseDownOnDropdown.value) {
+  //   ownerMouseDownOnDropdown.value = false
+  //   return
+  // }
   setTimeout(() => { showOwnerDropdown.value = false }, 100)
 }
 
@@ -357,6 +359,9 @@ watch(open, (val) => {
 async function handleSubmit(withBreakdown = false) {
   if (!title.value.trim()) return
 
+  const activeProduct = productStore.activeProduct
+  if (!activeProduct) return
+
   if (withBreakdown) {
     submittingWithBreakdown.value = true
   } else {
@@ -369,7 +374,7 @@ async function handleSubmit(withBreakdown = false) {
     acceptanceCriteria: acceptanceCriteria.value.trim() || undefined,
     type: type.value,
     priority: priority.value,
-    product: productStore.activeProduct.name,
+    product: activeProduct.name,
     initiative: initiative.value.trim() || undefined,
     delivery: requiredBy.value || undefined,
     owner: owner.value.trim() || undefined,
@@ -553,10 +558,10 @@ async function handleSubmit(withBreakdown = false) {
           <div class="space-y-1.5">
             <label class="text-sm font-medium text-gray-700">Product</label>
             <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 bg-gray-50 text-sm text-gray-500 cursor-not-allowed">
-              <div v-if="productStore.activeProduct.logo" class="w-5 h-5 rounded overflow-hidden shrink-0">
-                <img :src="productStore.activeProduct.logo" class="w-full h-full object-cover" :alt="productStore.activeProduct.name" />
+              <div v-if="activeProduct?.logo" class="w-5 h-5 rounded overflow-hidden shrink-0">
+                <img :src="activeProduct.logo" class="w-full h-full object-cover" :alt="activeProduct.name" />
               </div>
-              <span class="truncate">{{ productStore.activeProduct.name }}</span>
+              <span class="truncate">{{ activeProduct?.name || 'Product' }}</span>
             </div>
           </div>
 

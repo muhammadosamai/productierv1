@@ -145,7 +145,7 @@ onMounted(async () => {
   }
 })
 
-watch(() => productStore.activeProduct.name, () => {
+watch(() => productStore.activeProductName, () => {
   deliveriesStore.fetchDeliveries()
 })
 
@@ -473,6 +473,11 @@ function onDrop(idx: number) {
   }
   const arr = [...columns.value]
   const [moved] = arr.splice(dragIndex.value, 1)
+  if (!moved) {
+    dragIndex.value = null
+    dragOverIndex.value = null
+    return
+  }
   arr.splice(idx, 0, moved)
   columns.value = arr
   dragIndex.value = null
@@ -515,7 +520,7 @@ const deliveryActivitiesLoading = ref(false)
 async function fetchDeliveryActivities() {
   deliveryActivitiesLoading.value = true
   try {
-    const p = productStore.activeProduct.name
+    const p = productStore.activeProductName
     const res = await fetch(`/api/activities?product=${encodeURIComponent(p)}&entityType=delivery&limit=50`)
     if (res.ok) {
       deliveryActivities.value = await res.json()
@@ -1049,7 +1054,7 @@ function progressPercent(delivery: Delivery) {
                   :class="inlineEditMode && !isEditing(delivery.id, 'title') ? 'hover:bg-gray-100/60 rounded px-1 -mx-1 cursor-text' : ''"
                   @click="startEditing(delivery.id, 'title', delivery.title, $event)"
                 >
-                  <FavoriteStar entity-type="delivery" :entity-id="delivery.id" :product-id="productStore.activeProduct.name" />
+                  <FavoriteStar entity-type="delivery" :entity-id="delivery.id" :product-id="productStore.activeProductName" />
                   <template v-if="isEditing(delivery.id, 'title')">
                     <input
                       v-model="editValue"
@@ -1213,7 +1218,7 @@ function progressPercent(delivery: Delivery) {
 
               <!-- Title -->
               <div class="mb-1.5 flex items-start gap-2">
-                <FavoriteStar entity-type="delivery" :entity-id="delivery.id" :product-id="productStore.activeProduct.name" />
+                <FavoriteStar entity-type="delivery" :entity-id="delivery.id" :product-id="productStore.activeProductName" />
                 <h4 class="text-base leading-snug line-clamp-2 group-hover/card:text-[#4857FE] transition-colors">
                   <span v-if="parseDeliveryTitle(delivery.title).prefix" class="font-medium" :class="statusTextColor(delivery.status)">{{ parseDeliveryTitle(delivery.title).prefix }}</span>
                   <span v-if="parseDeliveryTitle(delivery.title).prefix"> - </span>

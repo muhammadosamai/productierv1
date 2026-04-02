@@ -20,7 +20,8 @@ export const useServersStore = defineStore('servers', () => {
   const error = ref<string | null>(null)
 
   async function fetchServers(environment?: Environment) {
-    const product = useProductStore().activeProduct.name
+    const productStore = useProductStore()
+    const product = productStore.activeProductName
     loading.value = true
     error.value = null
     try {

@@ -95,7 +95,9 @@ async function onColumnChange(colKey: string, evt: any) {
 }
 
 onMounted(async () => {
-  backlogStore.fetchStories(productStore.activeProduct.name)
+  if (productStore.activeProduct) {
+    backlogStore.fetchStories(productStore.activeProduct.name)
+  }
   const id = route.params.id as string
   const data = await store.fetchCycle(id)
   cycle.value = data
@@ -341,8 +343,8 @@ const resolvedIssues = computed(() => cycleIssues.value?.filter(i => i.status ==
                     <p class="text-sm font-medium text-gray-900 leading-snug mb-2">{{ issue.title }}</p>
 
                     <!-- Story tag -->
-                    <div v-if="issue.story" class="mb-2">
-                      <span class="text-[10px] text-[#4857FE] bg-[#4857FE]/8 px-1.5 py-0.5 rounded truncate inline-block max-w-full">{{ issue.story.title }}</span>
+                    <div v-if="issue.storyId" class="mb-2">
+                      <span class="text-[10px] text-[#4857FE] bg-[#4857FE]/8 px-1.5 py-0.5 rounded truncate inline-block max-w-full">{{ issue.storyId }}</span>
                     </div>
 
                     <!-- Footer: reporter + date -->
@@ -417,7 +419,7 @@ const resolvedIssues = computed(() => cycleIssues.value?.filter(i => i.status ==
                   </div>
                 </td>
                 <td class="px-5 py-3.5">
-                  <span v-if="issue.story" class="text-xs text-[#4857FE] bg-[#4857FE]/8 px-1.5 py-0.5 rounded truncate max-w-[120px] inline-block">{{ issue.story.title }}</span>
+                  <span v-if="issue.storyId" class="text-xs text-[#4857FE] bg-[#4857FE]/8 px-1.5 py-0.5 rounded truncate max-w-[120px] inline-block">{{ issue.storyId }}</span>
                   <span v-else class="text-sm text-gray-400">—</span>
                 </td>
                 <td class="px-5 py-3.5">

@@ -2,17 +2,15 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import {
   BookOpen, Search, Plus, ChevronRight, ChevronDown,
-  FileText, Clock, User2, Edit3, X, Tag, Eye,
+  Clock, User2, Edit3, Tag, Eye,
   Link2, Trash2, Globe, Lock, Shield, Loader2,
 } from 'lucide-vue-next'
 import { useProductStore } from '@/stores/products'
-import { useAuthStore } from '@/stores/auth'
 import { useWikiStore } from '@/stores/wiki'
 import CreateAssetDialog from '@/components/wiki/CreateAssetDialog.vue'
 import type { Asset, AssetType } from '@/types/wiki'
 
 const productStore = useProductStore()
-const authStore = useAuthStore()
 const wikiStore = useWikiStore()
 
 const searchQuery = ref('')
@@ -37,18 +35,24 @@ const expandedCategories = ref<Record<string, boolean>>(loadJson(STORAGE_KEY_CAT
 const expandedTypes = ref<Record<string, boolean>>(loadJson(STORAGE_KEY_TYPE, {}))
 
 onMounted(async () => {
-  const product = productStore.activeProduct.name
-  await Promise.all([
-    wikiStore.fetchAssetTypes(product),
-    wikiStore.fetchAssets(product),
-  ])
-  // Auto-select first asset
-  if (wikiStore.assets.length > 0 && !wikiStore.selectedAsset) {
-    selectAsset(wikiStore.assets[0])
+  const product = productStore.activeProduct?.name
+  if (product) {
+    await Promise.all([
+      wikiStore.fetchAssetTypes(product),
+      wikiStore.fetchAssets(product),
+    ])
+    // Auto-select first asset
+    if (wikiStore.assets.length > 0 && !wikiStore.selectedAsset) {
+      await selectAsset(wikiStore.assets[0] as Asset)
+    }
   }
 })
 
-watch(() => productStore.activeProduct.name, async (product) => {
+watch(() => productStore.activeProduct?.name, async (product) => {
+  if (!product) {
+    wikiStore.selectedAsset = null
+    return
+  }
   await Promise.all([
     wikiStore.fetchAssetTypes(product),
     wikiStore.fetchAssets(product),
@@ -66,7 +70,8 @@ const categoryGroups = computed(() => {
   }
 
   for (const at of wikiStore.assetTypes) {
-    const cat = groups[at.category] || groups['business']
+    const cat = groups[at.category] ?? groups['business']
+    if (!cat) continue
     const typeAssets = wikiStore.assets.filter(a => a.assetTypeId === at.id)
 
     // Apply search filter
@@ -128,7 +133,8 @@ async function saveEditing() {
       description: editDescription.value || null,
       content: editContent.value || null,
     })
-    await wikiStore.fetchAssets(productStore.activeProduct.name)
+    const pname = productStore.activeProduct?.name
+    if (pname) await wikiStore.fetchAssets(pname)
     await wikiStore.fetchAsset(wikiStore.selectedAsset.id)
     isEditing.value = false
   }
@@ -141,16 +147,18 @@ function cancelEditing() {
 async function deleteAsset() {
   if (wikiStore.selectedAsset && confirm('Delete this asset? This cannot be undone.')) {
     await wikiStore.deleteAsset(wikiStore.selectedAsset.id)
-    await wikiStore.fetchAssets(productStore.activeProduct.name)
+    const pname = productStore.activeProduct?.name
+    if (pname) await wikiStore.fetchAssets(pname)
   }
 }
 
 async function onAssetCreated() {
   showCreateDialog.value = false
-  await wikiStore.fetchAssets(productStore.activeProduct.name)
+  const pname = productStore.activeProduct?.name
+  if (pname) await wikiStore.fetchAssets(pname)
   // Select the newly created asset
   if (wikiStore.assets.length > 0) {
-    await selectAsset(wikiStore.assets[0])
+    await selectAsset(wikiStore.assets[0] as Asset)
   }
 }
 
@@ -229,7 +237,7 @@ const selected = computed(() => wikiStore.selectedAsset)
           </div>
           <div>
             <h1 class="text-xl font-semibold text-gray-900">Wiki <span class="text-gray-400 font-normal text-base ml-1">({{ totalAssets }})</span></h1>
-            <p class="text-sm text-gray-400 mt-0.5">{{ productStore.activeProduct.name }}</p>
+            <p class="text-sm text-gray-400 mt-0.5">{{ productStore.activeProduct?.name }}</p>
           </div>
         </div>
         <div class="flex items-center gap-3">

@@ -13,7 +13,7 @@ import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import type { Delivery, DeliveryStatus } from '@/types/delivery'
-import type { Task, TaskStatus, ItemType, TaskPriority } from '@/types/backlog'
+import type { Task, TaskStatus, TaskPriority } from '@/types/backlog'
 import draggable from 'vuedraggable'
 import DeliveryTimeline from '@/components/delivery/DeliveryTimeline.vue'
 import DeliveryList from '@/components/delivery/DeliveryList.vue'
@@ -860,7 +860,7 @@ function taskShortId(task: Task) {
                               v-for="(userId, i) in task.assigneeUserIds.slice(0, 3)"
                               :key="userId"
                               class="w-6 h-6 rounded-full border-2 border-white overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold"
-                              :style="{ zIndex: 3 - i }"
+                              :style="{ zIndex: 3 - Number(i) }"
                               :title="getUserById(userId)?.name || userId"
                             >
                               <img v-if="getUserById(userId)?.avatar" :src="getUserById(userId)!.avatar!" class="w-6 h-6 rounded-full object-cover" />

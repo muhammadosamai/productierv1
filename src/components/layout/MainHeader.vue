@@ -1,12 +1,184 @@
 <script setup lang="ts">
-import { Search, Settings, Moon, HelpCircle, Bell, ChevronDown, LogOut } from 'lucide-vue-next'
+import { Search, Settings, Moon, HelpCircle, Bell, ChevronDown, LogOut, BookText, ListTodo, Bug, Target, BookOpen } from 'lucide-vue-next'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { useAuthStore } from '@/stores/auth'
+import { useProductStore } from '@/stores/products'
+import type { SearchQuickItem, SearchQuickResponse } from '@/types/search'
 import { useRouter } from 'vue-router'
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const authStore = useAuthStore()
+const productStore = useProductStore()
+
 const router = useRouter()
+
+const searchQuery = ref('')
+const suggestions = ref<SearchQuickResponse['groups'] | null>(null)
+const debounceTimer = ref<number | null>(null)
+const isLoadingSuggestions = ref(false)
+const showSuggestions = ref(false)
+const searchContainerRef = ref<HTMLElement | null>(null)
+
+const suggestionSections = computed(() => {
+  if (!suggestions.value) return []
+  return [
+    { label: 'Stories', items: suggestions.value.stories },
+    { label: 'Tasks', items: suggestions.value.tasks },
+    { label: 'Issues', items: suggestions.value.issues },
+    { label: 'Initiatives', items: suggestions.value.initiatives },
+    { label: 'Wiki', items: suggestions.value.wikiAssets },
+  ].filter(section => section.items.length > 0)
+})
+
+const hasSuggestions = computed(() => suggestionSections.value.length > 0)
+
+function handleSearchSubmit() {
+  if (!searchQuery.value) return
+
+  const firstItem = suggestionSections.value[0]?.items[0]
+  if (firstItem) {
+    handleSuggestionClick(firstItem)
+    return
+  }
+
+  showSuggestions.value = false
+}
+
+async function handleSuggestionClick(item: SearchQuickItem) {
+  if (item.product) {
+    let productIndex = productStore.products.findIndex(p => p.name === item.product)
+    if (productIndex < 0) {
+      await productStore.fetchProducts()
+      productIndex = productStore.products.findIndex(p => p.name === item.product)
+    }
+    if (productIndex >= 0) {
+      productStore.selectProduct(productIndex)
+    }
+  }
+
+  showSuggestions.value = false
+  router.push(item.href)
+}
+
+function handleSearchFocus() {
+  if (searchQuery.value.trim()) {
+    showSuggestions.value = true
+  }
+}
+
+function formatStatusLabel(status?: string | null) {
+  if (!status) return ''
+  return status
+    .split('_')
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function formatUpdatedLabel(updatedAt?: string | null) {
+  if (!updatedAt) return ''
+  const timestamp = new Date(updatedAt)
+  if (Number.isNaN(timestamp.getTime())) return ''
+
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const startOfYesterday = new Date(startOfToday)
+  startOfYesterday.setDate(startOfToday.getDate() - 1)
+
+  if (timestamp >= startOfToday) {
+    const minutesDiff = Math.max(0, Math.floor((now.getTime() - timestamp.getTime()) / (1000 * 60)))
+    if (minutesDiff < 1) return 'Just now'
+    if (minutesDiff < 60) return `${minutesDiff}m ago`
+    const hoursDiff = Math.floor(minutesDiff / 60)
+    return `${hoursDiff}h ago`
+  }
+
+  if (timestamp >= startOfYesterday) {
+    return 'Yesterday'
+  }
+
+  return timestamp.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function getEntityIcon(entityType: SearchQuickItem['entityType']) {
+  if (entityType === 'story') return BookText
+  if (entityType === 'task') return ListTodo
+  if (entityType === 'issue') return Bug
+  if (entityType === 'initiative') return Target
+  return BookOpen
+}
+
+const entityIconTheme: Record<SearchQuickItem['entityType'], string> = {
+  story: 'bg-blue-50 text-blue-600',
+  task: 'bg-emerald-50 text-emerald-600',
+  issue: 'bg-red-50 text-red-600',
+  initiative: 'bg-violet-50 text-violet-600',
+  wiki: 'bg-amber-50 text-amber-600',
+}
+
+const iconBadgeBaseClass = 'inline-flex items-center justify-center rounded-md p-1 mr-1 shrink-0'
+
+function getEntityIconBadgeClass(entityType: SearchQuickItem['entityType']) {
+  return `${iconBadgeBaseClass} ${entityIconTheme[entityType]}`
+}
+
+function handleDocumentClick(event: MouseEvent) {
+  const target = event.target as Node | null
+  if (!searchContainerRef.value || !target) return
+  if (!searchContainerRef.value.contains(target)) {
+    showSuggestions.value = false
+  }
+}
+
+// Debounced live suggestions to /api/search/quick?q=...
+watch(searchQuery, (val) => {
+  if (debounceTimer.value) window.clearTimeout(debounceTimer.value)
+  if (!val) {
+    suggestions.value = null
+    isLoadingSuggestions.value = false
+    showSuggestions.value = false
+    return
+  }
+
+  showSuggestions.value = true
+  isLoadingSuggestions.value = true
+
+  debounceTimer.value = window.setTimeout(async () => {
+    try {
+      const authStore = useAuthStore()
+      const params = new URLSearchParams({ q: val })
+      const headers: Record<string, string> = {}
+      if (authStore.token) headers['Authorization'] = `Bearer ${authStore.token}`
+
+      const res = await fetch(`/api/search/quick?${params.toString()}`, { headers })
+      if (!res.ok) {
+        console.warn('Search quick failed', res.status)
+        suggestions.value = null
+        isLoadingSuggestions.value = false
+        return
+      }
+      const data = await res.json() as SearchQuickResponse
+      suggestions.value = data.groups
+      isLoadingSuggestions.value = false
+      // keep silent UI-wise; results available in `suggestions` for future use
+    } catch (err) {
+      console.error('Search quick error', err)
+      suggestions.value = null
+      isLoadingSuggestions.value = false
+    }
+  }, 300)
+})
+
+onMounted(() => {
+  document.addEventListener('click', handleDocumentClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleDocumentClick)
+})
 
 const userInitials = computed(() => {
   if (!authStore.user?.name) return '?'
@@ -36,12 +208,61 @@ function handleLogout() {
   <header class="flex items-center h-[64px] px-4 bg-white border-b border-gray-100 shrink-0">
     <!-- Search bar -->
     <div class="flex items-center flex-1">
-      <div class="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2 w-[320px] border border-gray-100">
-        <Search :size="16" class="text-gray-400" />
-        <span class="text-sm text-gray-400">Search any files...</span>
-        <div class="ml-auto flex items-center gap-1 text-xs text-gray-400 bg-white rounded-md px-1.5 py-0.5 border border-gray-200">
-          <span class="text-[11px]">&#8984;</span>
-          <span class="text-[11px] font-medium">S</span>
+      <div ref="searchContainerRef" class="relative w-[320px]">
+        <div class="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2 border border-gray-100">
+          <Search :size="16" class="text-gray-400" />
+          <input
+            v-model="searchQuery"
+            @focus="handleSearchFocus"
+            @keyup.enter="handleSearchSubmit"
+            placeholder="Search any files..."
+            aria-label="Search"
+            class="ml-2 text-sm bg-transparent placeholder-gray-400 outline-none flex-1"
+          />
+          <div class="ml-auto flex items-center gap-1 text-xs text-gray-400 bg-white rounded-md px-1.5 py-0.5 border border-gray-200">
+            <span class="text-[11px]">&#8984;</span>
+            <span class="text-[11px] font-medium">S</span>
+          </div>
+        </div>
+
+        <div
+          v-if="showSuggestions"
+          class="absolute top-[calc(100%+8px)] left-0 z-50 w-[156%] rounded-xl border border-gray-100 bg-white shadow-sm max-h-[360px] overflow-y-auto"
+        >
+          <div v-if="isLoadingSuggestions" class="px-3 py-2 text-xs text-gray-500">
+            Searching...
+          </div>
+
+          <div v-else-if="!hasSuggestions" class="px-3 py-2 text-xs text-gray-500">
+            No results found
+          </div>
+
+          <template v-else>
+            <div v-for="section in suggestionSections" :key="section.label" class="py-1">
+              <div class="px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                {{ section.label }}
+              </div>
+              <button
+                v-for="item in section.items"
+                :key="`${section.label}-${item.id}`"
+                class="w-full px-3 py-2 text-left hover:bg-gray-50 transition-colors"
+                @click="handleSuggestionClick(item)"
+              >
+                <div class="text-sm text-gray-800 truncate flex items-center gap-1.5">
+                  <span :class="getEntityIconBadgeClass(item.entityType)">
+                    <component :is="getEntityIcon(item.entityType)" :size="12" />
+                  </span>
+                  <span v-if="item.publicId" class="font-medium text-gray-500 mr-1">{{ item.publicId }}</span>
+                  <span>{{ item.title }}</span>
+                </div>
+                <div class="text-[11px] text-gray-400 truncate">
+                  {{ item.product }}
+                  <span v-if="item.status"> • {{ formatStatusLabel(item.status) }}</span>
+                  <span v-if="item.updatedAt"> • {{ formatUpdatedLabel(item.updatedAt) }}</span>
+                </div>
+              </button>
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -121,7 +342,7 @@ function handleLogout() {
           <!-- Settings -->
           <button
             class="flex items-center gap-2.5 w-full px-2 py-2 text-sm text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
-            @click="goToSettings"
+            @click="goToSettings()"
           >
             <Settings :size="15" class="text-gray-400" />
             Settings

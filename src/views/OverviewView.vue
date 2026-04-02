@@ -32,12 +32,12 @@ onMounted(() => {
   loadData()
 })
 
-watch(() => productStore.activeProduct.name, () => {
+watch(() => productStore.activeProductName, () => {
   loadData()
 })
 
 function loadData() {
-  const product = productStore.activeProduct.name
+  const product = productStore.activeProductName
   backlogStore.fetchStories(product)
   initiativesStore.fetchInitiatives()
   activitiesStore.fetchActivities(product)
@@ -48,7 +48,7 @@ function loadData() {
 const totalStories = computed(() => backlogStore.stories.length)
 const totalInitiatives = computed(() => initiativesStore.initiatives.length)
 const inProgressStories = computed(() => backlogStore.stories.filter(i => i.status === 'in_progress').length)
-const completedStories = computed(() => backlogStore.stories.filter(i => i.status === 'done').length)
+const completedStories = computed(() => backlogStore.stories.filter(i => i.status === 'completed').length)
 
 // Group activities by date
 const groupedActivities = computed(() => {
@@ -212,14 +212,18 @@ function onMemberSearchInput() {
 }
 
 async function addMember(user: { id: string; name: string }) {
-  await membersStore.addMember(productStore.activeProduct.name, user.id)
+  const pname = productStore.activeProductName
+  if (!pname) return
+  await membersStore.addMember(pname, user.id)
   memberSearch.value = ''
   memberSearchResults.value = []
   showAddMember.value = false
 }
 
 async function removeMember(userId: string) {
-  await membersStore.removeMember(productStore.activeProduct.name, userId)
+  const pname = productStore.activeProductName
+  if (!pname) return
+  await membersStore.removeMember(pname, userId)
 }
 
 function openAddMember() {
@@ -237,7 +241,7 @@ function openAddMember() {
       <!-- Page title -->
       <div class="mb-6">
         <h1 class="text-2xl font-semibold text-gray-900">Product Overview</h1>
-        <p class="text-sm text-gray-400 mt-1">{{ productStore.activeProduct.name }} — dashboard & activity</p>
+        <p class="text-sm text-gray-400 mt-1">{{ productStore.activeProductName }} — dashboard & activity</p>
       </div>
 
       <!-- Stats Cards -->

@@ -202,7 +202,7 @@ onMounted(async () => {
   }
 })
 
-watch(() => productStore.activeProduct.name, () => {
+watch(() => productStore.activeProductName, () => {
   backlogStore.fetchStories()
   fetchTeamMembers()
 })
@@ -609,6 +609,11 @@ function onDrop(idx: number) {
   }
   const arr = [...columns.value]
   const [moved] = arr.splice(dragIndex.value, 1)
+  if (!moved) {
+    dragIndex.value = null
+    dragOverIndex.value = null
+    return
+  }
   arr.splice(idx, 0, moved)
   columns.value = arr
   dragIndex.value = null
@@ -653,7 +658,7 @@ const taskActivitiesLoading = ref(false)
 async function fetchTaskActivities() {
   taskActivitiesLoading.value = true
   try {
-    const p = productStore.activeProduct.name
+    const p = productStore.activeProductName
     const res = await fetch(`/api/activities?product=${encodeURIComponent(p)}&entityType=task&limit=50`)
     if (res.ok) {
       taskActivities.value = await res.json()
@@ -1510,7 +1515,7 @@ function renderUserAvatar(userId: string | null) {
                   @click="startTaskEditing(task.id, 'title', task.title, $event)"
                 >
                   <template v-if="isEditing(task.id, 'title')">
-                    <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProduct.name" />
+                    <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProductName" />
                     <TaskStatusIcon :status="task.status" :size="18" />
                     <input
                       v-model="editValue"
@@ -1522,7 +1527,7 @@ function renderUserAvatar(userId: string | null) {
                     />
                   </template>
                   <template v-else>
-                    <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProduct.name" />
+                    <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProductName" />
                     <TaskStatusIcon :status="task.status" :size="18" />
                     <span class="text-sm font-medium truncate" :class="(task.status === 'done' || task.status === 'archived') ? 'text-gray-400 line-through' : 'text-gray-800'">{{ task.title }}</span>
                     <ChevronRight v-if="!inlineEditMode" :size="14" class="text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
@@ -1913,7 +1918,7 @@ function renderUserAvatar(userId: string | null) {
               <!-- Row 1: Status badge -->
               <div class="flex items-center justify-between mb-3.5">
                 <div class="flex items-center gap-2">
-                  <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProduct.name" />
+                  <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProductName" />
                   <div class="w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center">
                     <ListChecks :size="18" class="text-gray-400" />
                   </div>

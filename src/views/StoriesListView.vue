@@ -170,7 +170,7 @@ onMounted(async () => {
   }
 })
 
-watch(() => productStore.activeProduct.name, () => {
+watch(() => productStore.activeProductName, () => {
   backlogStore.fetchStories()
   fetchTeamMembers()
 })
@@ -520,6 +520,11 @@ function onDrop(idx: number) {
   }
   const arr = [...columns.value]
   const [moved] = arr.splice(dragIndex.value, 1)
+  if (!moved) {
+    dragIndex.value = null
+    dragOverIndex.value = null
+    return
+  }
   arr.splice(idx, 0, moved)
   columns.value = arr
   dragIndex.value = null
@@ -562,7 +567,7 @@ const storyActivitiesLoading = ref(false)
 async function fetchStoryActivities() {
   storyActivitiesLoading.value = true
   try {
-    const p = productStore.activeProduct.name
+    const p = productStore.activeProductName
     const res = await fetch(`/api/activities?product=${encodeURIComponent(p)}&entityType=story&limit=50`)
     if (res.ok) {
       storyActivities.value = await res.json()
@@ -1113,7 +1118,7 @@ function formatDate(dateStr: string | null) {
                   @click="startEditing(story.id, 'title', story.title, $event)"
                 >
                   <template v-if="isEditing(story.id, 'title')">
-                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProduct.name" />
+                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProductName" />
                     <component :is="typeIcon(story.type)" :size="16" class="shrink-0" :class="{
                       'text-blue-500': story.type === 'feature',
                       'text-red-500': story.type === 'bug',
@@ -1134,7 +1139,7 @@ function formatDate(dateStr: string | null) {
                     />
                   </template>
                   <template v-else>
-                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProduct.name" />
+                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProductName" />
                     <component :is="typeIcon(story.type)" :size="16" class="shrink-0" :class="{
                       'text-blue-500': story.type === 'feature',
                       'text-red-500': story.type === 'bug',
@@ -1145,7 +1150,7 @@ function formatDate(dateStr: string | null) {
                       'text-green-500': story.type === 'testing',
                       'text-gray-400': story.type === 'documentation',
                     }" />
-                    <span class="text-sm font-medium truncate" :class="(story.status === 'done' || story.status === 'archived') ? 'text-gray-400 line-through' : 'text-gray-800'">{{ story.title }}</span>
+                    <span class="text-sm font-medium truncate" :class="(story.status === 'completed' || story.status === 'archived') ? 'text-gray-400 line-through' : 'text-gray-800'">{{ story.title }}</span>
                     <ChevronRight v-if="!inlineEditMode" :size="14" class="text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                   </template>
                 </div>
@@ -1367,7 +1372,7 @@ function formatDate(dateStr: string | null) {
               <!-- Row 1: Type icon + status badge -->
               <div class="flex items-center justify-between mb-3.5">
                 <div class="flex items-center gap-2">
-                  <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProduct.name" />
+                  <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProductName" />
                   <div class="w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center">
                     <component :is="typeIcon(story.type)" :size="18" class="text-gray-400" />
                   </div>

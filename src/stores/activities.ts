@@ -30,7 +30,7 @@ export const useActivitiesStore = defineStore('activities', () => {
 
   async function fetchActivities(product?: string) {
     const productStore = useProductStore()
-    const p = product || productStore.activeProduct.name
+    const p = product || productStore.activeProductName
     loading.value = true
     try {
       const res = await fetch(`${API_BASE}/activities?product=${encodeURIComponent(p)}&limit=50`)

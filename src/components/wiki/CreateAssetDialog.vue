@@ -69,7 +69,7 @@ const typeGroups = computed(() => {
       }
       groups[at.category] = { label: labels[at.category] || at.category, types: [] }
     }
-    groups[at.category].types.push(at)
+    groups[at.category]!.types.push(at)
   }
   return Object.values(groups)
 })
@@ -99,6 +99,10 @@ function selectOwner(user: UserResult) {
   ownerName.value = user.name
   showOwnerDropdown.value = false
   ownerSearchQuery.value = ''
+}
+
+function onOwnerBlur() {
+  setTimeout(() => (showOwnerDropdown.value = false), 150)
 }
 
 function clearOwner() {
@@ -137,20 +141,23 @@ watch(open, (val) => {
     ownerName.value = ''
     tags.value = []
     tagInput.value = ''
-  } else {
-    // Ensure types are loaded
-    if (wikiStore.assetTypes.length === 0) {
-      wikiStore.fetchAssetTypes(productStore.activeProduct.name)
+    } else {
+      // Ensure types are loaded
+      const pname = productStore.activeProductName
+      if (wikiStore.assetTypes.length === 0 && pname) {
+        wikiStore.fetchAssetTypes(pname)
+      }
     }
-  }
 })
 
 async function handleSubmit() {
   if (!title.value.trim() || !assetTypeId.value) return
   submitting.value = true
 
+  const pname = productStore.activeProductName
+  if (!pname) { submitting.value = false; return }
   const created = await wikiStore.createAsset({
-    productId: productStore.activeProduct.name,
+    productId: pname,
     assetTypeId: assetTypeId.value,
     title: title.value.trim(),
     description: description.value.trim() || null,
@@ -257,7 +264,7 @@ async function handleSubmit() {
                   placeholder="Search users..."
                   @input="onOwnerInput"
                   @focus="showOwnerDropdown = true; searchOwners(ownerSearchQuery)"
-                  @blur="setTimeout(() => showOwnerDropdown = false, 150)"
+                  @blur="onOwnerBlur"
                 />
               </div>
               <div

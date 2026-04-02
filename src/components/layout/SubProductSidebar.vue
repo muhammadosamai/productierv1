@@ -38,6 +38,11 @@ const favoritesStore = useFavoritesStore()
 const rolesStore = useRolesStore()
 const issuesStore = useIssuesStore()
 
+const hasProducts = computed(() => productStore.products.length > 0)
+const activeProduct = computed(() => productStore.activeProduct)
+const activeProductName = computed(() => activeProduct.value?.name ?? '')
+const activeProductLogo = computed(() => activeProduct.value?.logo ?? '')
+
 const lastActivityTime = computed(() => {
   if (activitiesStore.activities.length === 0) return 'No activity'
   const latest = activitiesStore.activities[0]
@@ -664,13 +669,13 @@ function onIssueCreated() {
     <div class="flex items-center gap-3 px-5 pt-4 pb-3">
       <div class="flex items-center justify-center w-10 h-10 rounded-xl overflow-hidden shrink-0">
         <img
-          :src="productStore.activeProduct.logo"
-          :alt="productStore.activeProduct.name"
+          :src="activeProductLogo"
+          :alt="activeProductName || 'Product'"
           class="w-full h-full object-cover"
         />
       </div>
       <div class="flex-1 min-w-0">
-        <h2 class="text-[15px] font-semibold text-gray-900 truncate">{{ productStore.activeProduct.name }}</h2>
+        <h2 class="text-[15px] font-semibold text-gray-900 truncate">{{ activeProductName || 'No product selected' }}</h2>
         <p class="text-xs text-gray-400 mt-0.5">{{ lastActivityTime }}</p>
       </div>
       <button
@@ -683,7 +688,7 @@ function onIssueCreated() {
     </div>
 
     <!-- Navigation -->
-    <nav class="flex-1 px-4 pb-4">
+    <nav v-if="hasProducts" class="flex-1 px-4 pb-4">
       <!-- Top items (Overview, Team) -->
       <div class="border-t border-gray-100 mx-3 mt-3 mb-5"></div>
       <ul class="space-y-1 mb-2">
@@ -961,6 +966,10 @@ function onIssueCreated() {
         </ul>
       </div>
     </nav>
+
+    <div v-else class="flex-1 px-6 py-6 text-center text-sm text-gray-500">
+      No products yet. Create or join a product to see sidebar sections.
+    </div>
 
     <!-- Create Initiative Dialog -->
     <CreateInitiativeDialog v-model:open="showCreateDialog" @created="onInitiativeCreated" />

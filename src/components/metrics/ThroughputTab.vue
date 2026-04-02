@@ -103,7 +103,7 @@ watch(() => [props.period, productStore.activeProduct?.name], fetchData, { immed
           </thead>
           <tbody>
             <tr v-for="(a, idx) in data.completedByAssignee" :key="a.userId" class="border-b border-gray-50 hover:bg-gray-50/50">
-              <td class="px-5 py-3 text-gray-400">{{ idx + 1 }}</td>
+              <td class="px-5 py-3 text-gray-400">{{ Number(idx) + 1 }}</td>
               <td class="px-5 py-3">
                 <div class="flex items-center gap-2">
                   <img v-if="a.avatar" :src="a.avatar" class="w-6 h-6 rounded-full object-cover" />

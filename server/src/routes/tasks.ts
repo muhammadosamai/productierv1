@@ -1,12 +1,13 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
-import { tasks, taskComments, taskAttachments, stories, users, deliveries, taskStatusHistory } from '../db/schema'
+import { tasks, taskComments, taskAttachments, stories, users, deliveries, taskStatusHistory, products } from '../db/schema'
 import { randomUUID } from 'crypto'
 import { mkdir } from 'fs/promises'
 import path from 'path'
 import { eq } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
+import { generatePublicIdForProduct } from '../lib/publicIds'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -215,12 +216,20 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     // Auto-transition: if any role is assigned at creation, set status to 'assigned'
     const effectiveStatus = hasAnyRoleAssigned(rest) ? 'assigned' : 'created'
 
+    const product = await db.query.products.findFirst({
+      where: eq(products.name, story.product),
+      columns: { id: true },
+    })
+    const normalizedProductId = product?.id || story.product
+    const publicId = await generatePublicIdForProduct(normalizedProductId)
+
     const [task] = await db.insert(tasks)
       .values({
         ...rest,
         status: rest.status || effectiveStatus,
         storyId,
-        productId: story.product,
+        publicId,
+        productId: normalizedProductId,
         initiativeId: null, // auto-derive later when initiatives have proper FK
         createdByUserId: user.id,
         dueAt: dueAt ? new Date(dueAt) : null,

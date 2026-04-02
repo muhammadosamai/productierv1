@@ -107,7 +107,7 @@ export interface CreateStoryPayload {
   product?: string
   initiative?: string
   delivery?: string
-  owner?: string
+  owner?: string | null
   ownerAvatar?: string | null
   estimate?: string
   acceptanceCriteria?: string

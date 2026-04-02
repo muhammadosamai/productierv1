@@ -1,14 +1,144 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { issues, issueComments, issueAttachments, users } from '../db/schema'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
+import { generatePublicIdForProduct } from '../lib/publicIds'
 import { mkdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+let issueSchemaBootstrapped = false
+
+function optionalUuid(value: string | null | undefined) {
+  if (!value) return null
+  return UUID_REGEX.test(value) ? value : null
+}
+
+async function ensureIssueSchema() {
+  if (issueSchemaBootstrapped) return
+
+  await db.execute(sql`
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_type') THEN
+    CREATE TYPE issue_type AS ENUM ('bug', 'ui_issue', 'performance', 'crash', 'security', 'data_loss', 'other');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_severity') THEN
+    CREATE TYPE issue_severity AS ENUM ('critical', 'major', 'minor', 'trivial');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_status') THEN
+    CREATE TYPE issue_status AS ENUM ('open', 'in_progress', 'resolved', 'closed', 'deferred');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_priority') THEN
+    CREATE TYPE issue_priority AS ENUM ('critical', 'high', 'medium', 'low');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_reproducibility') THEN
+    CREATE TYPE issue_reproducibility AS ENUM ('always', 'sometimes', 'rarely', 'once', 'unable_to_reproduce');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_environment') THEN
+    CREATE TYPE issue_environment AS ENUM ('production', 'staging', 'development', 'testing');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_browser') THEN
+    CREATE TYPE issue_browser AS ENUM ('chrome', 'firefox', 'safari', 'edge', 'other');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_os') THEN
+    CREATE TYPE issue_os AS ENUM ('windows', 'macos', 'linux', 'ios', 'android', 'other');
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS issues (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  public_id varchar(32),
+  title varchar(255) NOT NULL,
+  description text,
+  type issue_type NOT NULL DEFAULT 'bug',
+  module varchar(255),
+  steps_to_reproduce text,
+  expected_behavior text,
+  actual_behavior text,
+  reproducibility issue_reproducibility,
+  severity issue_severity NOT NULL DEFAULT 'minor',
+  priority issue_priority NOT NULL DEFAULT 'medium',
+  status issue_status NOT NULL DEFAULT 'open',
+  assigned_to_user_id uuid,
+  reported_by_user_id uuid NOT NULL,
+  app_version varchar(50),
+  environment issue_environment,
+  browser issue_browser,
+  operating_system issue_os,
+  product varchar(255) NOT NULL,
+  story_id uuid,
+  task_id uuid,
+  test_cycle_id uuid,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS issue_comments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  issue_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  content text NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS issue_attachments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  issue_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  file_name varchar(500) NOT NULL,
+  file_size integer NOT NULL,
+  mime_type varchar(255) NOT NULL,
+  file_path varchar(1000) NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'issue_comments_issue_id_issues_id_fk') THEN
+    ALTER TABLE issue_comments
+      ADD CONSTRAINT issue_comments_issue_id_issues_id_fk
+      FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'issue_comments_user_id_users_id_fk') THEN
+    ALTER TABLE issue_comments
+      ADD CONSTRAINT issue_comments_user_id_users_id_fk
+      FOREIGN KEY (user_id) REFERENCES users(id);
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'issue_attachments_issue_id_issues_id_fk') THEN
+    ALTER TABLE issue_attachments
+      ADD CONSTRAINT issue_attachments_issue_id_issues_id_fk
+      FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'issue_attachments_user_id_users_id_fk') THEN
+    ALTER TABLE issue_attachments
+      ADD CONSTRAINT issue_attachments_user_id_users_id_fk
+      FOREIGN KEY (user_id) REFERENCES users(id);
+  END IF;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS issues_public_id_unique
+  ON issues(public_id)
+  WHERE public_id IS NOT NULL;
+`)
+
+  issueSchemaBootstrapped = true
+}
 
 const issueBody = t.Object({
   title: t.String({ minLength: 1 }),
@@ -65,6 +195,9 @@ async function getUserFromHeader(jwtVerify: any, headers: Record<string, string 
 
 export const issueRoutes = new Elysia({ prefix: '/api/issues' })
   .use(jwt({ name: 'jwt', secret: JWT_SECRET }))
+  .onBeforeHandle(async () => {
+    await ensureIssueSchema()
+  })
 
   // GET /api/issues?product=X&testCycleId=X
   .get('/', async ({ query }) => {
@@ -91,7 +224,15 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
+    const product = body.product || 'Product'
+    const publicId = await generatePublicIdForProduct(product)
+    const assignedToUserId = optionalUuid(body.assignedToUserId)
+    const storyId = optionalUuid(body.storyId)
+    const taskId = optionalUuid(body.taskId)
+    const testCycleId = optionalUuid(body.testCycleId)
+
     const [issue] = await db.insert(issues).values({
+      publicId,
       title: body.title,
       description: body.description,
       type: body.type || 'bug',
@@ -103,16 +244,16 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       severity: body.severity || 'minor',
       priority: body.priority || 'medium',
       status: body.status || 'open',
-      assignedToUserId: body.assignedToUserId,
+      assignedToUserId,
       reportedByUserId: user.id,
       appVersion: body.appVersion,
       environment: body.environment,
       browser: body.browser,
       operatingSystem: body.operatingSystem,
-      product: body.product || 'Product',
-      storyId: body.storyId,
-      taskId: body.taskId,
-      testCycleId: body.testCycleId,
+      product,
+      storyId,
+      taskId,
+      testCycleId,
     }).returning()
 
     logActivity({
@@ -161,7 +302,13 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const existing = await db.query.issues.findFirst({ where: eq(issues.id, id) })
     if (!existing) { set.status = 404; return { error: 'Issue not found' } }
 
-    const [updated] = await db.update(issues).set(body).where(eq(issues.id, id)).returning()
+    const updatePayload: Record<string, any> = { ...body }
+    if ('assignedToUserId' in updatePayload) updatePayload.assignedToUserId = optionalUuid(updatePayload.assignedToUserId)
+    if ('storyId' in updatePayload) updatePayload.storyId = optionalUuid(updatePayload.storyId)
+    if ('taskId' in updatePayload) updatePayload.taskId = optionalUuid(updatePayload.taskId)
+    if ('testCycleId' in updatePayload) updatePayload.testCycleId = optionalUuid(updatePayload.testCycleId)
+
+    const [updated] = await db.update(issues).set(updatePayload).where(eq(issues.id, id)).returning()
 
     const changes = computeChanges(existing, updated!, [
       'title', 'description', 'type', 'severity', 'priority', 'status',

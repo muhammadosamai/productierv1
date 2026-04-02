@@ -23,5 +23,16 @@ services:
     ports:
       - "3002:3001"
 
+  frontend:
+    build:
+      context: ..
+      dockerfile: Dockerfile.frontend
+    container_name: productier-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
 volumes:
   productier_pgdata:

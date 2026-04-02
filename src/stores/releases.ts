@@ -22,7 +22,7 @@ export const useReleasesStore = defineStore('releases', () => {
   const releaseCount = computed(() => releases.value.length)
 
   async function fetchReleases(productName?: string) {
-    const product = productName || useProductStore().activeProduct.name
+    const product = productName || useProductStore().activeProductName
     loading.value = true
     error.value = null
     try {

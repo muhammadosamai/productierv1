@@ -128,7 +128,7 @@ async function saveAll() {
 
   try {
     for (const role of dirtyRoles.value) {
-      await rolesStore.updateRolePermissions(role, localPermissions.value[role])
+      await rolesStore.updateRolePermissions(role, localPermissions.value[role] as Record<string, PagePermission>)
     }
     // Sync local state with server
     for (const role of configurableRoles) {
@@ -149,7 +149,7 @@ async function saveAll() {
 }
 
 // Selected role for viewing permissions
-const selectedRoleKey = ref<string>(configurableRoles[0].key)
+const selectedRoleKey = ref<string>(configurableRoles[0]?.key ?? '')
 
 const selectedRoleLabel = computed(() =>
   configurableRoles.find(r => r.key === selectedRoleKey.value)?.label || ''

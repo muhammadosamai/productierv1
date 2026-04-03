@@ -1,0 +1,1 @@
+ALTER TABLE "tasks" ALTER COLUMN "estimate_value" SET DATA TYPE double precision;

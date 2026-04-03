@@ -187,12 +187,6 @@ watch(open, (val) => {
 async function handleSubmit() {
   if (!name.value.trim()) return
 
-  // Check for duplicate name
-  if (productStore.products.some(p => p.name.toLowerCase() === name.value.trim().toLowerCase())) {
-    error.value = 'A product with this name already exists'
-    return
-  }
-
   error.value = ''
   submitting.value = true
 
@@ -202,7 +196,7 @@ async function handleSubmit() {
     logoUrl = await uploadLogo()
   }
 
-  const created = await productStore.createProduct({
+  const result = await productStore.createProduct({
     name: name.value.trim(),
     logo: logoUrl,
     description: description.value.trim() || null,
@@ -211,11 +205,13 @@ async function handleSubmit() {
 
   submitting.value = false
 
-  if (created) {
-    emit('created', created.name)
+  if (result && 'error' in result) {
+    error.value = result.error as string
+  } else if (result) {
+    emit('created', (result as any).name)
     open.value = false
   } else {
-    error.value = 'Failed to create product. The name may already be taken.'
+    error.value = 'Failed to create product. Please try again.'
   }
 }
 </script>

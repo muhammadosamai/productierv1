@@ -111,7 +111,7 @@ export const useProductStore = defineStore('products', () => {
     logo?: string | null
     description?: string | null
     members?: { userId: string; role?: string }[]
-  }): Promise<Product | null> {
+  }): Promise<Product | { error: string } | null> {
     const authStore = useAuthStore()
     try {
       const res = await fetch('/api/products', {
@@ -122,17 +122,17 @@ export const useProductStore = defineStore('products', () => {
         },
         body: JSON.stringify(data),
       })
-      if (!res.ok) return null
+      const body = await res.json()
+      if (!res.ok) return { error: body.error || 'Failed to create product' }
 
-      const created = await res.json()
       const newProduct: Product = {
-        id: created.id,
-        name: created.name,
-        logo: created.logo || '',
+        id: body.id,
+        name: body.name,
+        logo: body.logo || '',
         members: (data.members?.length || 0) + 1,
         dotColor: '',
-        description: created.description,
-        createdByUserId: created.createdByUserId,
+        description: body.description,
+        createdByUserId: body.createdByUserId,
       }
       products.value.push(newProduct)
       activeProductName.value = newProduct.name

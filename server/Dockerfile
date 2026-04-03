@@ -1,6 +1,6 @@
 FROM oven/bun:1 AS base
 WORKDIR /app
-
+  
 # Install curl for healthcheck (oven/bun:1 is Debian-based); done early for layer caching
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 

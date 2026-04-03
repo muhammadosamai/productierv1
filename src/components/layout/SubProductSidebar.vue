@@ -483,7 +483,7 @@ onMounted(() => {
   testCyclesStore.fetchCycles()
   issuesStore.fetchIssues(productStore.activeProduct?.name)
   fetchTeamMembers()
-  favoritesStore.fetchFavorites(productStore.activeProduct?.name)
+  favoritesStore.fetchFavorites(productStore.activeProduct?.name || '')
   document.addEventListener('click', onDocumentClick)
 })
 
@@ -496,7 +496,7 @@ watch(() => productStore.activeIndex, () => {
   testCyclesStore.fetchCycles()
   issuesStore.fetchIssues(productStore.activeProduct?.name)
   fetchTeamMembers()
-  favoritesStore.fetchFavorites(productStore.activeProduct?.name)
+  favoritesStore.fetchFavorites(productStore.activeProduct?.name || '')
   // Navigate to overview if on a detail page (it may belong to another product)
   if (route.params.id && (route.path.startsWith('/initiatives/') || route.path.startsWith('/deliveries/') || route.path.startsWith('/releases/'))) {
     router.push('/metrics')

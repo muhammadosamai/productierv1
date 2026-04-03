@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: stage-productier
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sarimalavi
+      POSTGRES_DB: productier
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - productier_pgdata:/var/lib/postgresql/data
+
+  backend:
+    build: .
+    container_name: stage-productier-backend
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgresql://sarimalavi@postgres:5432/productier
+    ports:
+      - "3010:3001"
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: Dockerfile.frontend
+    container_name: stage-productier-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+volumes:
+  productier_pgdata:

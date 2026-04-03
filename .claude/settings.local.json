@@ -196,7 +196,8 @@
       "Bash(psql -d productier -c \"SELECT id, name, email, role FROM users LIMIT 10;\")",
       "Bash(psql -d productier -c \"SELECT id, name, email, role FROM users ORDER BY created_at DESC LIMIT 5;\")",
       "Bash(psql -d productier -c \"UPDATE users SET role = ''super_admin'' WHERE email = ''sarim@productier.com'' RETURNING name, email, role;\")",
-      "Bash(grep -E \"\\\\.\\(ts|js\\)$\")"
+      "Bash(grep -E \"\\\\.\\(ts|js\\)$\")",
+      "Bash(ls /home/muhammed/Projects/productierv1/Dockerfile*)"
     ]
   }
 }

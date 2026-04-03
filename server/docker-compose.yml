@@ -7,10 +7,12 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: sarimalavi
-      POSTGRES_DB: productier
+      POSTGRES_DB: productier_staging
       POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - productier_pgdata:/var/lib/postgresql/data
+    ports:
+      - "6050:6050"
 
   backend:
     build: .
@@ -19,9 +21,9 @@ services:
     depends_on:
       - postgres
     environment:
-      DATABASE_URL: postgresql://sarimalavi@postgres:5432/productier
+      DATABASE_URL: postgresql://sarimalavi@postgres:6050/productier_staging
     ports:
-      - "3010:3001"
+      - "3010:3010"
 
   frontend:
     build:
@@ -32,7 +34,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "3000:80"
+      - "3030:80"
 
 volumes:
   productier_pgdata:

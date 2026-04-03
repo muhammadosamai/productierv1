@@ -252,7 +252,7 @@ function handleLogout() {
                   <span :class="getEntityIconBadgeClass(item.entityType)">
                     <component :is="getEntityIcon(item.entityType)" :size="12" />
                   </span>
-                  <span v-if="item.publicId" class="font-medium text-gray-500 mr-1">{{ item.publicId }}</span>
+                  <!-- <span v-if="item.publicId" class="font-medium text-gray-500 mr-1">{{ item.publicId }}</span> -->
                   <span>{{ item.title }}</span>
                 </div>
                 <div class="text-[11px] text-gray-400 truncate">

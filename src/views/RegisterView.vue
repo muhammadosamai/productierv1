@@ -2,12 +2,14 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useProductStore } from '@/stores/products'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Loader2, Eye, EyeOff } from 'lucide-vue-next'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const productStore = useProductStore()
 
 const name = ref('')
 const email = ref('')
@@ -30,6 +32,7 @@ async function handleSubmit() {
 
   const success = await authStore.register(name.value, email.value, password.value)
   if (success) {
+    await productStore.fetchProducts()
     router.push('/')
   }
 }

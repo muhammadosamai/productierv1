@@ -150,7 +150,7 @@ function closeIssuePanel() {
 }
 
 async function onIssueUpdated() {
-  await issuesStore.fetchIssues(productStore.activeProduct.name)
+  await issuesStore.fetchIssues(productStore.activeProduct?.name || '')
   if (selectedIssue.value) {
     const fresh = issuesStore.issues.find(i => i.id === selectedIssue.value!.id)
     if (fresh) {
@@ -160,7 +160,7 @@ async function onIssueUpdated() {
 }
 
 onMounted(async () => {
-  await issuesStore.fetchIssues(productStore.activeProduct.name)
+  await issuesStore.fetchIssues(productStore.activeProduct?.name || '')
   fetchTeamMembers()
   loadUserSettings()
   // Auto-open issue from query param
@@ -171,8 +171,8 @@ onMounted(async () => {
   }
 })
 
-watch(() => productStore.activeProduct.name, () => {
-  issuesStore.fetchIssues(productStore.activeProduct.name)
+watch(() => productStore.activeProduct?.name, () => {
+  issuesStore.fetchIssues(productStore.activeProduct?.name || '')
   fetchTeamMembers()
 })
 
@@ -512,6 +512,7 @@ function onDrop(idx: number) {
   }
   const arr = [...columns.value]
   const [moved] = arr.splice(dragIndex.value, 1)
+  if (!moved) return
   arr.splice(idx, 0, moved)
   columns.value = arr
   dragIndex.value = null
@@ -554,7 +555,7 @@ const issueActivitiesLoading = ref(false)
 async function fetchIssueActivities() {
   issueActivitiesLoading.value = true
   try {
-    const p = productStore.activeProduct.name
+    const p = productStore.activeProduct?.name || ''
     const res = await fetch(`/api/activities?product=${encodeURIComponent(p)}&entityType=issue&limit=50`)
     if (res.ok) {
       issueActivities.value = await res.json()
@@ -1116,7 +1117,7 @@ function formatDate(dateStr: string | null) {
                   @click="startEditing(issue.id, 'title', issue.title, $event)"
                 >
                   <template v-if="isEditing(issue.id, 'title')">
-                    <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProduct.name" />
+                    <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProduct?.name || ''" />
                     <Bug :size="16" class="shrink-0 text-red-500" />
                     <input
                       v-model="editValue"
@@ -1128,7 +1129,7 @@ function formatDate(dateStr: string | null) {
                     />
                   </template>
                   <template v-else>
-                    <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProduct.name" />
+                    <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProduct?.name || ''" />
                     <Bug :size="16" class="shrink-0 text-red-500" />
                     <span class="text-sm font-medium truncate" :class="issue.status === 'closed' ? 'text-gray-400 line-through' : 'text-gray-800'">{{ issue.title }}</span>
                     <ChevronRight v-if="!inlineEditMode" :size="14" class="text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
@@ -1364,7 +1365,7 @@ function formatDate(dateStr: string | null) {
               <!-- Row 1: Bug icon + type badge + severity badge -->
               <div class="flex items-center justify-between mb-3.5">
                 <div class="flex items-center gap-2">
-                  <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProduct.name" />
+                  <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProduct?.name || ''" />
                   <div class="w-9 h-9 rounded-lg bg-red-50 border border-red-100 flex items-center justify-center">
                     <Bug :size="18" class="text-red-500" />
                   </div>
@@ -1439,6 +1440,7 @@ function formatDate(dateStr: string | null) {
     <IssueDetailPanel
       :issue="selectedIssue"
       :open="showIssuePanel"
+      :team-members="teamMembers"
       @close="closeIssuePanel"
       @updated="onIssueUpdated"
     />

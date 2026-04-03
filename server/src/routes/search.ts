@@ -150,11 +150,43 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
     const filters = parseFilters(q)
     const textPattern = filters.text ? `%${filters.text}%` : null
 
-    // Allowed status values per-entity to avoid invalid enum comparisons
-    const storyStatuses = ['backlog', 'drafted', 'initialized', 'in_progress', 'completed', 'archived']
-    const taskStatuses = ['created', 'assigned', 'in_progress', 'in_review', 'done', 'overdue', 'blocked', 'archived']
-    const issueStatuses = ['open', 'in_progress', 'resolved', 'closed', 'deferred']
+    // Valid status values per entity — used to gate which entities are queried
+    // when a status: token is present. If the requested status doesn't exist for
+    // an entity, that entity returns [] rather than ignoring the filter and
+    // returning all results.
+    const storyStatuses      = ['backlog', 'drafted', 'initialized', 'in_progress', 'completed', 'archived']
+    const taskStatuses       = ['created', 'assigned', 'in_progress', 'in_review', 'done', 'overdue', 'blocked', 'archived']
+    const issueStatuses      = ['open', 'in_progress', 'resolved', 'closed', 'deferred']
     const initiativeStatuses = ['planning', 'active', 'paused', 'completed']
+
+    // Valid type values per entity
+    const storyTypes = ['feature', 'bug', 'improvement', 'technical_debt', 'research', 'infrastructure', 'testing', 'documentation']
+    const taskTypes  = ['design', 'development', 'testing', 'review', 'research', 'fix', 'documentation', 'deployment']
+    const issueTypes = ['bug', 'ui_issue', 'performance', 'crash', 'security', 'data_loss', 'other']
+    // Initiatives and wiki have no type field
+
+    // When a status token is present, an entity whose status enum doesn't include
+    // that value should return no results — the user explicitly asked for that status.
+    const statusAppliesToStory      = !filters.status || storyStatuses.includes(filters.status)
+    const statusAppliesToTask       = !filters.status || taskStatuses.includes(filters.status)
+    const statusAppliesToIssue      = !filters.status || issueStatuses.includes(filters.status)
+    const statusAppliesToInitiative = !filters.status || initiativeStatuses.includes(filters.status)
+    // Wiki assets have no meaningful status filter — hide if status token was provided
+    const statusAppliesToWiki       = !filters.status
+
+    // Same gate for type: token — entities without that type return []
+    const typeAppliesToStory      = !filters.type || storyTypes.includes(filters.type)
+    const typeAppliesToTask       = !filters.type || taskTypes.includes(filters.type)
+    const typeAppliesToIssue      = !filters.type || issueTypes.includes(filters.type)
+    // Initiatives and wiki have no type field — exclude them if type: was specified
+    const typeAppliesToInitiative = !filters.type
+    const typeAppliesToWiki       = !filters.type
+
+    const entityAppliesToStory      = statusAppliesToStory      && typeAppliesToStory
+    const entityAppliesToTask       = statusAppliesToTask       && typeAppliesToTask
+    const entityAppliesToIssue      = statusAppliesToIssue      && typeAppliesToIssue
+    const entityAppliesToInitiative = statusAppliesToInitiative && typeAppliesToInitiative
+    const entityAppliesToWiki       = statusAppliesToWiki       && typeAppliesToWiki
 
     const storyConditions: any[] = [inArray(stories.product, allowedProducts)]
     if (textPattern) {
@@ -165,7 +197,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
         )
       )
     }
-    if (filters.status && storyStatuses.includes(filters.status)) storyConditions.push(eq(stories.status, filters.status as any))
+    if (filters.status) storyConditions.push(eq(stories.status, filters.status as any))
     if (filters.type) storyConditions.push(eq(stories.type, filters.type as any))
     if (filters.assigneeMe) storyConditions.push(eq(stories.owner, user.name))
 
@@ -178,7 +210,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
         )
       )
     }
-    if (filters.status && taskStatuses.includes(filters.status)) taskConditions.push(eq(tasks.status, filters.status as any))
+    if (filters.status) taskConditions.push(eq(tasks.status, filters.status as any))
     if (filters.type) taskConditions.push(eq(tasks.type, filters.type as any))
     if (filters.assigneeMe) {
       taskConditions.push(
@@ -199,7 +231,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
         )
       )
     }
-    if (filters.status && issueStatuses.includes(filters.status)) issueConditions.push(eq(issues.status, filters.status as any))
+    if (filters.status) issueConditions.push(eq(issues.status, filters.status as any))
     if (filters.type) issueConditions.push(eq(issues.type, filters.type as any))
     if (filters.assigneeMe) issueConditions.push(eq(issues.assignedToUserId, user.id))
 
@@ -212,7 +244,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
         )
       )
     }
-    if (filters.status && initiativeStatuses.includes(filters.status)) initiativeConditions.push(eq(initiatives.status, filters.status as any))
+    if (filters.status) initiativeConditions.push(eq(initiatives.status, filters.status as any))
     if (filters.assigneeMe) initiativeConditions.push(eq(initiatives.leader, user.name))
 
     const wikiConditions: any[] = [inArray(assets.productId, productScopeForIdColumns)]
@@ -226,7 +258,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
     }
 
     const [storyRows, taskRows, issueRows, initiativeRows, wikiRows] = await Promise.all([
-      safeQueryRows(db.select({
+      entityAppliesToStory ? safeQueryRows(db.select({
         id: stories.id,
         publicId: stories.publicId,
         title: stories.title,
@@ -234,8 +266,8 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
         product: stories.product,
         status: stories.status,
         updatedAt: stories.updatedAt,
-      }).from(stories).where(and(...storyConditions)).limit(limit)),
-      safeQueryRows(db.select({
+      }).from(stories).where(and(...storyConditions)).limit(limit)) : Promise.resolve([]),
+      entityAppliesToTask ? safeQueryRows(db.select({
         id: tasks.id,
         publicId: tasks.publicId,
         title: tasks.title,
@@ -243,8 +275,8 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
         product: tasks.productId,
         status: tasks.status,
         updatedAt: tasks.updatedAt,
-      }).from(tasks).where(and(...taskConditions)).limit(limit)),
-      safeQueryRows(db.select({
+      }).from(tasks).where(and(...taskConditions)).limit(limit)) : Promise.resolve([]),
+      entityAppliesToIssue ? safeQueryRows(db.select({
         id: issues.id,
         publicId: issues.publicId,
         title: issues.title,
@@ -252,8 +284,8 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
         product: issues.product,
         status: issues.status,
         updatedAt: issues.updatedAt,
-      }).from(issues).where(and(...issueConditions)).limit(limit)),
-      safeQueryRows(db.select({
+      }).from(issues).where(and(...issueConditions)).limit(limit)) : Promise.resolve([]),
+      entityAppliesToInitiative ? safeQueryRows(db.select({
         id: initiatives.id,
         publicId: sql<string | null>`NULL`,
         title: initiatives.title,
@@ -261,8 +293,8 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
         product: initiatives.product,
         status: initiatives.status,
         updatedAt: initiatives.updatedAt,
-      }).from(initiatives).where(and(...initiativeConditions)).limit(limit)),
-      safeQueryRows(db.select({
+      }).from(initiatives).where(and(...initiativeConditions)).limit(limit)) : Promise.resolve([]),
+      entityAppliesToWiki ? safeQueryRows(db.select({
         id: assets.id,
         publicId: sql<string | null>`NULL`,
         title: assets.title,
@@ -270,7 +302,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
         product: assets.productId,
         status: assets.status,
         updatedAt: assets.updatedAt,
-      }).from(assets).where(and(...wikiConditions)).limit(limit)),
+      }).from(assets).where(and(...wikiConditions)).limit(limit)) : Promise.resolve([]),
     ])
 
     return {

@@ -217,12 +217,14 @@ const initiativeChildren = computed(() =>
 )
 
 const storyChildren = computed(() =>
-  backlogStore.stories.map(s => ({
-    label: s.title,
-    id: s.id,
-    status: s.status,
-    type: s.type,
-  }))
+  backlogStore.stories
+    .filter(s => s.status !== 'archived')
+    .map(s => ({
+      label: s.title,
+      id: s.id,
+      status: s.status,
+      type: s.type,
+    }))
 )
 
 const issueChildren = computed(() =>

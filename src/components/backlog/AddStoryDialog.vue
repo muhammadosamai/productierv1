@@ -414,7 +414,7 @@ async function handleSubmit(withBreakdown = false) {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-[620px] !overflow-visible">
+    <DialogContent class="sm:max-w-[620px] !overflow-x-hidden flex flex-col max-h-[90dvh]">
       <DialogHeader>
         <DialogTitle>Add Story</DialogTitle>
         <DialogDescription>Create a new story.</DialogDescription>
@@ -424,7 +424,7 @@ async function handleSubmit(withBreakdown = false) {
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
       </button>
 
-      <form @submit.prevent="handleSubmit(false)" class="space-y-4">
+      <form @submit.prevent="handleSubmit(false)" class="space-y-4 overflow-y-auto overflow-x-hidden min-h-0 pr-1">
         <!-- Title (larger) -->
         <div class="space-y-1.5">
           <label class="text-sm font-medium text-gray-700">Title *</label>
@@ -819,28 +819,30 @@ async function handleSubmit(withBreakdown = false) {
           </div>
         </div>
 
-        <DialogFooter class="gap-2">
-          <Button type="button" variant="outline" @click="open = false">Cancel</Button>
-          <Button
-            v-if="!showBreakdown"
-            type="button"
-            variant="outline"
-            :disabled="!title.trim() || submittingWithBreakdown"
-            class="border-[#4857FE] text-[#4857FE] hover:bg-[#4857FE]/5"
-            @click="showBreakdown = true"
-          >
-            <ListTodo :size="14" class="mr-1.5" />
-            Breakdown into Tasks
-          </Button>
-          <Button
-            type="submit"
-            :disabled="!title.trim() || submitting || submittingWithBreakdown"
-            class="bg-[#4857FE] hover:bg-[#3E4BDE]"
-          >
-            {{ submitting ? 'Creating...' : 'Create Story' }}
-          </Button>
-        </DialogFooter>
       </form>
+
+      <DialogFooter class="gap-2 shrink-0">
+        <Button type="button" variant="outline" @click="open = false">Cancel</Button>
+        <Button
+          v-if="!showBreakdown"
+          type="button"
+          variant="outline"
+          :disabled="!title.trim() || submittingWithBreakdown"
+          class="border-[#4857FE] text-[#4857FE] hover:bg-[#4857FE]/5"
+          @click="showBreakdown = true"
+        >
+          <ListTodo :size="14" class="mr-1.5" />
+          Breakdown into Tasks
+        </Button>
+        <Button
+          type="button"
+          :disabled="!title.trim() || submitting || submittingWithBreakdown"
+          class="bg-[#4857FE] hover:bg-[#3E4BDE]"
+          @click="handleSubmit(false)"
+        >
+          {{ submitting ? 'Creating...' : 'Create Story' }}
+        </Button>
+      </DialogFooter>
     </DialogContent>
   </Dialog>
 </template>

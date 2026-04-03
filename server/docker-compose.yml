@@ -11,15 +11,22 @@ services:
       POSTGRES_HOST_AUTH_METHOD: trust   # no password, matches your .env
     volumes:
       - productier_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sarimalavi -d productier"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   backend:
     build: .
     container_name: productier-backend
     restart: unless-stopped
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://sarimalavi@postgres:5432/productier
+      RUN_DB_MIGRATIONS: "true"
     ports:
       - "3002:3001"
 

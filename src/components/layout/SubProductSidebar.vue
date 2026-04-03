@@ -669,10 +669,17 @@ function onIssueCreated() {
     <div class="flex items-center gap-3 px-5 pt-4 pb-3">
       <div class="flex items-center justify-center w-10 h-10 rounded-xl overflow-hidden shrink-0">
         <img
+          v-if="activeProductLogo"
           :src="activeProductLogo"
           :alt="activeProductName || 'Product'"
           class="w-full h-full object-cover"
         />
+        <div
+          v-else
+          class="w-full h-full flex items-center justify-center bg-[#4857FE] text-white text-sm font-semibold"
+        >
+          {{ activeProductName ? activeProductName.charAt(0).toUpperCase() : '?' }}
+        </div>
       </div>
       <div class="flex-1 min-w-0">
         <h2 class="text-[15px] font-semibold text-gray-900 truncate">{{ activeProductName || 'No product selected' }}</h2>

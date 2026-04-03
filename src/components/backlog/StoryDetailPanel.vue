@@ -385,8 +385,8 @@ async function clearOwner() {
   showOwnerDropdown.value = false
   saving.value = true
   try {
-    const payload: Partial<CreateStoryPayload> = { owner: null, ownerAvatar: null }
-    await backlogStore.updateStory(props.story!.id, payload)
+    const payload: Partial<Story> = { owner: null, ownerAvatar: null }
+    await backlogStore.updateStory(props.story!.id, payload as any)
     emit('updated')
   } catch {}
   finally {

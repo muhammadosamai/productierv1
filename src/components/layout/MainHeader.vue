@@ -278,23 +278,38 @@ function handleLogout() {
       </button>
 
       <!-- Dark mode toggle -->
-      <button class="flex items-center justify-center w-8 h-8 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors">
-        <Moon :size="18" />
-      </button>
+      <div class="relative group">
+        <button class="flex items-center justify-center w-8 h-8 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors">
+          <Moon :size="18" />
+        </button>
+        <span class="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 whitespace-nowrap rounded-md bg-gray-800 px-2 py-1 text-[11px] text-white opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+          Coming soon
+        </span>
+      </div>
 
       <!-- Divider -->
       <div class="w-px h-6 bg-gray-200 mx-1"></div>
 
       <!-- Help -->
-      <button class="flex items-center justify-center w-8 h-8 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors">
-        <HelpCircle :size="18" />
-      </button>
+      <div class="relative group">
+        <button class="flex items-center justify-center w-8 h-8 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors">
+          <HelpCircle :size="18" />
+        </button>
+        <span class="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 whitespace-nowrap rounded-md bg-gray-800 px-2 py-1 text-[11px] text-white opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+          Coming soon
+        </span>
+      </div>
 
       <!-- Notifications -->
-      <button class="relative flex items-center justify-center w-8 h-8 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors">
-        <Bell :size="18" />
-        <span class="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
-      </button>
+      <div class="relative group">
+        <button class="relative flex items-center justify-center w-8 h-8 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors">
+          <Bell :size="18" />
+          <span class="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
+        </button>
+        <span class="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 whitespace-nowrap rounded-md bg-gray-800 px-2 py-1 text-[11px] text-white opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+          Coming soon
+        </span>
+      </div>
 
       <!-- Divider -->
       <div class="w-px h-6 bg-gray-200 mx-1"></div>

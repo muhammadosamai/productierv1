@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, varchar, timestamp, date, pgEnum, json, unique, integer, boolean } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, varchar, timestamp, date, pgEnum, json, unique, integer, boolean, doublePrecision } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 
 // Enums (PG enum names kept unchanged for DB compatibility)
@@ -207,7 +207,7 @@ export const tasks = pgTable('tasks', {
   assigneeUserIds: uuid('assignee_user_ids').array(),
   reviewerUserIds: uuid('reviewer_user_ids').array(),
   createdByUserId: uuid('created_by_user_id').notNull().references(() => users.id),
-  estimateValue: integer('estimate_value'),
+  estimateValue: doublePrecision('estimate_value'),
   dependent: uuid('dependent').array(),
   blockedReason: text('blocked_reason'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

@@ -1,15 +1,27 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { stories, storyComments, storyAttachments, users } from '../db/schema'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
-import { generatePublicIdForProduct } from '../lib/publicIds'
 import { mkdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
+
+// Drop the non-partial unique constraint that blocks multiple NULL public_ids.
+let storySchemaBootstrapped = false
+async function bootstrapStorySchema() {
+  if (storySchemaBootstrapped) return
+  try {
+    await db.execute(sql`
+      ALTER TABLE backlog_items
+        DROP CONSTRAINT IF EXISTS backlog_items_public_id_unique;
+    `)
+  } catch { /* ignore if constraint doesn't exist */ }
+  storySchemaBootstrapped = true
+}
 
 const storyBody = t.Object({
   title: t.String({ minLength: 1 }),
@@ -60,13 +72,12 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
 
   // POST /api/stories
   .post('/', async ({ body, jwt, headers }) => {
+    await bootstrapStorySchema()
     const product = body.product || 'Product'
 
-    const publicId = await generatePublicIdForProduct(product)
     const [story] = await db.insert(stories).values({
       ...body,
       product,
-      publicId,
     }).returning()
 
     if (!story) {

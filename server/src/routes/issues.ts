@@ -4,7 +4,6 @@ import { issues, issueComments, issueAttachments, users } from '../db/schema'
 import { eq, sql } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
-import { generatePublicIdForProduct } from '../lib/publicIds'
 import { mkdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
@@ -232,9 +231,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
 
     let issue: typeof issues.$inferSelect | null = null
 
-    const publicId = await generatePublicIdForProduct(product)
     const [inserted] = await db.insert(issues).values({
-      publicId,
       title: body.title,
       description: body.description,
       type: body.type || 'bug',

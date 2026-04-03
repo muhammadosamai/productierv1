@@ -70,12 +70,24 @@ interface TeamUser {
 const teamMembers = ref<TeamUser[]>([])
 
 async function fetchTeamMembers() {
+  const productName = productStore.activeProduct?.name
+  if (!productName) {
+    teamMembers.value = []
+    return
+  }
   try {
-    const res = await fetch(`/api/auth/users?q=`, {
+    const res = await fetch(`/api/products/${encodeURIComponent(productName)}/members`, {
       headers: { Authorization: `Bearer ${authStore.token}` },
     })
     if (res.ok) {
-      teamMembers.value = await res.json()
+      const data = await res.json()
+      teamMembers.value = data.map((m: any) => ({
+        id: m.userId,
+        name: m.userName,
+        email: m.userEmail,
+        role: m.userRole,
+        avatar: m.userAvatar,
+      }))
     }
   } catch {
     teamMembers.value = []
@@ -205,12 +217,14 @@ const initiativeChildren = computed(() =>
 )
 
 const storyChildren = computed(() =>
-  backlogStore.stories.map(s => ({
-    label: s.title,
-    id: s.id,
-    status: s.status,
-    type: s.type,
-  }))
+  backlogStore.stories
+    .filter(s => s.status !== 'archived')
+    .map(s => ({
+      label: s.title,
+      id: s.id,
+      status: s.status,
+      type: s.type,
+    }))
 )
 
 const issueChildren = computed(() =>

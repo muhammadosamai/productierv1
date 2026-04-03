@@ -287,7 +287,7 @@ async function submit() {
 
         <DialogFooter class="pt-2">
           <Button type="button" variant="outline" @click="open = false">Cancel</Button>
-          <Button type="submit" :disabled="!title.trim() || submitting">
+          <Button type="submit" :disabled="!title.trim() || submitting" class="bg-[#4857FE] hover:bg-[#3E4BDE]">
             <Loader2 v-if="submitting" :size="14" class="animate-spin mr-2" />
             Create Release
           </Button>

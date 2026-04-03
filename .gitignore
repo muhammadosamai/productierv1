@@ -41,4 +41,5 @@ __screenshots__/
 # Server
 server/node_modules
 server/.env
-server/drizzle/
+# server/drizzle/ — migration files must be versioned and deployed
+

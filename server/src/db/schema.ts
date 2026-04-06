@@ -237,6 +237,27 @@ export const taskAttachments = pgTable('task_attachments', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+export const taskSubtasks = pgTable('task_subtasks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  parentTaskId: uuid('parent_task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  title: varchar('title', { length: 255 }).notNull(),
+  description: text('description'),
+  status: taskStatusEnum('status').notNull().default('created'),
+  priority: taskPriorityEnum('priority').notNull().default('medium'),
+  type: taskTypeEnum('type'),
+  assigneeUserIds: uuid('assignee_user_ids').array(),
+  estimateValue: doublePrecision('estimate_value'),
+  dependent: uuid('dependent').array(),
+  blockedReason: text('blocked_reason'),
+  dueAt: timestamp('due_at', { withTimezone: true }),
+  deliveryId: uuid('delivery_id').references(() => deliveries.id),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+})
+
 export const initiatives = pgTable('initiatives', {
   id: uuid('id').primaryKey().defaultRandom(),
   title: varchar('title', { length: 255 }).notNull(),
@@ -593,6 +614,18 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   }),
   comments: many(taskComments),
   attachments: many(taskAttachments),
+  subtasks: many(taskSubtasks),
+}))
+
+export const taskSubtasksRelations = relations(taskSubtasks, ({ one }) => ({
+  parentTask: one(tasks, {
+    fields: [taskSubtasks.parentTaskId],
+    references: [tasks.id],
+  }),
+  delivery: one(deliveries, {
+    fields: [taskSubtasks.deliveryId],
+    references: [deliveries.id],
+  }),
 }))
 
 export const taskAttachmentsRelations = relations(taskAttachments, ({ one }) => ({
@@ -623,6 +656,7 @@ export const deliveriesRelations = relations(deliveries, ({ one, many }) => ({
     references: [users.id],
   }),
   tasks: many(tasks),
+  taskSubtasks: many(taskSubtasks),
   deliveryInitiatives: many(deliveryInitiatives),
 }))
 
@@ -975,6 +1009,8 @@ export type UserSetting = typeof userSettings.$inferSelect
 export type NewUserSetting = typeof userSettings.$inferInsert
 export type TaskAttachment = typeof taskAttachments.$inferSelect
 export type NewTaskAttachment = typeof taskAttachments.$inferInsert
+export type TaskSubtaskRecord = typeof taskSubtasks.$inferSelect
+export type NewTaskSubtask = typeof taskSubtasks.$inferInsert
 export type ProductRecord = typeof products.$inferSelect
 export type NewProduct = typeof products.$inferInsert
 export type ProductCounterRecord = typeof productCounters.$inferSelect

@@ -1,6 +1,6 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
-import { tasks, taskComments, taskAttachments, stories, users, deliveries, taskStatusHistory, products } from '../db/schema'
+import { tasks, taskComments, taskAttachments, taskSubtasks, stories, users, deliveries, taskStatusHistory, products } from '../db/schema'
 import { randomUUID } from 'crypto'
 import { mkdir } from 'fs/promises'
 import path from 'path'
@@ -47,6 +47,79 @@ const taskBody = t.Object({
   deliveryId: t.Optional(t.Nullable(t.String())),
   dueAt: t.Optional(t.Nullable(t.String())),
 })
+
+const taskStatusLiterals = [
+  t.Literal('created'), t.Literal('assigned'), t.Literal('in_progress'),
+  t.Literal('in_review'), t.Literal('done'), t.Literal('overdue'), t.Literal('blocked'),
+  t.Literal('archived'),
+]
+
+const taskPriorityLiterals = [
+  t.Literal('low'), t.Literal('medium'), t.Literal('high'),
+]
+
+const taskTypeLiterals = [
+  t.Literal('design'), t.Literal('development'), t.Literal('testing'),
+  t.Literal('review'), t.Literal('research'), t.Literal('fix'),
+  t.Literal('documentation'), t.Literal('deployment'),
+]
+
+const subtaskCreateInput = t.Object({
+  title: t.String({ minLength: 1 }),
+  description: t.Optional(t.Nullable(t.String())),
+  status: t.Optional(t.Union(taskStatusLiterals)),
+  priority: t.Optional(t.Union(taskPriorityLiterals)),
+  type: t.Optional(t.Nullable(t.Union(taskTypeLiterals))),
+  assigneeUserIds: t.Optional(t.Nullable(t.Array(t.String()))),
+  estimateValue: t.Optional(t.Nullable(t.Number())),
+  dependent: t.Optional(t.Nullable(t.Array(t.String()))),
+  blockedReason: t.Optional(t.Nullable(t.String())),
+  deliveryId: t.Optional(t.Nullable(t.String())),
+  dueAt: t.Optional(t.Nullable(t.String())),
+  sortOrder: t.Optional(t.Number()),
+})
+
+const createTaskBody = t.Intersect([
+  taskBody,
+  t.Object({
+    subtasks: t.Optional(t.Array(subtaskCreateInput)),
+  }),
+])
+
+const subtaskUpdateBody = t.Partial(t.Object({
+  title: t.String({ minLength: 1 }),
+  description: t.Nullable(t.String()),
+  status: t.Union(taskStatusLiterals),
+  priority: t.Union(taskPriorityLiterals),
+  type: t.Nullable(t.Union(taskTypeLiterals)),
+  assigneeUserIds: t.Nullable(t.Array(t.String())),
+  estimateValue: t.Nullable(t.Number()),
+  dependent: t.Nullable(t.Array(t.String())),
+  blockedReason: t.Nullable(t.String()),
+  deliveryId: t.Nullable(t.String()),
+  dueAt: t.Nullable(t.String()),
+  sortOrder: t.Number(),
+}))
+
+async function fetchTaskWithSubtasks(taskId: string) {
+  return db.query.tasks.findFirst({
+    where: eq(tasks.id, taskId),
+    with: {
+      subtasks: {
+        orderBy: (s, { asc }) => [asc(s.sortOrder), asc(s.createdAt)],
+        with: {
+          delivery: { columns: { id: true, title: true } },
+        },
+      },
+    },
+  })
+}
+
+function effectiveSubtaskStatus(input: { status?: string; assigneeUserIds?: string[] | null }) {
+  if (input.status) return input.status
+  const ids = input.assigneeUserIds
+  return ids && ids.length > 0 ? 'assigned' : 'created'
+}
 
 /** Check if a task has any role assigned (owner, assignee, or reviewer) */
 function hasAnyRoleAssigned(task: Record<string, any>): boolean {
@@ -197,7 +270,16 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     return db.query.tasks.findMany({
       where: eq(tasks.storyId, storyId),
       orderBy: (t, { asc }) => [asc(t.createdAt)],
-      with: { comments: { with: { user: true } }, createdByUser: true },
+      with: {
+        comments: { with: { user: true } },
+        createdByUser: true,
+        subtasks: {
+          orderBy: (s, { asc }) => [asc(s.sortOrder), asc(s.createdAt)],
+          with: {
+            delivery: { columns: { id: true, title: true } },
+          },
+        },
+      },
     })
   })
 
@@ -211,7 +293,7 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     })
     if (!story) { set.status = 404; return { error: 'Story not found' } }
 
-    const { dueAt, ...rest } = body
+    const { dueAt, subtasks: subtasksPayload, ...rest } = body
 
     // Auto-transition: if any role is assigned at creation, set status to 'assigned'
     const effectiveStatus = hasAnyRoleAssigned(rest) ? 'assigned' : 'created'
@@ -271,8 +353,31 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     // Auto-compute story status based on child tasks
     await recomputeStoryStatus(storyId)
 
-    return task
-  }, { body: taskBody })
+    if (subtasksPayload && subtasksPayload.length > 0) {
+      for (let i = 0; i < subtasksPayload.length; i++) {
+        const st = subtasksPayload[i]
+        const subStatus = effectiveSubtaskStatus({ status: st.status, assigneeUserIds: st.assigneeUserIds }) as any
+        await db.insert(taskSubtasks).values({
+          parentTaskId: task.id,
+          title: st.title,
+          description: st.description ?? null,
+          status: subStatus,
+          priority: (st.priority ?? 'medium') as any,
+          type: st.type ?? null,
+          assigneeUserIds: st.assigneeUserIds ?? null,
+          estimateValue: st.estimateValue ?? null,
+          dependent: st.dependent ?? null,
+          blockedReason: st.blockedReason ?? null,
+          deliveryId: st.deliveryId ?? null,
+          dueAt: st.dueAt ? new Date(st.dueAt) : null,
+          sortOrder: st.sortOrder ?? i,
+        })
+      }
+    }
+
+    const full = await fetchTaskWithSubtasks(task.id)
+    return full || task
+  }, { body: createTaskBody })
 
   // PUT /api/tasks/:id
   .put('/:id', async ({ params: { id }, body, set, jwt: jwtInstance, headers }) => {
@@ -434,6 +539,120 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     // Auto-compute story status based on remaining child tasks
     await recomputeStoryStatus(deleted.storyId)
 
+    return { success: true }
+  })
+
+  // POST /api/tasks/:id/subtasks
+  .post('/:id/subtasks', async ({ params: { id }, body, set, jwt: jwtInstance, headers }) => {
+    const user = await getUserFromHeader(jwtInstance.verify, headers)
+    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+
+    const parent = await db.query.tasks.findFirst({ where: eq(tasks.id, id) })
+    if (!parent) { set.status = 404; return { error: 'Task not found' } }
+
+    const siblings = await db.query.taskSubtasks.findMany({
+      where: eq(taskSubtasks.parentTaskId, id),
+      columns: { sortOrder: true },
+    })
+    const defaultSort = siblings.length ? Math.max(...siblings.map(s => s.sortOrder)) + 1 : 0
+
+    const [created] = await db.insert(taskSubtasks)
+      .values({
+        parentTaskId: id,
+        title: body.title,
+        description: body.description ?? null,
+        status: effectiveSubtaskStatus({ status: body.status, assigneeUserIds: body.assigneeUserIds }) as any,
+        priority: (body.priority ?? 'medium') as any,
+        type: body.type ?? null,
+        assigneeUserIds: body.assigneeUserIds ?? null,
+        estimateValue: body.estimateValue ?? null,
+        dependent: body.dependent ?? null,
+        blockedReason: body.blockedReason ?? null,
+        deliveryId: body.deliveryId ?? null,
+        dueAt: body.dueAt ? new Date(body.dueAt) : null,
+        sortOrder: body.sortOrder ?? defaultSort,
+      })
+      .returning()
+
+    return db.query.taskSubtasks.findFirst({
+      where: eq(taskSubtasks.id, created!.id),
+      with: {
+        delivery: { columns: { id: true, title: true } },
+      },
+    })
+  }, { body: subtaskCreateInput })
+
+  // PUT /api/tasks/:id/subtasks/:subtaskId
+  .put('/:id/subtasks/:subtaskId', async ({ params: { id, subtaskId }, body, set, jwt: jwtInstance, headers }) => {
+    const user = await getUserFromHeader(jwtInstance.verify, headers)
+    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+
+    const existing = await db.query.taskSubtasks.findFirst({ where: eq(taskSubtasks.id, subtaskId) })
+    if (!existing || existing.parentTaskId !== id) {
+      set.status = 404
+      return { error: 'Subtask not found' }
+    }
+
+    const updatePayload: Record<string, any> = { updatedAt: new Date() }
+    if (body.title !== undefined) updatePayload.title = body.title
+    if (body.description !== undefined) updatePayload.description = body.description
+    if (body.priority !== undefined) updatePayload.priority = body.priority
+    if (body.type !== undefined) updatePayload.type = body.type
+    if (body.sortOrder !== undefined) updatePayload.sortOrder = body.sortOrder
+    if (body.assigneeUserIds !== undefined) updatePayload.assigneeUserIds = body.assigneeUserIds
+    if (body.estimateValue !== undefined) updatePayload.estimateValue = body.estimateValue
+    if (body.dependent !== undefined) updatePayload.dependent = body.dependent
+    if (body.blockedReason !== undefined) updatePayload.blockedReason = body.blockedReason
+    if (body.deliveryId !== undefined) updatePayload.deliveryId = body.deliveryId
+    if (body.dueAt !== undefined) updatePayload.dueAt = body.dueAt ? new Date(body.dueAt) : null
+
+    if (body.status !== undefined) {
+      updatePayload.status = body.status
+    } else if (body.assigneeUserIds !== undefined) {
+      const nextIds = body.assigneeUserIds
+      const hasNext = nextIds && nextIds.length > 0
+      if (existing.status === 'created' && hasNext) {
+        updatePayload.status = 'assigned'
+      } else if (existing.status === 'assigned' && !hasNext) {
+        updatePayload.status = 'created'
+      }
+    }
+
+    if (body.status === 'in_progress' && existing.status !== 'in_progress') {
+      updatePayload.startedAt = new Date()
+    }
+    if (body.status === 'done' && existing.status !== 'done') {
+      updatePayload.completedAt = new Date()
+    }
+    if (body.status && body.status !== 'done' && existing.status === 'done') {
+      updatePayload.completedAt = null
+    }
+
+    const [updated] = await db.update(taskSubtasks)
+      .set(updatePayload)
+      .where(eq(taskSubtasks.id, subtaskId))
+      .returning()
+
+    return db.query.taskSubtasks.findFirst({
+      where: eq(taskSubtasks.id, updated!.id),
+      with: {
+        delivery: { columns: { id: true, title: true } },
+      },
+    })
+  }, { body: subtaskUpdateBody })
+
+  // DELETE /api/tasks/:id/subtasks/:subtaskId
+  .delete('/:id/subtasks/:subtaskId', async ({ params: { id, subtaskId }, set, jwt: jwtInstance, headers }) => {
+    const user = await getUserFromHeader(jwtInstance.verify, headers)
+    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+
+    const existing = await db.query.taskSubtasks.findFirst({ where: eq(taskSubtasks.id, subtaskId) })
+    if (!existing || existing.parentTaskId !== id) {
+      set.status = 404
+      return { error: 'Subtask not found' }
+    }
+
+    await db.delete(taskSubtasks).where(eq(taskSubtasks.id, subtaskId))
     return { success: true }
   })
 

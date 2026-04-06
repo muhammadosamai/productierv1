@@ -15,7 +15,8 @@ import { useRouter } from 'vue-router'
 import { useBacklogStore } from '@/stores/backlog'
 import TaskStatusIcon from '@/components/shared/TaskStatusIcon.vue'
 import { useAuthStore } from '@/stores/auth'
-import type { Task, TaskStatus, TaskType, TaskPriority, TaskComment, TaskAttachment } from '@/types/backlog'
+import type { Task, TaskSubtask, TaskStatus, TaskType, TaskPriority, TaskComment, TaskAttachment } from '@/types/backlog'
+import SubtaskDetailDialog from '@/components/delivery/SubtaskDetailDialog.vue'
 
 interface TeamUser {
   id: string
@@ -244,6 +245,51 @@ function closeAllDropdowns() {
   ownerSearch.value = ''
   reviewerSearch.value = ''
   storySearchQuery.value = ''
+}
+
+// ─── Sub-tasks ───
+const sortedSubtasks = computed(() => {
+  const list = props.task?.subtasks ?? []
+  return [...list].sort((a, b) =>
+    a.sortOrder - b.sortOrder || String(a.createdAt).localeCompare(String(b.createdAt))
+  )
+})
+
+const newSubtaskTitle = ref('')
+const addingSubtask = ref(false)
+const subtaskDetailOpen = ref(false)
+const editingSubtask = ref<TaskSubtask | null>(null)
+
+function openSubtaskEditor(st: TaskSubtask) {
+  editingSubtask.value = st
+  subtaskDetailOpen.value = true
+}
+
+function onSubtaskDialogSaved() {
+  emit('updated')
+}
+
+async function addSubtask() {
+  if (!props.task || !newSubtaskTitle.value.trim()) return
+  addingSubtask.value = true
+  try {
+    await backlogStore.createSubtask(props.task.id, { title: newSubtaskTitle.value.trim() })
+    newSubtaskTitle.value = ''
+    emit('updated')
+  } finally {
+    addingSubtask.value = false
+  }
+}
+
+async function removeSubtask(st: TaskSubtask) {
+  if (!props.task) return
+  saving.value = true
+  try {
+    await backlogStore.deleteSubtask(props.task.id, st.id)
+    emit('updated')
+  } finally {
+    saving.value = false
+  }
 }
 
 async function updateTaskField(field: string, value: any) {
@@ -1432,6 +1478,65 @@ function onBackdropClick(e: MouseEvent) {
                 Click to add a description...
               </p>
             </div>
+
+            <!-- Sub-tasks -->
+            <div class="mt-5 pt-4 border-t border-gray-100" @click.stop>
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+                  <ListTree :size="14" class="text-gray-400" /> Sub-tasks
+                </h3>
+              </div>
+              <p class="text-[11px] text-gray-500 mb-2">Click a row to view or edit all fields.</p>
+              <div class="space-y-2">
+                <div
+                  v-for="st in sortedSubtasks"
+                  :key="st.id"
+                  class="flex items-stretch gap-2"
+                >
+                  <button
+                    type="button"
+                    class="flex-1 min-w-0 text-left rounded-lg border border-gray-100 bg-gray-50/40 px-3 py-2 flex items-center gap-2 hover:border-[#4857FE]/50 hover:bg-white transition-colors"
+                    @click="openSubtaskEditor(st)"
+                  >
+                    <span class="flex-1 truncate text-sm font-medium text-gray-900">{{ st.title }}</span>
+                    <span
+                      class="text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 capitalize"
+                      :class="statusStyle(st.status)"
+                    >{{ label(st.status) }}</span>
+                    <span
+                      class="text-[10px] px-1.5 py-0.5 rounded font-bold shrink-0"
+                      :class="priorityStyle(st.priority)"
+                    >{{ st.priority }}</span>
+                    <span v-if="st.assigneeUserIds?.length" class="text-[10px] text-gray-500 shrink-0">{{ st.assigneeUserIds.length }} assignee(s)</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 shrink-0"
+                    title="Delete sub-task"
+                    @click.stop="removeSubtask(st)"
+                  >
+                    <Trash2 :size="14" />
+                  </button>
+                </div>
+              </div>
+              <div class="mt-3 flex items-center gap-2">
+                <input
+                  v-model="newSubtaskTitle"
+                  type="text"
+                  placeholder="New sub-task title…"
+                  class="flex-1 text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 outline-none focus:border-[#4857FE]"
+                  @keydown.enter="addSubtask"
+                />
+                <button
+                  type="button"
+                  class="text-xs font-medium text-white bg-[#4857FE] hover:bg-[#3E4BDE] rounded-lg px-3 py-1.5 shrink-0 disabled:opacity-50"
+                  :disabled="!newSubtaskTitle.trim() || addingSubtask"
+                  @click="addSubtask"
+                >
+                  {{ addingSubtask ? '…' : 'Add' }}
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- Sticky Tabs (sticks below title on scroll) -->
@@ -1882,6 +1987,15 @@ function onBackdropClick(e: MouseEvent) {
       </div>
     </Transition>
   </Teleport>
+  <SubtaskDetailDialog
+    v-if="task && editingSubtask"
+    v-model:open="subtaskDetailOpen"
+    :parent-task="task"
+    mode="saved"
+    :subtask="editingSubtask"
+    :team-members="teamMembers"
+    @saved="onSubtaskDialogSaved"
+  />
 </template>
 
 <style scoped>

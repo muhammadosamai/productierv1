@@ -33,8 +33,11 @@ import {
   FileText,
   Rocket,
   Calendar,
+  Plus,
+  ListTree,
 } from 'lucide-vue-next'
-import type { TaskType, TaskPriority } from '@/types/backlog'
+import type { Task, TaskType, TaskPriority, SubtaskDraftRow, TaskStatus } from '@/types/backlog'
+import SubtaskDetailDialog from '@/components/delivery/SubtaskDetailDialog.vue'
 
 interface UserResult {
   id: string
@@ -238,6 +241,112 @@ function storyStatusDot(status: string) {
 
 const submitted = ref(false)
 
+const subtaskDraftRows = ref<SubtaskDraftRow[]>([])
+
+const subtaskTeamMembers = ref<{ id: string; name: string; email: string; avatar: string | null }[]>([])
+const subtaskDetailOpen = ref(false)
+const editingDraftRow = ref<SubtaskDraftRow | null>(null)
+
+const PLACEHOLDER_PARENT_TASK_ID = '00000000-0000-4000-8000-000000000000'
+
+const draftParentTask = computed((): Task | null => {
+  if (!selectedStoryId.value || !selectedStory.value) return null
+  const story = selectedStory.value
+  return {
+    id: PLACEHOLDER_PARENT_TASK_ID,
+    productId: story.product,
+    initiativeId: null,
+    storyId: story.id,
+    deliveryId: null,
+    title: '',
+    description: null,
+    status: 'created',
+    priority: 'medium',
+    type: null,
+    ownerUserId: null,
+    assigneeUserIds: null,
+    reviewerUserIds: null,
+    createdByUserId: '',
+    estimateValue: null,
+    dependent: null,
+    blockedReason: null,
+    createdAt: '',
+    updatedAt: '',
+    startedAt: null,
+    completedAt: null,
+    dueAt: null,
+  } as unknown as Task
+})
+
+async function fetchSubtaskTeamMembers() {
+  const name = productStore.activeProduct?.name
+  if (!name) {
+    subtaskTeamMembers.value = []
+    return
+  }
+  try {
+    const res = await fetch(`/api/products/${encodeURIComponent(name)}/members`, {
+      headers: { Authorization: `Bearer ${authStore.token}` },
+    })
+    if (res.ok) {
+      const data = await res.json()
+      subtaskTeamMembers.value = data.map((m: any) => ({
+        id: m.userId,
+        name: m.userName,
+        email: m.userEmail,
+        avatar: m.userAvatar,
+      }))
+    }
+  } catch {
+    subtaskTeamMembers.value = []
+  }
+}
+
+function addSubtaskDraftRow() {
+  subtaskDraftRows.value.push({
+    localId: crypto.randomUUID(),
+    title: '',
+    description: null,
+    status: 'created',
+    priority: 'medium',
+    type: null,
+    assigneeUserIds: [],
+    estimateValue: null,
+    dependent: [],
+    blockedReason: null,
+    deliveryId: null,
+    dueAt: '',
+    sortOrder: subtaskDraftRows.value.length,
+  })
+}
+
+function openSubtaskDraftEditor(row: SubtaskDraftRow) {
+  editingDraftRow.value = row
+  subtaskDetailOpen.value = true
+}
+
+function subtaskPreviewPriorityClass(p: TaskPriority) {
+  switch (p) {
+    case 'high': return 'bg-red-100 text-red-700'
+    case 'medium': return 'bg-green-100 text-green-700'
+    case 'low': return 'bg-blue-100 text-blue-700'
+    default: return 'bg-gray-100 text-gray-600'
+  }
+}
+
+function subtaskPreviewStatusClass(s: TaskStatus) {
+  switch (s) {
+    case 'done': return 'bg-[#00c875] text-white'
+    case 'in_progress': return 'bg-[#fdab3d] text-white'
+    case 'blocked': return 'bg-[#e2445c] text-white'
+    default: return 'bg-gray-200 text-gray-700'
+  }
+}
+
+function removeSubtaskDraftRow(localId: string) {
+  subtaskDraftRows.value = subtaskDraftRows.value.filter(r => r.localId !== localId)
+}
+
 function resetForm() {
   title.value = ''
   description.value = ''
@@ -257,10 +366,14 @@ function resetForm() {
   assigneeSearchQuery.value = ''
   assigneeSearchResults.value = []
   showAssigneeDropdown.value = false
+  subtaskDraftRows.value = []
 }
 
 // Only reset form after successful submission
 watch(open, (val) => {
+  if (val) {
+    fetchSubtaskTeamMembers()
+  }
   if (!val && submitted.value) {
     resetForm()
     submitted.value = false
@@ -271,6 +384,23 @@ async function handleSubmit() {
   if (!title.value.trim() || !selectedStoryId.value) return
   submitting.value = true
 
+  const subtasksPayload = subtaskDraftRows.value
+    .filter(r => r.title.trim())
+    .map((r, i) => ({
+      title: r.title.trim(),
+      description: r.description,
+      status: r.status,
+      priority: r.priority,
+      type: r.type,
+      assigneeUserIds: r.assigneeUserIds.length > 0 ? r.assigneeUserIds : null,
+      estimateValue: r.estimateValue,
+      dependent: r.dependent.length > 0 ? r.dependent : null,
+      blockedReason: r.blockedReason,
+      deliveryId: r.deliveryId,
+      dueAt: r.dueAt || null,
+      sortOrder: i,
+    }))
+
   await backlogStore.createTask(selectedStoryId.value, {
     title: title.value.trim(),
     description: description.value.trim() || null,
@@ -279,6 +409,7 @@ async function handleSubmit() {
     ownerUserId: ownerUserId.value,
     assigneeUserIds: assigneeUserIds.value.length > 0 ? assigneeUserIds.value : null,
     dueAt: dueAt.value || null,
+    subtasks: subtasksPayload.length > 0 ? subtasksPayload : undefined,
   })
 
   submitting.value = false
@@ -290,7 +421,7 @@ async function handleSubmit() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-[520px] !overflow-x-hidden !overflow-y-visible">
+    <DialogContent class="sm:max-w-[560px] !overflow-x-hidden !overflow-y-visible max-h-[90vh] overflow-y-auto">
       <DialogHeader>
         <DialogTitle>Create Task</DialogTitle>
         <DialogDescription>Create a new task under a story.</DialogDescription>
@@ -615,6 +746,51 @@ async function handleSubmit() {
           </div>
         </div>
 
+        <!-- Sub-tasks (optional) -->
+        <div class="space-y-2 rounded-lg border border-dashed border-gray-200 bg-gray-50/50 p-3">
+          <div class="flex items-center justify-between gap-2">
+            <label class="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+              <ListTree :size="14" class="text-gray-400" />
+              Sub-tasks
+            </label>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 text-xs font-medium text-[#4857FE] hover:text-[#3E4BDE]"
+              @click="addSubtaskDraftRow"
+            >
+              <Plus :size="12" /> Add row
+            </button>
+          </div>
+          <p class="text-[11px] text-gray-500">Click a row to edit details. Title is required to include the sub-task when creating.</p>
+          <div v-if="subtaskDraftRows.length === 0" class="text-xs text-gray-400 italic py-1">No sub-tasks yet.</div>
+          <div v-else class="space-y-2">
+            <div
+              v-for="row in subtaskDraftRows"
+              :key="row.localId"
+              class="flex items-stretch gap-2"
+            >
+              <button
+                type="button"
+                class="flex-1 min-w-0 text-left rounded-lg border border-gray-200 bg-white px-3 py-2 flex items-center gap-2 hover:border-[#4857FE]/60 hover:bg-[#4857FE]/5 transition-colors"
+                @click="openSubtaskDraftEditor(row)"
+              >
+                <span class="flex-1 truncate text-sm font-medium text-gray-900">{{ row.title.trim() || 'Untitled sub-task' }}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded shrink-0 capitalize" :class="subtaskPreviewStatusClass(row.status)">{{ row.status.replace('_', ' ') }}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded shrink-0 capitalize" :class="subtaskPreviewPriorityClass(row.priority)">{{ row.priority }}</span>
+                <span v-if="row.assigneeUserIds.length" class="text-[10px] text-gray-500 shrink-0">{{ row.assigneeUserIds.length }} assignee(s)</span>
+              </button>
+              <button
+                type="button"
+                class="p-2 rounded-lg border border-transparent text-gray-400 hover:text-red-500 hover:bg-red-50 shrink-0"
+                title="Remove row"
+                @click.stop="removeSubtaskDraftRow(row.localId)"
+              >
+                <X :size="16" />
+              </button>
+            </div>
+          </div>
+        </div>
+
         <DialogFooter class="gap-2">
           <Button type="button" variant="outline" @click="open = false">Cancel</Button>
           <Button
@@ -628,4 +804,12 @@ async function handleSubmit() {
       </form>
     </DialogContent>
   </Dialog>
+  <SubtaskDetailDialog
+    v-if="draftParentTask && editingDraftRow"
+    v-model:open="subtaskDetailOpen"
+    :parent-task="draftParentTask"
+    mode="draft"
+    :draft-row="editingDraftRow"
+    :team-members="subtaskTeamMembers"
+  />
 </template>

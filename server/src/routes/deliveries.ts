@@ -98,6 +98,12 @@ export const deliveryRoutes = new Elysia({ prefix: '/api/deliveries' })
               columns: { id: true, title: true },
             },
             comments: true,
+            subtasks: {
+              orderBy: (s, { asc }) => [asc(s.sortOrder), asc(s.createdAt)],
+              with: {
+                delivery: { columns: { id: true, title: true } },
+              },
+            },
           },
           orderBy: (t, { asc }) => [asc(t.createdAt)],
         },

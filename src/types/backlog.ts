@@ -36,6 +36,28 @@ export interface StoryComment {
   user?: { id: string; name: string; email: string; avatar: string | null }
 }
 
+export interface TaskSubtask {
+  id: string
+  parentTaskId: string
+  title: string
+  description: string | null
+  status: TaskStatus
+  priority: TaskPriority
+  type: TaskType | null
+  assigneeUserIds: string[] | null
+  estimateValue: number | null
+  dependent: string[] | null
+  blockedReason: string | null
+  deliveryId: string | null
+  dueAt: string | null
+  startedAt: string | null
+  completedAt: string | null
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+  delivery?: { id: string; title: string } | null
+}
+
 export interface Task {
   id: string
   productId: string
@@ -61,6 +83,7 @@ export interface Task {
   dueAt: string | null
   comments?: TaskComment[]
   attachments?: TaskAttachment[]
+  subtasks?: TaskSubtask[]
   createdByUser?: { id: string; name: string; email: string; avatar: string | null }
 }
 
@@ -113,6 +136,38 @@ export interface CreateStoryPayload {
   acceptanceCriteria?: string
 }
 
+export interface CreateTaskSubtaskPayload {
+  title: string
+  description?: string | null
+  status?: TaskStatus
+  priority?: TaskPriority
+  type?: TaskType | null
+  assigneeUserIds?: string[] | null
+  estimateValue?: number | null
+  dependent?: string[] | null
+  blockedReason?: string | null
+  deliveryId?: string | null
+  dueAt?: string | null
+  sortOrder?: number
+}
+
+/** Sub-task row while creating the parent task (not yet persisted). */
+export interface SubtaskDraftRow {
+  localId: string
+  title: string
+  description: string | null
+  status: TaskStatus
+  priority: TaskPriority
+  type: TaskType | null
+  assigneeUserIds: string[]
+  estimateValue: number | null
+  dependent: string[]
+  blockedReason: string | null
+  deliveryId: string | null
+  dueAt: string
+  sortOrder: number
+}
+
 export interface CreateTaskPayload {
   title: string
   description?: string | null
@@ -127,4 +182,20 @@ export interface CreateTaskPayload {
   blockedReason?: string | null
   deliveryId?: string | null
   dueAt?: string | null
+  subtasks?: CreateTaskSubtaskPayload[]
 }
+
+export type UpdateTaskSubtaskPayload = Partial<{
+  title: string
+  description: string | null
+  status: TaskStatus
+  priority: TaskPriority
+  type: TaskType | null
+  assigneeUserIds: string[] | null
+  estimateValue: number | null
+  dependent: string[] | null
+  blockedReason: string | null
+  deliveryId: string | null
+  dueAt: string | null
+  sortOrder: number
+}>

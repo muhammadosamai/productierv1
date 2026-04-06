@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
-import type { Story, CreateStoryPayload, CreateTaskPayload, Task, TaskComment } from '@/types/backlog'
+import type { Story, CreateStoryPayload, CreateTaskPayload, Task, TaskComment, CreateTaskSubtaskPayload, UpdateTaskSubtaskPayload } from '@/types/backlog'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 
@@ -167,10 +167,52 @@ export const useBacklogStore = defineStore('backlog', () => {
     }
   }
 
+  async function createSubtask(taskId: string, payload: CreateTaskSubtaskPayload) {
+    try {
+      const res = await fetch(`${API_BASE}/tasks/${taskId}/subtasks`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error('Failed to create subtask')
+      await fetchStories()
+    } catch (e) {
+      error.value = (e as Error).message
+    }
+  }
+
+  async function updateSubtask(taskId: string, subtaskId: string, payload: UpdateTaskSubtaskPayload) {
+    try {
+      const res = await fetch(`${API_BASE}/tasks/${taskId}/subtasks/${subtaskId}`, {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error('Failed to update subtask')
+      await fetchStories()
+    } catch (e) {
+      error.value = (e as Error).message
+    }
+  }
+
+  async function deleteSubtask(taskId: string, subtaskId: string) {
+    try {
+      const res = await fetch(`${API_BASE}/tasks/${taskId}/subtasks/${subtaskId}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      })
+      if (!res.ok) throw new Error('Failed to delete subtask')
+      await fetchStories()
+    } catch (e) {
+      error.value = (e as Error).message
+    }
+  }
+
   return {
     stories, loading, error, storyCount, allTasks,
     fetchStories, createStory, updateStory, deleteStory,
     createTask, updateTask, deleteTask,
     fetchTaskComments, createTaskComment, deleteTaskComment,
+    createSubtask, updateSubtask, deleteSubtask,
   }
 })

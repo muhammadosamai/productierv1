@@ -67,7 +67,21 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
     return db.query.stories.findMany({
       where: product ? eq(stories.product, product) : undefined,
       orderBy: (s, { desc }) => [desc(s.createdAt)],
-      with: { tasks: { with: { comments: { with: { user: true } }, attachments: true } }, comments: { with: { user: true } } },
+      with: {
+        tasks: {
+          with: {
+            comments: { with: { user: true } },
+            attachments: true,
+            subtasks: {
+              orderBy: (s, { asc }) => [asc(s.sortOrder), asc(s.createdAt)],
+              with: {
+                delivery: { columns: { id: true, title: true } },
+              },
+            },
+          },
+        },
+        comments: { with: { user: true } },
+      },
     })
   })
 
@@ -103,7 +117,21 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
   .get('/:id', async ({ params: { id }, set }) => {
     const story = await db.query.stories.findFirst({
       where: eq(stories.id, id),
-      with: { tasks: { with: { comments: { with: { user: true } }, attachments: true } }, comments: { with: { user: true } } },
+      with: {
+        tasks: {
+          with: {
+            comments: { with: { user: true } },
+            attachments: true,
+            subtasks: {
+              orderBy: (s, { asc }) => [asc(s.sortOrder), asc(s.createdAt)],
+              with: {
+                delivery: { columns: { id: true, title: true } },
+              },
+            },
+          },
+        },
+        comments: { with: { user: true } },
+      },
     })
     if (!story) { set.status = 404; return { error: 'Story not found' } }
     return story

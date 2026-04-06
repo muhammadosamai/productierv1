@@ -360,7 +360,7 @@ const topItems = computed<NavItem[]>(() => [
     expandable: true,
     hasAdd: true,
     totalCount: teamChildren.value.length,
-    children: favoritedOrRecent(teamChildren.value, 'team_member'),
+    children: teamChildren.value,
   },
 ])
 
@@ -747,7 +747,7 @@ function onIssueCreated() {
           </button>
 
           <!-- Children (Team members) -->
-          <ul v-if="item.children && expandedItems[item.label]" class="mt-1 ml-4 pl-4 border-l border-gray-100 space-y-0.5">
+          <ul v-if="item.children && expandedItems[item.label]" class="mt-1 ml-4 pl-4 border-l border-gray-100 space-y-0.5 max-h-[108px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200 scrollbar-track-transparent">
             <li
               v-for="child in item.children"
               :key="child.id || child.label"

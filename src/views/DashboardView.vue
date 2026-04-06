@@ -229,13 +229,13 @@ function toggleSort(column: SortColumn) {
   }
 }
 
-const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
 const statusOrder: Record<string, number> = { in_progress: 0, initialized: 1, drafted: 2, backlog: 3, completed: 4, archived: 5 }
 
 // Create Task dialog state
 const newTaskStoryId = ref('')
 const newTaskTitle = ref('')
-const newTaskPriority = ref<'low' | 'medium' | 'high' | 'critical'>('medium')
+const newTaskPriority = ref<'low' | 'medium' | 'high'>('medium')
 const newTaskType = ref<string>('')
 const newTaskEstimate = ref<string>('')
 const newTaskDueAt = ref<string>('')
@@ -292,7 +292,7 @@ const editValue = ref('')
 
 const taskTypeOptions = ['design', 'development', 'testing', 'review', 'research', 'fix', 'documentation', 'deployment'] as const
 const statusOptions = ['backlog', 'drafted', 'initialized', 'in_progress', 'completed', 'archived'] as const
-const priorityOptions = ['low', 'medium', 'high', 'critical'] as const
+const priorityOptions = ['low', 'medium', 'high'] as const
 
 function isEditing(storyId: string, field: string) {
   return editingCell.value?.storyId === storyId && editingCell.value?.field === field
@@ -457,8 +457,7 @@ onUnmounted(() => {
 
 function priorityColor(priority: string) {
   switch (priority) {
-    case 'critical': return '#e2445c'
-    case 'high': return '#fdab3d'
+    case 'high': return '#e2445c'
     case 'medium': return '#00c875'
     case 'low': return '#579bfc'
     default: return '#c4c4c4'
@@ -471,8 +470,7 @@ function priorityLabel(priority: string) {
 
 function priorityStyle(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-red-50 text-red-700 border border-red-200'
-    case 'high': return 'bg-orange-50 text-orange-700 border border-orange-200'
+    case 'high': return 'bg-red-50 text-red-700 border border-red-200'
     case 'medium': return 'bg-green-50 text-green-700 border border-green-200'
     case 'low': return 'bg-blue-50 text-blue-700 border border-blue-200'
     default: return 'bg-gray-50 text-gray-600 border border-gray-200'
@@ -481,8 +479,7 @@ function priorityStyle(priority: string) {
 
 function priorityDotStyle(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-red-500'
-    case 'high': return 'bg-orange-500'
+    case 'high': return 'bg-red-500'
     case 'medium': return 'bg-green-500'
     case 'low': return 'bg-blue-500'
     default: return 'bg-gray-400'
@@ -656,8 +653,7 @@ function cancelInlineTaskAdd() {
 
 function priorityCircleColor(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-[#e2445c]'
-    case 'high': return 'bg-[#fdab3d]'
+    case 'high': return 'bg-[#e2445c]'
     case 'medium': return 'bg-[#00c875]'
     case 'low': return 'bg-[#579bfc]'
     default: return 'bg-gray-400'
@@ -666,11 +662,10 @@ function priorityCircleColor(priority: string) {
 
 function priorityNumber(priority: string) {
   switch (priority) {
-    case 'critical': return 1
-    case 'high': return 2
-    case 'medium': return 3
-    case 'low': return 4
-    default: return 4
+    case 'high': return 1
+    case 'medium': return 2
+    case 'low': return 3
+    default: return 3
   }
 }
 
@@ -700,8 +695,7 @@ function statusTextColor(status: string) {
 
 function priorityBarColor(priority: string) {
   switch (priority) {
-    case 'critical': return 'text-red-500'
-    case 'high': return 'text-orange-500'
+    case 'high': return 'text-red-500'
     case 'medium': return 'text-green-500'
     case 'low': return 'text-blue-400'
     default: return 'text-gray-400'
@@ -1424,7 +1418,6 @@ function priorityBarColor(priority: string) {
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
-                <option value="critical">Critical</option>
               </select>
             </div>
             <div>

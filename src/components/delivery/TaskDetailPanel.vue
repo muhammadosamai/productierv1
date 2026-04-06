@@ -114,7 +114,6 @@ const statusOptions: { value: TaskStatus; label: string }[] = [
 ]
 
 const priorityOptions: { value: TaskPriority; label: string }[] = [
-  { value: 'critical', label: 'Critical' },
   { value: 'high', label: 'High' },
   { value: 'medium', label: 'Medium' },
   { value: 'low', label: 'Low' },
@@ -562,8 +561,7 @@ function fileIcon(mimeType: string) {
 
 function priorityStyle(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-red-100 text-red-700 border border-red-200'
-    case 'high': return 'bg-orange-100 text-orange-700 border border-orange-200'
+    case 'high': return 'bg-red-100 text-red-700 border border-red-200'
     case 'medium': return 'bg-green-100 text-green-700 border border-green-200'
     case 'low': return 'bg-blue-100 text-blue-700 border border-blue-200'
     default: return 'bg-gray-100 text-gray-600 border border-gray-200'
@@ -964,7 +962,9 @@ function onBackdropClick(e: MouseEvent) {
 
               <!-- Priority (dropdown) -->
               <div class="flex items-center gap-3">
-                <span class="text-sm text-gray-500 w-24 shrink-0">Priority</span>
+                <span class="text-sm text-gray-500 w-24 shrink-0 flex items-center gap-1.5">
+                  <Signal :size="13" class="text-gray-400" /> Priority
+                </span>
                 <div class="relative" @click.stop>
                   <button
                     class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold cursor-pointer hover:opacity-80 transition-opacity"

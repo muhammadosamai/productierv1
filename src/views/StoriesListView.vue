@@ -55,7 +55,7 @@ const editValue = ref('')
 const inlineOwnerSearch = ref('')
 
 const storyStatusOptions = ['backlog', 'drafted', 'initialized', 'in_progress', 'completed', 'archived'] as const
-const storyPriorityOptions = ['critical', 'high', 'medium', 'low'] as const
+const storyPriorityOptions = ['high', 'medium', 'low'] as const
 const storyTypeOptions = ['feature', 'bug', 'improvement', 'technical_debt', 'research', 'infrastructure', 'testing', 'documentation'] as const
 
 const editableFields = new Set(['title', 'priority', 'type', 'owner', 'initiative'])
@@ -233,7 +233,7 @@ function toggleSort(field: SortField) {
 }
 
 const statusOrder: Record<string, number> = { backlog: 0, ready: 1, in_progress: 2, done: 3, archived: 4 }
-const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
 const typeOrder: Record<string, number> = { feature: 0, bug: 1, improvement: 2, technical_debt: 3, research: 4, infrastructure: 5, testing: 6, documentation: 7 }
 
 function compareStr(a: string | null | undefined, b: string | null | undefined): number {
@@ -688,8 +688,7 @@ function statusTabColor(status: string) {
 
 function priorityStyle(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-red-100 text-red-700 border border-red-200'
-    case 'high': return 'bg-orange-100 text-orange-700 border border-orange-200'
+    case 'high': return 'bg-red-100 text-red-700 border border-red-200'
     case 'medium': return 'bg-green-100 text-green-700 border border-green-200'
     case 'low': return 'bg-blue-100 text-blue-700 border border-blue-200'
     default: return 'bg-gray-100 text-gray-600 border border-gray-200'
@@ -698,8 +697,7 @@ function priorityStyle(priority: string) {
 
 function priorityDotStyle(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-red-500'
-    case 'high': return 'bg-orange-500'
+    case 'high': return 'bg-red-500'
     case 'medium': return 'bg-green-500'
     case 'low': return 'bg-blue-500'
     default: return 'bg-gray-400'

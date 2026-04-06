@@ -375,8 +375,7 @@ function statusLabel(status: string) {
 // Task styling
 function priorityStyle(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-[#e2445c] text-white'
-    case 'high': return 'bg-[#fdab3d] text-white'
+    case 'high': return 'bg-[#e2445c] text-white'
     case 'medium': return 'bg-[#00c875] text-white'
     case 'low': return 'bg-gray-200 text-gray-600'
     default: return 'bg-gray-200 text-gray-600'
@@ -385,8 +384,7 @@ function priorityStyle(priority: string) {
 
 function priorityDotStyle(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-red-500'
-    case 'high': return 'bg-orange-500'
+    case 'high': return 'bg-red-500'
     case 'medium': return 'bg-green-500'
     case 'low': return 'bg-blue-500'
     default: return 'bg-gray-400'
@@ -395,8 +393,7 @@ function priorityDotStyle(priority: string) {
 
 function prioritySelectStyle(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-red-50 text-red-700 border border-red-200'
-    case 'high': return 'bg-orange-50 text-orange-700 border border-orange-200'
+    case 'high': return 'bg-red-50 text-red-700 border border-red-200'
     case 'medium': return 'bg-green-50 text-green-700 border border-green-200'
     case 'low': return 'bg-blue-50 text-blue-700 border border-blue-200'
     default: return 'bg-gray-50 text-gray-600 border border-gray-200'

@@ -7,7 +7,7 @@ export const storyTypeEnum = pgEnum('item_type', [
 ])
 
 export const storyPriorityEnum = pgEnum('item_priority', [
-  'low', 'medium', 'high', 'critical'
+  'low', 'medium', 'high',
 ])
 
 export const storyStatusEnum = pgEnum('item_status', [
@@ -19,7 +19,7 @@ export const taskStatusEnum = pgEnum('task_status', [
 ])
 
 export const taskPriorityEnum = pgEnum('task_priority', [
-  'low', 'medium', 'high', 'critical'
+  'low', 'medium', 'high',
 ])
 
 export const taskTypeEnum = pgEnum('task_type', [
@@ -59,7 +59,7 @@ export const testCycleStatusEnum = pgEnum('test_cycle_status', [
 ])
 
 export const issueSeverityEnum = pgEnum('issue_severity', [
-  'critical', 'major', 'minor', 'trivial'
+  'blocker', 'critical', 'major', 'minor', 'trivial'
 ])
 
 export const issueStatusEnum = pgEnum('issue_status', [
@@ -75,7 +75,7 @@ export const issueReproducibilityEnum = pgEnum('issue_reproducibility', [
 ])
 
 export const issuePriorityEnum = pgEnum('issue_priority', [
-  'critical', 'high', 'medium', 'low'
+  'high', 'medium', 'low',
 ])
 
 export const issueEnvironmentEnum = pgEnum('issue_environment', [
@@ -871,7 +871,7 @@ export const consumerFeedbackStatusEnum = pgEnum('consumer_feedback_status', [
 ])
 
 export const consumerFeedbackPriorityEnum = pgEnum('consumer_feedback_priority', [
-  'low', 'medium', 'high', 'critical'
+  'low', 'medium', 'high',
 ])
 
 export const consumerFeedbacks = pgTable('consumer_feedbacks', {
@@ -1010,6 +1010,29 @@ export const rolePermissions = pgTable('role_permissions', {
 
 export type RolePermissionRecord = typeof rolePermissions.$inferSelect
 export type NewRolePermission = typeof rolePermissions.$inferInsert
+
+// ============ PASSWORD RESET TOKENS ============
+
+export const passwordResetTokens = pgTable('password_reset_tokens', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  token: varchar('token', { length: 255 }).notNull().unique(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+// ============ EMAIL PREFERENCES ============
+
+export const emailPreferences = pgTable('email_preferences', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }).unique(),
+  assignedToMe: boolean('assigned_to_me').notNull().default(true),
+  statusChanges: boolean('status_changes').notNull().default(true),
+  newComments: boolean('new_comments').notNull().default(true),
+  deadlineReminders: boolean('deadline_reminders').notNull().default(true),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+})
 
 // ============ FORM BUILDER ============
 

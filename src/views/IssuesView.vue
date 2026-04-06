@@ -55,9 +55,9 @@ const editValue = ref('')
 const inlineAssigneeSearch = ref('')
 
 const issueStatusOptions = ['open', 'in_progress', 'resolved', 'closed', 'deferred'] as const
-const issuePriorityOptions = ['critical', 'high', 'medium', 'low'] as const
+const issuePriorityOptions = ['high', 'medium', 'low'] as const
 const issueTypeOptions = ['bug', 'ui_issue', 'performance', 'crash', 'security', 'data_loss', 'other'] as const
-const issueSeverityOptions = ['critical', 'major', 'minor', 'trivial'] as const
+const issueSeverityOptions = ['blocker', 'critical', 'major', 'minor', 'trivial'] as const
 
 const editableFields = new Set(['title', 'priority', 'severity', 'type', 'module', 'assignedTo'])
 
@@ -233,8 +233,8 @@ function toggleSort(field: SortField) {
 }
 
 const statusOrder: Record<string, number> = { open: 0, in_progress: 1, resolved: 2, closed: 3, deferred: 4 }
-const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
-const severityOrder: Record<string, number> = { critical: 0, major: 1, minor: 2, trivial: 3 }
+const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
+const severityOrder: Record<string, number> = { blocker: 0, critical: 1, major: 2, minor: 3, trivial: 4 }
 const typeOrder: Record<string, number> = { bug: 0, ui_issue: 1, performance: 2, crash: 3, security: 4, data_loss: 5, other: 6 }
 
 function compareStr(a: string | null | undefined, b: string | null | undefined): number {
@@ -675,8 +675,7 @@ function statusTabColor(status: string) {
 
 function priorityStyle(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-red-100 text-red-700 border border-red-200'
-    case 'high': return 'bg-orange-100 text-orange-700 border border-orange-200'
+    case 'high': return 'bg-red-100 text-red-700 border border-red-200'
     case 'medium': return 'bg-green-100 text-green-700 border border-green-200'
     case 'low': return 'bg-blue-100 text-blue-700 border border-blue-200'
     default: return 'bg-gray-100 text-gray-600 border border-gray-200'
@@ -685,8 +684,7 @@ function priorityStyle(priority: string) {
 
 function priorityDotStyle(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-red-500'
-    case 'high': return 'bg-orange-500'
+    case 'high': return 'bg-red-500'
     case 'medium': return 'bg-green-500'
     case 'low': return 'bg-blue-500'
     default: return 'bg-gray-400'
@@ -695,6 +693,7 @@ function priorityDotStyle(priority: string) {
 
 function severityStyle(severity: string) {
   switch (severity) {
+    case 'blocker': return 'bg-rose-950 text-white border border-rose-900'
     case 'critical': return 'bg-red-100 text-red-700 border border-red-200'
     case 'major': return 'bg-orange-100 text-orange-700 border border-orange-200'
     case 'minor': return 'bg-yellow-100 text-yellow-700 border border-yellow-200'

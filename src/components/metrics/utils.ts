@@ -34,7 +34,7 @@ export function statusBg(status: string): string {
 
 export function priorityColor(priority: string): string {
   const colors: Record<string, string> = {
-    critical: '#EF4444', high: '#F97316', medium: '#EAB308', low: '#22C55E',
+    high: '#EF4444', medium: '#EAB308', low: '#22C55E',
   }
   return colors[priority] || '#9CA3AF'
 }

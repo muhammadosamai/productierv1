@@ -121,6 +121,7 @@ const statusOptions: { value: IssueStatus; label: string }[] = [
 ]
 
 const severityOptions: { value: IssueSeverity; label: string }[] = [
+  { value: 'blocker', label: 'Blocker' },
   { value: 'critical', label: 'Critical' },
   { value: 'major', label: 'Major' },
   { value: 'minor', label: 'Minor' },
@@ -128,7 +129,6 @@ const severityOptions: { value: IssueSeverity; label: string }[] = [
 ]
 
 const priorityOptions: { value: IssuePriority; label: string }[] = [
-  { value: 'critical', label: 'Critical' },
   { value: 'high', label: 'High' },
   { value: 'medium', label: 'Medium' },
   { value: 'low', label: 'Low' },
@@ -623,6 +623,7 @@ function statusStyle(status: string) {
 
 function severityStyle(severity: string) {
   switch (severity) {
+    case 'blocker': return 'bg-rose-950 text-white border border-rose-900'
     case 'critical': return 'bg-red-100 text-red-700 border border-red-200'
     case 'major': return 'bg-orange-100 text-orange-700 border border-orange-200'
     case 'minor': return 'bg-yellow-100 text-yellow-700 border border-yellow-200'
@@ -633,8 +634,7 @@ function severityStyle(severity: string) {
 
 function priorityStyle(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-red-100 text-red-700 border border-red-200'
-    case 'high': return 'bg-orange-100 text-orange-700 border border-orange-200'
+    case 'high': return 'bg-red-100 text-red-700 border border-red-200'
     case 'medium': return 'bg-green-100 text-green-700 border border-green-200'
     case 'low': return 'bg-blue-100 text-blue-700 border border-blue-200'
     default: return 'bg-gray-100 text-gray-600 border border-gray-200'

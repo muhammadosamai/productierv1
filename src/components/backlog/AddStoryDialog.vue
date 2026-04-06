@@ -126,7 +126,6 @@ const priorityColors: Record<string, string> = {
   low: 'bg-[#00c875]',
   medium: 'bg-[#fdab3d]',
   high: 'bg-[#e2445c]',
-  critical: 'bg-[#333333]',
 }
 
 // Type icons
@@ -540,12 +539,6 @@ async function handleSubmit(withBreakdown = false) {
                   <span class="flex items-center gap-2">
                     <span class="w-2.5 h-2.5 rounded-full bg-[#e2445c]"></span>
                     High
-                  </span>
-                </SelectItem>
-                <SelectItem value="critical">
-                  <span class="flex items-center gap-2">
-                    <span class="w-2.5 h-2.5 rounded-full bg-[#333333]"></span>
-                    Critical
                   </span>
                 </SelectItem>
               </SelectContent>

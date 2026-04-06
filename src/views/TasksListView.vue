@@ -61,7 +61,7 @@ const editValue = ref('')
 const inlineOwnerSearch = ref('')
 
 const taskStatusOptions = ['created', 'assigned', 'in_progress', 'in_review', 'done', 'overdue', 'blocked', 'archived'] as const
-const taskPriorityOptions = ['critical', 'high', 'medium', 'low'] as const
+const taskPriorityOptions = ['high', 'medium', 'low'] as const
 const taskTypeOptions = ['design', 'development', 'testing', 'review', 'research', 'fix', 'documentation', 'deployment'] as const
 
 const taskEditableFields = new Set(['title', 'status', 'priority', 'type', 'owner', 'assignees', 'reviewers', 'estimate', 'dueAt', 'blockedReason'])
@@ -278,7 +278,7 @@ function toggleSort(field: SortField) {
 }
 
 const statusOrder: Record<string, number> = { created: 0, assigned: 1, in_progress: 2, in_review: 3, done: 4, overdue: 5, blocked: 6 }
-const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
 const typeOrder: Record<string, number> = { design: 0, development: 1, testing: 2, review: 3, research: 4, fix: 5, documentation: 6, deployment: 7 }
 
 function compareStr(a: string | null | undefined, b: string | null | undefined): number {
@@ -927,8 +927,7 @@ function statusTextColor(status: string) {
 
 function priorityStyle(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-red-100 text-red-700 border border-red-200'
-    case 'high': return 'bg-orange-100 text-orange-700 border border-orange-200'
+    case 'high': return 'bg-red-100 text-red-700 border border-red-200'
     case 'medium': return 'bg-green-100 text-green-700 border border-green-200'
     case 'low': return 'bg-blue-100 text-blue-700 border border-blue-200'
     default: return 'bg-gray-100 text-gray-600 border border-gray-200'
@@ -937,8 +936,7 @@ function priorityStyle(priority: string) {
 
 function priorityDotStyle(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-red-500'
-    case 'high': return 'bg-orange-500'
+    case 'high': return 'bg-red-500'
     case 'medium': return 'bg-green-500'
     case 'low': return 'bg-blue-500'
     default: return 'bg-gray-400'

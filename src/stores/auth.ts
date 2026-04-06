@@ -41,14 +41,17 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function register(name: string, email: string, password: string, role?: string): Promise<boolean> {
+  async function register(name: string, email: string, password: string, role?: string, inviteToken?: string): Promise<boolean> {
     loading.value = true
     error.value = null
     try {
+      const payload: Record<string, string> = { name, email, password }
+      if (role) payload.role = role
+      if (inviteToken) payload.inviteToken = inviteToken
       const res = await fetch(`${API_BASE}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password, role }),
+        body: JSON.stringify(payload),
       })
       const data = await res.json()
       if (!res.ok) {

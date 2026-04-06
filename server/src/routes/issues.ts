@@ -4,6 +4,7 @@ import { issues, issueComments, issueAttachments, users } from '../db/schema'
 import { eq, sql } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
+import { sendNotificationIfEnabled } from '../services/notificationEmails'
 import { mkdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
@@ -28,7 +29,7 @@ BEGIN
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_severity') THEN
-    CREATE TYPE issue_severity AS ENUM ('critical', 'major', 'minor', 'trivial');
+    CREATE TYPE issue_severity AS ENUM ('blocker', 'critical', 'major', 'minor', 'trivial');
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_status') THEN
@@ -36,7 +37,7 @@ BEGIN
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_priority') THEN
-    CREATE TYPE issue_priority AS ENUM ('critical', 'high', 'medium', 'low');
+    CREATE TYPE issue_priority AS ENUM ('high', 'medium', 'low');
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_reproducibility') THEN
@@ -155,10 +156,10 @@ const issueBody = t.Object({
     t.Literal('once'), t.Literal('unable_to_reproduce'),
   ]))),
   severity: t.Optional(t.Union([
-    t.Literal('critical'), t.Literal('major'), t.Literal('minor'), t.Literal('trivial'),
+    t.Literal('blocker'), t.Literal('critical'), t.Literal('major'), t.Literal('minor'), t.Literal('trivial'),
   ])),
   priority: t.Optional(t.Union([
-    t.Literal('critical'), t.Literal('high'), t.Literal('medium'), t.Literal('low'),
+    t.Literal('high'), t.Literal('medium'), t.Literal('low'),
   ])),
   status: t.Optional(t.Union([
     t.Literal('open'), t.Literal('in_progress'), t.Literal('resolved'),
@@ -334,6 +335,39 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       })
     }
 
+    // Notification: assignee changed
+    if (body.assignedToUserId && body.assignedToUserId !== existing.assignedToUserId) {
+      const assigneeId = optionalUuid(body.assignedToUserId)
+      if (assigneeId) {
+        sendNotificationIfEnabled({
+          targetUserId: assigneeId,
+          actorUserId: user.id,
+          eventType: 'assigned',
+          entityType: 'issue',
+          entityTitle: updated!.title,
+          entityPath: `/issues?issue=${updated!.id}`,
+        }).catch(() => {})
+      }
+    }
+
+    // Notification: status changed
+    if (body.status && body.status !== existing.status) {
+      const notifyIds = new Set<string>()
+      if (existing.assignedToUserId) notifyIds.add(existing.assignedToUserId)
+      if (existing.reportedByUserId) notifyIds.add(existing.reportedByUserId)
+      for (const uid of notifyIds) {
+        sendNotificationIfEnabled({
+          targetUserId: uid,
+          actorUserId: user.id,
+          eventType: 'status_change',
+          entityType: 'issue',
+          entityTitle: updated!.title,
+          entityPath: `/issues?issue=${updated!.id}`,
+          details: body.status,
+        }).catch(() => {})
+      }
+    }
+
     const full = await db.query.issues.findFirst({
       where: eq(issues.id, id),
       with: {
@@ -383,11 +417,32 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
+    const issue = await db.query.issues.findFirst({ where: eq(issues.id, id) })
+
     const [comment] = await db.insert(issueComments).values({
       issueId: id,
       userId: user.id,
       content: body.content,
     }).returning()
+
+    // Notify assignee and reporter about the comment
+    if (issue) {
+      const notifyIds = new Set<string>()
+      if (issue.assignedToUserId) notifyIds.add(issue.assignedToUserId)
+      if (issue.reportedByUserId) notifyIds.add(issue.reportedByUserId)
+      const preview = body.content.length > 100 ? body.content.slice(0, 100) + '...' : body.content
+      for (const uid of notifyIds) {
+        sendNotificationIfEnabled({
+          targetUserId: uid,
+          actorUserId: user.id,
+          eventType: 'comment',
+          entityType: 'issue',
+          entityTitle: issue.title,
+          entityPath: `/issues?issue=${issue.id}`,
+          details: preview,
+        }).catch(() => {})
+      }
+    }
 
     return db.query.issueComments.findFirst({
       where: eq(issueComments.id, comment!.id),

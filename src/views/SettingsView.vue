@@ -4,7 +4,7 @@ import { useAuthStore } from '@/stores/auth'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { Loader2, Camera, CheckCircle2, ArrowLeft, User, Shield, Box, AlertTriangle, ImagePlus, X } from 'lucide-vue-next'
+import { Loader2, Camera, CheckCircle2, ArrowLeft, User, Shield, Box, AlertTriangle, ImagePlus, X, Mail } from 'lucide-vue-next'
 import { useRouter, useRoute } from 'vue-router'
 import RolesSettings from '@/components/settings/RolesSettings.vue'
 import DeleteProductDialog from '@/components/product/DeleteProductDialog.vue'
@@ -16,14 +16,68 @@ const router = useRouter()
 const route = useRoute()
 
 // Tabs — default to query param if provided
-type TabType = 'profile' | 'roles' | 'product'
+type TabType = 'profile' | 'roles' | 'product' | 'email'
 const initialTab = (): TabType => {
   const tab = route.query.tab as string
   if (tab === 'roles' && ['super_admin', 'admin', 'product_admin'].includes(authStore.user?.role || '')) return 'roles'
   if (tab === 'product') return 'product'
+  if (tab === 'email') return 'email'
   return 'profile'
 }
 const activeTab = ref<TabType>(initialTab())
+
+// Email preferences
+const emailPrefs = ref({
+  assignedToMe: true,
+  statusChanges: true,
+  newComments: true,
+  deadlineReminders: true,
+})
+const emailPrefsSaving = ref(false)
+const emailPrefsSaved = ref(false)
+const emailPrefsLoaded = ref(false)
+
+async function loadEmailPreferences() {
+  try {
+    const res = await fetch('/api/auth/email-preferences', {
+      headers: { Authorization: `Bearer ${authStore.token}` },
+    })
+    if (res.ok) {
+      const data = await res.json()
+      emailPrefs.value = {
+        assignedToMe: data.assignedToMe ?? true,
+        statusChanges: data.statusChanges ?? true,
+        newComments: data.newComments ?? true,
+        deadlineReminders: data.deadlineReminders ?? true,
+      }
+      emailPrefsLoaded.value = true
+    }
+  } catch {}
+}
+
+async function saveEmailPreferences() {
+  emailPrefsSaving.value = true
+  emailPrefsSaved.value = false
+  try {
+    const res = await fetch('/api/auth/email-preferences', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authStore.token}`,
+      },
+      body: JSON.stringify(emailPrefs.value),
+    })
+    if (res.ok) {
+      emailPrefsSaved.value = true
+      setTimeout(() => emailPrefsSaved.value = false, 3000)
+    }
+  } catch {}
+  emailPrefsSaving.value = false
+}
+
+watch(activeTab, (tab) => {
+  if (tab === 'email' && !emailPrefsLoaded.value) loadEmailPreferences()
+})
 const canViewRoles = computed(() => ['super_admin', 'admin', 'product_admin'].includes(authStore.user?.role || ''))
 
 // Product settings
@@ -286,6 +340,20 @@ const userInitials = () => {
         />
       </button>
       <button
+        class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors relative"
+        :class="activeTab === 'email'
+          ? 'text-[#7C5CFC]'
+          : 'text-gray-500 hover:text-gray-700'"
+        @click="activeTab = 'email'"
+      >
+        <Mail :size="16" />
+        Email Notifications
+        <span
+          v-if="activeTab === 'email'"
+          class="absolute bottom-0 left-0 right-0 h-0.5 bg-[#7C5CFC] rounded-t"
+        />
+      </button>
+      <button
         v-if="productStore.activeProduct"
         class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors relative"
         :class="activeTab === 'product'
@@ -418,6 +486,112 @@ const userInitials = () => {
     <!-- Roles Tab -->
     <div v-if="activeTab === 'roles' && canViewRoles">
       <RolesSettings />
+    </div>
+
+    <!-- Email Notifications Tab -->
+    <div v-if="activeTab === 'email'" class="max-w-2xl">
+      <div class="bg-white rounded-2xl border border-gray-100 p-8 shadow-sm">
+        <h2 class="text-lg font-semibold text-gray-900 mb-1">Email Notifications</h2>
+        <p class="text-sm text-gray-500 mb-6">Choose which email notifications you'd like to receive</p>
+
+        <!-- Success -->
+        <div
+          v-if="emailPrefsSaved"
+          class="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-3 mb-6"
+        >
+          <CheckCircle2 :size="16" class="text-green-500" />
+          <p class="text-sm text-green-700 font-medium">Preferences saved</p>
+        </div>
+
+        <div class="space-y-5">
+          <!-- Assigned to me -->
+          <label class="flex items-center justify-between gap-4 cursor-pointer group">
+            <div>
+              <p class="text-sm font-medium text-gray-900 group-hover:text-gray-700">Assigned to me</p>
+              <p class="text-xs text-gray-500 mt-0.5">When a task, story, or issue is assigned to you</p>
+            </div>
+            <button
+              type="button"
+              class="relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+              :class="emailPrefs.assignedToMe ? 'bg-[#7C5CFC]' : 'bg-gray-200'"
+              @click="emailPrefs.assignedToMe = !emailPrefs.assignedToMe"
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform duration-200 ease-in-out"
+                :class="emailPrefs.assignedToMe ? 'translate-x-5' : 'translate-x-0'"
+              />
+            </button>
+          </label>
+
+          <!-- Status changes -->
+          <label class="flex items-center justify-between gap-4 cursor-pointer group">
+            <div>
+              <p class="text-sm font-medium text-gray-900 group-hover:text-gray-700">Status changes</p>
+              <p class="text-xs text-gray-500 mt-0.5">When items you own or are assigned to change status</p>
+            </div>
+            <button
+              type="button"
+              class="relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+              :class="emailPrefs.statusChanges ? 'bg-[#7C5CFC]' : 'bg-gray-200'"
+              @click="emailPrefs.statusChanges = !emailPrefs.statusChanges"
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform duration-200 ease-in-out"
+                :class="emailPrefs.statusChanges ? 'translate-x-5' : 'translate-x-0'"
+              />
+            </button>
+          </label>
+
+          <!-- New comments -->
+          <label class="flex items-center justify-between gap-4 cursor-pointer group">
+            <div>
+              <p class="text-sm font-medium text-gray-900 group-hover:text-gray-700">New comments</p>
+              <p class="text-xs text-gray-500 mt-0.5">When someone comments on your items</p>
+            </div>
+            <button
+              type="button"
+              class="relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+              :class="emailPrefs.newComments ? 'bg-[#7C5CFC]' : 'bg-gray-200'"
+              @click="emailPrefs.newComments = !emailPrefs.newComments"
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform duration-200 ease-in-out"
+                :class="emailPrefs.newComments ? 'translate-x-5' : 'translate-x-0'"
+              />
+            </button>
+          </label>
+
+          <!-- Deadline reminders -->
+          <label class="flex items-center justify-between gap-4 cursor-pointer group">
+            <div>
+              <p class="text-sm font-medium text-gray-900 group-hover:text-gray-700">Deadline reminders</p>
+              <p class="text-xs text-gray-500 mt-0.5">Upcoming deadlines on deliveries and releases</p>
+            </div>
+            <button
+              type="button"
+              class="relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+              :class="emailPrefs.deadlineReminders ? 'bg-[#7C5CFC]' : 'bg-gray-200'"
+              @click="emailPrefs.deadlineReminders = !emailPrefs.deadlineReminders"
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform duration-200 ease-in-out"
+                :class="emailPrefs.deadlineReminders ? 'translate-x-5' : 'translate-x-0'"
+              />
+            </button>
+          </label>
+        </div>
+
+        <div class="mt-8 pt-6 border-t border-gray-100">
+          <Button
+            class="bg-[#7C5CFC] hover:bg-[#6B4CE0] h-10 px-6 text-sm font-medium"
+            :disabled="emailPrefsSaving"
+            @click="saveEmailPreferences"
+          >
+            <Loader2 v-if="emailPrefsSaving" :size="16" class="animate-spin mr-2" />
+            {{ emailPrefsSaving ? 'Saving...' : 'Save Preferences' }}
+          </Button>
+        </div>
+      </div>
     </div>
 
     <!-- Product Settings Tab -->

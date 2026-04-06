@@ -21,7 +21,7 @@ const initiativeBody = t.Object({
   leaderAvatar: t.Optional(t.Nullable(t.String())),
   priority: t.Optional(t.Union([
     t.Literal('low'), t.Literal('medium'),
-    t.Literal('high'), t.Literal('critical')
+    t.Literal('high')
   ])),
   product: t.Optional(t.String()),
 })

@@ -1,6 +1,6 @@
 export type ConsumerFeedbackType = 'bug' | 'feature' | 'enhancement'
 export type ConsumerFeedbackStatus = 'new' | 'acknowledged' | 'investigating' | 'resolved' | 'wont_fix' | 'duplicate'
-export type ConsumerFeedbackPriority = 'low' | 'medium' | 'high' | 'critical'
+export type ConsumerFeedbackPriority = 'low' | 'medium' | 'high'
 
 export interface ConsumerFeedback {
   id: string

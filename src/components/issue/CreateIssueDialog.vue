@@ -379,6 +379,7 @@ async function handleSubmit() {
                 <Select v-model="severity">
                   <SelectTrigger><SelectValue placeholder="Select severity" /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="blocker">Blocker</SelectItem>
                     <SelectItem value="critical">Critical</SelectItem>
                     <SelectItem value="major">Major</SelectItem>
                     <SelectItem value="minor">Minor</SelectItem>
@@ -391,7 +392,6 @@ async function handleSubmit() {
                 <Select v-model="priority">
                   <SelectTrigger><SelectValue placeholder="Select priority" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="critical">Critical</SelectItem>
                     <SelectItem value="high">High</SelectItem>
                     <SelectItem value="medium">Medium</SelectItem>
                     <SelectItem value="low">Low</SelectItem>
@@ -584,13 +584,13 @@ async function handleSubmit() {
               <div>
                 <p class="text-[10px] text-gray-400 uppercase tracking-wider">Severity</p>
                 <span class="text-xs font-medium px-2 py-0.5 rounded-full"
-                  :class="severity === 'critical' ? 'bg-red-100 text-red-700' : severity === 'major' ? 'bg-orange-100 text-orange-700' : severity === 'minor' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'"
+                  :class="severity === 'blocker' ? 'bg-rose-950 text-white' : severity === 'critical' ? 'bg-red-100 text-red-700' : severity === 'major' ? 'bg-orange-100 text-orange-700' : severity === 'minor' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'"
                 >{{ severity }}</span>
               </div>
               <div>
                 <p class="text-[10px] text-gray-400 uppercase tracking-wider">Priority</p>
                 <span class="text-xs font-medium capitalize"
-                  :class="priority === 'critical' ? 'text-red-600' : priority === 'high' ? 'text-orange-600' : priority === 'medium' ? 'text-yellow-600' : 'text-gray-500'"
+                  :class="priority === 'high' ? 'text-red-600' : priority === 'medium' ? 'text-yellow-600' : 'text-gray-500'"
                 >{{ priority }}</span>
               </div>
               <div v-if="assigneeName">

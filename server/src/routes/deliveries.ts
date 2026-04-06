@@ -4,6 +4,7 @@ import { deliveries, deliveryInitiatives, tasks, users, initiatives } from '../d
 import { eq, count } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
+import { sendNotificationIfEnabled } from '../services/notificationEmails'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -197,6 +198,20 @@ export const deliveryRoutes = new Elysia({ prefix: '/api/deliveries' })
         changes,
       })
     }
+
+    // Notification: status changed — notify the creator
+    if (body.status && body.status !== old.status && old.createdByUserId) {
+      sendNotificationIfEnabled({
+        targetUserId: old.createdByUserId,
+        actorUserId: user?.id,
+        eventType: 'status_change',
+        entityType: 'delivery',
+        entityTitle: updated!.title,
+        entityPath: `/deliveries/${updated!.id}`,
+        details: body.status,
+      }).catch(() => {})
+    }
+
     return updated
   }, { body: t.Partial(deliveryBody) })
 

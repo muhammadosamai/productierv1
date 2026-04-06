@@ -456,12 +456,6 @@ async function handleSubmit() {
                     High
                   </span>
                 </SelectItem>
-                <SelectItem value="critical">
-                  <span class="flex items-center gap-2">
-                    <span class="w-2.5 h-2.5 rounded-full bg-[#333333]"></span>
-                    Critical
-                  </span>
-                </SelectItem>
               </SelectContent>
             </Select>
           </div>

@@ -2,10 +2,12 @@ import { Elysia, t } from 'elysia'
 import { jwt } from '@elysiajs/jwt'
 import bcrypt from 'bcryptjs'
 import { db } from '../db'
-import { users, tasks, stories, initiatives, deliveries, activities, productInvites, productMembers } from '../db/schema'
+import { users, tasks, stories, initiatives, deliveries, activities, productInvites, productMembers, passwordResetTokens, emailPreferences } from '../db/schema'
 import { eq, ilike, or, sql, arrayContains, and } from 'drizzle-orm'
 import { writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { randomBytes } from 'node:crypto'
+import { sendWelcomeEmail, sendPasswordResetEmail } from '../services/email'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -53,7 +55,28 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
       role: 'viewer',
     }).returning()
 
-    // Auto-accept any pending invites for this email
+    // If an invite token was provided, consume that specific invite
+    if (body.inviteToken) {
+      const invite = await db.query.productInvites.findFirst({
+        where: and(
+          eq(productInvites.token, body.inviteToken),
+          eq(productInvites.status, 'pending'),
+        ),
+      })
+      if (invite) {
+        await db.insert(productMembers).values({
+          product: invite.product,
+          userId: user!.id,
+          role: invite.role,
+        }).onConflictDoNothing()
+
+        await db.update(productInvites)
+          .set({ status: 'accepted' })
+          .where(eq(productInvites.id, invite.id))
+      }
+    }
+
+    // Auto-accept any other pending invites for this email
     const pendingInvites = await db.select().from(productInvites)
       .where(and(
         eq(productInvites.email, body.email.toLowerCase()),
@@ -71,6 +94,9 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
         .set({ status: 'accepted' })
         .where(eq(productInvites.id, invite.id))
     }
+
+    // Send welcome email (fire-and-forget)
+    sendWelcomeEmail({ email: user!.email, userName: user!.name }).catch(() => {})
 
     // Generate token
     const token = await jwt.sign({ userId: user!.id, role: user!.role })
@@ -91,6 +117,7 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
       name: t.String({ minLength: 1 }),
       email: t.String({ minLength: 1 }),
       password: t.String({ minLength: 6 }),
+      inviteToken: t.Optional(t.String()),
     }),
   })
 
@@ -132,12 +159,27 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
 
   // POST /api/auth/forgot-password
   .post('/forgot-password', async ({ body }) => {
-    // Check if user exists (don't reveal if email exists or not for security)
     const user = await db.query.users.findFirst({
       where: eq(users.email, body.email.toLowerCase()),
     })
 
-    // Always return success to prevent email enumeration
+    if (user) {
+      const token = randomBytes(32).toString('hex')
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000) // 1 hour
+
+      await db.insert(passwordResetTokens).values({
+        userId: user.id,
+        token,
+        expiresAt,
+      })
+
+      sendPasswordResetEmail({
+        email: user.email,
+        userName: user.name,
+        token,
+      }).catch(() => {})
+    }
+
     return {
       success: true,
       message: 'If an account with that email exists, we have sent a password reset link.',
@@ -145,6 +187,47 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
   }, {
     body: t.Object({
       email: t.String({ minLength: 1 }),
+    }),
+  })
+
+  // POST /api/auth/reset-password
+  .post('/reset-password', async ({ body, set }) => {
+    const resetToken = await db.query.passwordResetTokens.findFirst({
+      where: and(
+        eq(passwordResetTokens.token, body.token),
+      ),
+    })
+
+    if (!resetToken) {
+      set.status = 400
+      return { error: 'Invalid or expired reset link' }
+    }
+
+    if (resetToken.usedAt) {
+      set.status = 400
+      return { error: 'This reset link has already been used' }
+    }
+
+    if (new Date() > resetToken.expiresAt) {
+      set.status = 400
+      return { error: 'This reset link has expired' }
+    }
+
+    const hashedPassword = await bcrypt.hash(body.newPassword, 10)
+
+    await db.update(users)
+      .set({ password: hashedPassword })
+      .where(eq(users.id, resetToken.userId))
+
+    await db.update(passwordResetTokens)
+      .set({ usedAt: new Date() })
+      .where(eq(passwordResetTokens.id, resetToken.id))
+
+    return { success: true, message: 'Password has been reset successfully' }
+  }, {
+    body: t.Object({
+      token: t.String({ minLength: 1 }),
+      newPassword: t.String({ minLength: 6 }),
     }),
   })
 
@@ -640,5 +723,84 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
   }, {
     body: t.Object({
       file: t.File({ maxSize: '5m', type: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] }),
+    }),
+  })
+
+  // GET /api/auth/email-preferences
+  .get('/email-preferences', async ({ jwt, headers, set }) => {
+    const authHeader = headers.authorization
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      set.status = 401
+      return { error: 'Unauthorized' }
+    }
+
+    const token = authHeader.replace('Bearer ', '')
+    const payload = await jwt.verify(token)
+    if (!payload) {
+      set.status = 401
+      return { error: 'Invalid or expired token' }
+    }
+
+    const prefs = await db.query.emailPreferences.findFirst({
+      where: eq(emailPreferences.userId, payload.userId as string),
+    })
+
+    return prefs || {
+      assignedToMe: true,
+      statusChanges: true,
+      newComments: true,
+      deadlineReminders: true,
+    }
+  })
+
+  // PUT /api/auth/email-preferences
+  .put('/email-preferences', async ({ body, jwt, headers, set }) => {
+    const authHeader = headers.authorization
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      set.status = 401
+      return { error: 'Unauthorized' }
+    }
+
+    const token = authHeader.replace('Bearer ', '')
+    const payload = await jwt.verify(token)
+    if (!payload) {
+      set.status = 401
+      return { error: 'Invalid or expired token' }
+    }
+
+    const userId = payload.userId as string
+
+    const existing = await db.query.emailPreferences.findFirst({
+      where: eq(emailPreferences.userId, userId),
+    })
+
+    if (existing) {
+      const [updated] = await db.update(emailPreferences)
+        .set({
+          assignedToMe: body.assignedToMe,
+          statusChanges: body.statusChanges,
+          newComments: body.newComments,
+          deadlineReminders: body.deadlineReminders,
+        })
+        .where(eq(emailPreferences.userId, userId))
+        .returning()
+      return updated
+    }
+
+    const [created] = await db.insert(emailPreferences).values({
+      userId,
+      assignedToMe: body.assignedToMe,
+      statusChanges: body.statusChanges,
+      newComments: body.newComments,
+      deadlineReminders: body.deadlineReminders,
+    }).returning()
+
+    return created
+  }, {
+    body: t.Object({
+      assignedToMe: t.Boolean(),
+      statusChanges: t.Boolean(),
+      newComments: t.Boolean(),
+      deadlineReminders: t.Boolean(),
     }),
   })

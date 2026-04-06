@@ -4,6 +4,7 @@ import { stories, storyComments, storyAttachments, users } from '../db/schema'
 import { eq, sql } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
+import { sendNotificationIfEnabled } from '../services/notificationEmails'
 import { mkdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
@@ -32,7 +33,7 @@ const storyBody = t.Object({
     t.Literal('testing'), t.Literal('documentation')
   ])),
   priority: t.Optional(t.Union([
-    t.Literal('low'), t.Literal('medium'), t.Literal('high'), t.Literal('critical')
+    t.Literal('low'), t.Literal('medium'), t.Literal('high')
   ])),
   status: t.Optional(t.Union([
     t.Literal('backlog'), t.Literal('drafted'), t.Literal('initialized'),
@@ -135,6 +136,38 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
         changes,
       })
     }
+
+    // Notification: owner changed (owner is a name string, resolve to user)
+    if (body.owner && body.owner !== old.owner) {
+      const ownerUser = await db.query.users.findFirst({ where: eq(users.name, body.owner) })
+      if (ownerUser) {
+        sendNotificationIfEnabled({
+          targetUserId: ownerUser.id,
+          actorUserId: user?.id,
+          eventType: 'assigned',
+          entityType: 'story',
+          entityTitle: updated!.title,
+          entityPath: `/stories?story=${updated!.id}`,
+        }).catch(() => {})
+      }
+    }
+
+    // Notification: status changed — notify owner
+    if (body.status && body.status !== old.status && old.owner) {
+      const ownerUser = await db.query.users.findFirst({ where: eq(users.name, old.owner) })
+      if (ownerUser) {
+        sendNotificationIfEnabled({
+          targetUserId: ownerUser.id,
+          actorUserId: user?.id,
+          eventType: 'status_change',
+          entityType: 'story',
+          entityTitle: updated!.title,
+          entityPath: `/stories?story=${updated!.id}`,
+          details: body.status,
+        }).catch(() => {})
+      }
+    }
+
     return updated
   }, { body: t.Partial(storyBody) })
 
@@ -173,11 +206,30 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
     const user = await getUserFromHeader(jwt.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
+    const story = await db.query.stories.findFirst({ where: eq(stories.id, id) })
+
     const [comment] = await db.insert(storyComments).values({
       storyId: id,
       userId: user.id,
       content: body.content,
     }).returning()
+
+    // Notify story owner about the comment
+    if (story?.owner) {
+      const ownerUser = await db.query.users.findFirst({ where: eq(users.name, story.owner) })
+      if (ownerUser) {
+        const preview = body.content.length > 100 ? body.content.slice(0, 100) + '...' : body.content
+        sendNotificationIfEnabled({
+          targetUserId: ownerUser.id,
+          actorUserId: user.id,
+          eventType: 'comment',
+          entityType: 'story',
+          entityTitle: story.title,
+          entityPath: `/stories?story=${story.id}`,
+          details: preview,
+        }).catch(() => {})
+      }
+    }
 
     const full = await db.query.storyComments.findFirst({
       where: eq(storyComments.id, comment!.id),

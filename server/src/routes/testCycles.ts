@@ -159,7 +159,7 @@ export const testCycleRoutes = new Elysia({ prefix: '/api/test-cycles' })
       title: t.String({ minLength: 1 }),
       description: t.Optional(t.Nullable(t.String())),
       severity: t.Optional(t.Union([
-        t.Literal('critical'), t.Literal('major'), t.Literal('minor'), t.Literal('trivial'),
+        t.Literal('blocker'), t.Literal('critical'), t.Literal('major'), t.Literal('minor'), t.Literal('trivial'),
       ])),
       status: t.Optional(t.Union([
         t.Literal('open'), t.Literal('in_progress'), t.Literal('resolved'), t.Literal('closed'), t.Literal('deferred'),
@@ -189,7 +189,7 @@ export const testCycleRoutes = new Elysia({ prefix: '/api/test-cycles' })
       title: t.String({ minLength: 1 }),
       description: t.Nullable(t.String()),
       severity: t.Union([
-        t.Literal('critical'), t.Literal('major'), t.Literal('minor'), t.Literal('trivial'),
+        t.Literal('blocker'), t.Literal('critical'), t.Literal('major'), t.Literal('minor'), t.Literal('trivial'),
       ]),
       status: t.Union([
         t.Literal('open'), t.Literal('in_progress'), t.Literal('resolved'), t.Literal('closed'), t.Literal('deferred'),

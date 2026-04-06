@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useProductStore } from '@/stores/products'
 import { Input } from '@/components/ui/input'
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Loader2, Eye, EyeOff } from 'lucide-vue-next'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 const productStore = useProductStore()
 
@@ -17,6 +18,27 @@ const password = ref('')
 const confirmPassword = ref('')
 const showPassword = ref(false)
 const localError = ref('')
+
+const inviteToken = ref<string | null>(null)
+const inviteProduct = ref<string | null>(null)
+const inviteLoading = ref(false)
+
+onMounted(async () => {
+  const token = route.query.invite as string | undefined
+  if (token) {
+    inviteToken.value = token
+    inviteLoading.value = true
+    try {
+      const res = await fetch(`/api/invites/info/${token}`)
+      if (res.ok) {
+        const data = await res.json()
+        email.value = data.email
+        inviteProduct.value = data.product
+      }
+    } catch {}
+    inviteLoading.value = false
+  }
+})
 
 async function handleSubmit() {
   localError.value = ''
@@ -30,7 +52,7 @@ async function handleSubmit() {
     return
   }
 
-  const success = await authStore.register(name.value, email.value, password.value)
+  const success = await authStore.register(name.value, email.value, password.value, undefined, inviteToken.value || undefined)
   if (success) {
     await productStore.fetchProducts()
     router.push('/')
@@ -38,7 +60,6 @@ async function handleSubmit() {
 }
 
 const displayError = ref('')
-// Compute which error to show
 function getError() {
   return localError.value || authStore.error || ''
 }
@@ -52,6 +73,14 @@ function getError() {
         <img src="/logo.png" alt="Productier" class="w-14 h-14 rounded-2xl mb-4 shadow-lg shadow-[#7C5CFC]/20 mx-auto block" />
         <h1 class="text-2xl font-bold text-gray-900">Create an account</h1>
         <p class="text-sm text-gray-500 mt-1">Get started with Productier</p>
+      </div>
+
+      <!-- Invite banner -->
+      <div v-if="inviteProduct" class="bg-[#4857FE]/5 border border-[#4857FE]/20 rounded-xl px-5 py-3.5 mb-4">
+        <p class="text-sm text-[#4857FE] font-medium">
+          You've been invited to join <strong>{{ inviteProduct }}</strong>
+        </p>
+        <p class="text-xs text-gray-500 mt-0.5">Create an account to accept the invitation</p>
       </div>
 
       <!-- Form Card -->
@@ -82,6 +111,8 @@ function getError() {
               type="email"
               placeholder="you@example.com"
               required
+              :readonly="!!inviteToken"
+              :class="inviteToken ? 'bg-gray-50 text-gray-500' : ''"
             />
           </div>
 

@@ -7,6 +7,7 @@ import path from 'path'
 import { eq } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
+import { sendNotificationIfEnabled } from '../services/notificationEmails'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -30,7 +31,7 @@ const taskBody = t.Object({
   ])),
   priority: t.Optional(t.Union([
     t.Literal('low'), t.Literal('medium'),
-    t.Literal('high'), t.Literal('critical')
+    t.Literal('high')
   ])),
   type: t.Optional(t.Nullable(t.Union([
     t.Literal('design'), t.Literal('development'), t.Literal('testing'),
@@ -338,6 +339,51 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
       })
     }
 
+    // Notification: assignee changed
+    if (body.ownerUserId && body.ownerUserId !== old.ownerUserId) {
+      sendNotificationIfEnabled({
+        targetUserId: body.ownerUserId,
+        actorUserId: user?.id,
+        eventType: 'assigned',
+        entityType: 'task',
+        entityTitle: updated!.title,
+        entityPath: `/tasks?task=${updated!.id}`,
+      }).catch(() => {})
+    }
+    if (body.assigneeUserIds) {
+      const oldIds = new Set(old.assigneeUserIds || [])
+      for (const uid of body.assigneeUserIds) {
+        if (!oldIds.has(uid)) {
+          sendNotificationIfEnabled({
+            targetUserId: uid,
+            actorUserId: user?.id,
+            eventType: 'assigned',
+            entityType: 'task',
+            entityTitle: updated!.title,
+            entityPath: `/tasks?task=${updated!.id}`,
+          }).catch(() => {})
+        }
+      }
+    }
+
+    // Notification: status changed
+    if (body.status && body.status !== old.status) {
+      const notifyIds = new Set<string>()
+      if (old.ownerUserId) notifyIds.add(old.ownerUserId)
+      if (old.assigneeUserIds) old.assigneeUserIds.forEach(id => notifyIds.add(id))
+      for (const uid of notifyIds) {
+        sendNotificationIfEnabled({
+          targetUserId: uid,
+          actorUserId: user?.id,
+          eventType: 'status_change',
+          entityType: 'task',
+          entityTitle: updated!.title,
+          entityPath: `/tasks?task=${updated!.id}`,
+          details: body.status,
+        }).catch(() => {})
+      }
+    }
+
     // Auto-update parent delivery status based on task statuses
     if (updated!.deliveryId && (body.status || body.deliveryId !== undefined)) {
       await autoUpdateDeliveryStatus(updated!.deliveryId)
@@ -427,6 +473,23 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
       entityTitle: task.title,
       changes: [{ field: 'comment', from: null, to: body.content.length > 80 ? body.content.slice(0, 80) + '…' : body.content }],
     })
+
+    // Notify task owner and assignees about the comment
+    const commentNotifyIds = new Set<string>()
+    if (task.ownerUserId) commentNotifyIds.add(task.ownerUserId)
+    if (task.assigneeUserIds) task.assigneeUserIds.forEach(uid => commentNotifyIds.add(uid))
+    const preview = body.content.length > 100 ? body.content.slice(0, 100) + '...' : body.content
+    for (const uid of commentNotifyIds) {
+      sendNotificationIfEnabled({
+        targetUserId: uid,
+        actorUserId: user.id,
+        eventType: 'comment',
+        entityType: 'task',
+        entityTitle: task.title,
+        entityPath: `/tasks?task=${task.id}`,
+        details: preview,
+      }).catch(() => {})
+    }
 
     return comment
   }, { body: t.Object({ content: t.String({ minLength: 1 }) }) })

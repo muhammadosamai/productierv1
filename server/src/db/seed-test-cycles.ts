@@ -53,7 +53,7 @@ async function seed() {
   }).returning()
 
   await db.insert(testCycleIssues).values([
-    { testCycleId: c2!.id, title: 'Password reset email not sent', severity: 'critical', status: 'resolved', reportedByUserId: u1.id, assignedToUserId: u2.id, storyId: allStories[1]?.id || null },
+    { testCycleId: c2!.id, title: 'Password reset email not sent', severity: 'blocker', status: 'resolved', reportedByUserId: u1.id, assignedToUserId: u2.id, storyId: allStories[1]?.id || null },
     { testCycleId: c2!.id, title: 'Team member role not saving', severity: 'major', status: 'closed', reportedByUserId: u3.id, assignedToUserId: u1.id },
     { testCycleId: c2!.id, title: 'Mobile nav menu z-index issue', severity: 'minor', status: 'closed', reportedByUserId: u2.id },
   ])

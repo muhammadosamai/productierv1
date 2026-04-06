@@ -1,8 +1,8 @@
 export type StoryType = 'feature' | 'bug' | 'improvement' | 'technical_debt' | 'research' | 'infrastructure' | 'testing' | 'documentation'
-export type StoryPriority = 'low' | 'medium' | 'high' | 'critical'
+export type StoryPriority = 'low' | 'medium' | 'high'
 export type StoryStatus = 'backlog' | 'drafted' | 'initialized' | 'in_progress' | 'completed' | 'archived'
 export type TaskStatus = 'created' | 'assigned' | 'in_progress' | 'in_review' | 'done' | 'overdue' | 'blocked' | 'archived'
-export type TaskPriority = 'low' | 'medium' | 'high' | 'critical'
+export type TaskPriority = 'low' | 'medium' | 'high'
 export type TaskType = 'design' | 'development' | 'testing' | 'review' | 'research' | 'fix' | 'documentation' | 'deployment'
 
 export interface Story {

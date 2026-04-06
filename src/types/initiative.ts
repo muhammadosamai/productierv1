@@ -1,5 +1,5 @@
 export type InitiativeStatus = 'planning' | 'active' | 'paused' | 'completed' | 'archived'
-export type InitiativePriority = 'low' | 'medium' | 'high' | 'critical'
+export type InitiativePriority = 'low' | 'medium' | 'high'
 
 export interface Initiative {
   id: string

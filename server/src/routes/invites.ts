@@ -4,6 +4,7 @@ import { productInvites, productMembers, users } from '../db/schema'
 import { eq, and } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { randomBytes } from 'node:crypto'
+import { sendInviteEmail, getAppUrl } from '../services/email'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -110,6 +111,14 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
       invitedByUserId: user.id,
     }).returning()
 
+    sendInviteEmail({
+      email,
+      productName: body.product,
+      inviterName: user.name,
+      role: body.role || 'member',
+      token,
+    }).catch(() => {})
+
     return {
       type: 'invited',
       invite: {
@@ -184,4 +193,64 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
     await db.delete(productInvites).where(eq(productInvites.id, id))
 
     return { success: true }
+  })
+
+  // GET /api/invites/info/:token — Get invite info (public, no auth required)
+  .get('/info/:token', async ({ params: { token }, set }) => {
+    const invite = await db.query.productInvites.findFirst({
+      where: and(
+        eq(productInvites.token, token),
+        eq(productInvites.status, 'pending'),
+      ),
+    })
+
+    if (!invite) {
+      set.status = 404
+      return { error: 'Invite not found or already used' }
+    }
+
+    return {
+      email: invite.email,
+      product: invite.product,
+      role: invite.role,
+    }
+  })
+
+  // GET /api/invites/accept/:token — Accept an invite (redirect-based)
+  .get('/accept/:token', async ({ params: { token }, set }) => {
+    const invite = await db.query.productInvites.findFirst({
+      where: and(
+        eq(productInvites.token, token),
+        eq(productInvites.status, 'pending'),
+      ),
+    })
+
+    if (!invite) {
+      set.status = 302
+      set.headers = { Location: `${getAppUrl()}/login?invite_error=expired` }
+      return
+    }
+
+    const existingUser = await db.query.users.findFirst({
+      where: eq(users.email, invite.email),
+    })
+
+    if (existingUser) {
+      await db.insert(productMembers).values({
+        product: invite.product,
+        userId: existingUser.id,
+        role: invite.role,
+      }).onConflictDoNothing()
+
+      await db.update(productInvites)
+        .set({ status: 'accepted' })
+        .where(eq(productInvites.id, invite.id))
+
+      set.status = 302
+      set.headers = { Location: `${getAppUrl()}/login?invited=true` }
+      return
+    }
+
+    set.status = 302
+    set.headers = { Location: `${getAppUrl()}/register?invite=${token}` }
   })

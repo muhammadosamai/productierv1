@@ -141,6 +141,7 @@ function parsePrefix(title: string) {
 
 function severityStyle(s: string) {
   switch (s) {
+    case 'blocker': return 'bg-rose-950 text-white border border-rose-900'
     case 'critical': return 'bg-red-100 text-red-700 border border-red-200'
     case 'major': return 'bg-orange-100 text-orange-700 border border-orange-200'
     case 'minor': return 'bg-yellow-100 text-yellow-700 border border-yellow-200'
@@ -273,6 +274,7 @@ const resolvedIssues = computed(() => cycleIssues.value?.filter(i => i.status ==
             <option value="minor">Minor</option>
             <option value="major">Major</option>
             <option value="critical">Critical</option>
+            <option value="blocker">Blocker</option>
           </select>
           <button type="submit" :disabled="!issueTitle.trim() || addingIssue" class="text-sm font-medium text-white bg-[#4857FE] hover:bg-[#3E4BDE] px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50">
             {{ addingIssue ? 'Adding...' : 'Add Issue' }}

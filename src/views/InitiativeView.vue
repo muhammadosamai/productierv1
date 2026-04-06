@@ -229,10 +229,9 @@ const initiativeStatuses: { value: InitiativeStatus; label: string }[] = [
 ]
 
 const priorities: { value: InitiativePriority; label: string; number: number; color: string }[] = [
-  { value: 'critical', label: 'Critical', number: 1, color: 'bg-[#e2445c]' },
-  { value: 'high', label: 'High', number: 2, color: 'bg-[#fdab3d]' },
-  { value: 'medium', label: 'Medium', number: 3, color: 'bg-[#00c875]' },
-  { value: 'low', label: 'Low', number: 4, color: 'bg-[#579bfc]' },
+  { value: 'high', label: 'High', number: 1, color: 'bg-[#e2445c]' },
+  { value: 'medium', label: 'Medium', number: 2, color: 'bg-[#00c875]' },
+  { value: 'low', label: 'Low', number: 3, color: 'bg-[#579bfc]' },
 ]
 
 function statusStyle(status: string) {
@@ -259,18 +258,16 @@ function statusLabel(status: string) {
 
 function priorityNumber(priority: string) {
   switch (priority) {
-    case 'critical': return 1
-    case 'high': return 2
-    case 'medium': return 3
-    case 'low': return 4
-    default: return 4
+    case 'high': return 1
+    case 'medium': return 2
+    case 'low': return 3
+    default: return 3
   }
 }
 
 function priorityCircleColor(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-[#e2445c]'
-    case 'high': return 'bg-[#fdab3d]'
+    case 'high': return 'bg-[#e2445c]'
     case 'medium': return 'bg-[#00c875]'
     case 'low': return 'bg-[#579bfc]'
     default: return 'bg-gray-400'

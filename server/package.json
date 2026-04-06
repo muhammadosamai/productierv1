@@ -16,6 +16,7 @@
     "@elysiajs/cors": "^1.2",
     "@elysiajs/jwt": "^1.4.1",
     "@elysiajs/static": "^1.4.7",
+    "@sendgrid/mail": "^8.1.6",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.38",
     "elysia": "^1.2",

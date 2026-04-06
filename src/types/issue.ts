@@ -1,6 +1,6 @@
 export type IssueType = 'bug' | 'ui_issue' | 'performance' | 'crash' | 'security' | 'data_loss' | 'other'
-export type IssueSeverity = 'critical' | 'major' | 'minor' | 'trivial'
-export type IssuePriority = 'critical' | 'high' | 'medium' | 'low'
+export type IssueSeverity = 'blocker' | 'critical' | 'major' | 'minor' | 'trivial'
+export type IssuePriority = 'high' | 'medium' | 'low'
 export type IssueStatus = 'open' | 'in_progress' | 'resolved' | 'closed' | 'deferred'
 export type IssueReproducibility = 'always' | 'sometimes' | 'rarely' | 'once' | 'unable_to_reproduce'
 export type IssueEnvironment = 'production' | 'staging' | 'development' | 'testing'

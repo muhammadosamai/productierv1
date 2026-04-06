@@ -126,7 +126,6 @@ const statusOptions: { value: StoryStatus; label: string }[] = [
 ]
 
 const priorityOptions: { value: StoryPriority; label: string }[] = [
-  { value: 'critical', label: 'Critical' },
   { value: 'high', label: 'High' },
   { value: 'medium', label: 'Medium' },
   { value: 'low', label: 'Low' },
@@ -454,8 +453,7 @@ function statusStyle(status: string) {
 
 function priorityStyle(priority: string) {
   switch (priority) {
-    case 'critical': return 'bg-red-100 text-red-700 border border-red-200'
-    case 'high': return 'bg-orange-100 text-orange-700 border border-orange-200'
+    case 'high': return 'bg-red-100 text-red-700 border border-red-200'
     case 'medium': return 'bg-green-100 text-green-700 border border-green-200'
     case 'low': return 'bg-blue-100 text-blue-700 border border-blue-200'
     default: return 'bg-gray-100 text-gray-600 border border-gray-200'
@@ -631,8 +629,7 @@ function taskPriorityLabel(priority: string) {
 
 function taskPriorityStyle(priority: string) {
   switch (priority) {
-    case 'critical': return 'text-red-600 bg-red-50'
-    case 'high': return 'text-orange-600 bg-orange-50'
+    case 'high': return 'text-red-600 bg-red-50'
     case 'medium': return 'text-yellow-600 bg-yellow-50'
     case 'low': return 'text-green-600 bg-green-50'
     default: return 'text-gray-600 bg-gray-50'

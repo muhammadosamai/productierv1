@@ -22,6 +22,7 @@ import { inviteRoutes } from './routes/invites'
 import { issueRoutes } from './routes/issues'
 import { formConfigRoutes, customFieldRoutes } from './routes/formConfigs'
 import { searchRoutes } from './routes/search'
+import { startDeadlineReminder } from './services/deadlineReminder'
 
 const app = new Elysia()
   .use(cors({
@@ -57,3 +58,5 @@ const app = new Elysia()
   .listen(3001)
 
 console.log(`Server running at http://localhost:${app.server?.port}`)
+
+startDeadlineReminder()

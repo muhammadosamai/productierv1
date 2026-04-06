@@ -14,7 +14,7 @@ async function seed() {
     {
       title: 'Login page crashes on Safari iOS',
       description: 'When trying to log in on Safari for iPhone, the page freezes after entering credentials and tapping Sign In. The spinner appears but never resolves.',
-      type: 'bug' as const, status: 'investigating' as const, priority: 'critical' as const,
+      type: 'bug' as const, status: 'investigating' as const, priority: 'high' as const,
       reporterName: 'Sarah Chen', reporterEmail: 'sarah.chen@gmail.com',
       reporterBrowser: 'Safari 17.2', reporterOs: 'iOS 17.3', reporterDevice: 'iPhone 15 Pro',
       pageUrl: '/login', stepsToReproduce: '1. Open app on Safari iOS\n2. Enter valid credentials\n3. Tap Sign In\n4. Page freezes with spinner',

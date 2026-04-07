@@ -55,8 +55,8 @@ export function normalizeUploadUrlsForStorage(html: string): string {
   if (!html) return html
   let out = html
   if (API_ORIGIN) {
-    out = out.replaceAll(`${API_ORIGIN}/api/uploads/`, '/uploads/')
+    out = out.split(`${API_ORIGIN}/api/uploads/`).join('/uploads/')
   }
-  out = out.replaceAll('/api/uploads/', '/uploads/')
+  out = out.split('/api/uploads/').join('/uploads/')
   return out
 }

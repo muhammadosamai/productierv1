@@ -10,9 +10,9 @@ const LABELS: Record<string, string> = {
 
 export function formatProductRoleLabel(role: string): string {
   if (role in LABELS) return LABELS[role]!
-  return role.replaceAll('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+  return role.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())
 }
 
 export function formatAccountRoleLabel(role: string): string {
-  return role.replaceAll('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+  return role.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())
 }

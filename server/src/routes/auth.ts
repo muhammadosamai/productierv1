@@ -720,7 +720,7 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
     }
   }, {
     body: t.Object({
-      file: t.File({ maxSize: '5m', type: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] }),
+      file: t.File({ maxSize: '10m', type: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] }),
     }),
   })
 

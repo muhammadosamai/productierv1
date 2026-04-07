@@ -19,6 +19,7 @@ import type {
   IssueReproducibility, IssueEnvironment, IssueBrowser, IssueOs,
   IssueComment, IssueAttachment,
 } from '@/types/issue'
+import { attachmentPublicUrl } from '@/utils/uploadAssetUrl'
 
 interface TeamUser {
   id: string
@@ -147,7 +148,7 @@ async function hydrateAttachmentImagePreviews(items: IssueAttachment[]) {
 
   if (!authStore.token) {
     const next: Record<string, string> = {}
-    for (const att of imageAtts) next[att.id] = att.filePath
+    for (const att of imageAtts) next[att.id] = attachmentPublicUrl(att.filePath)
     attachmentPreviewUrls.value = next
     return
   }
@@ -169,6 +170,9 @@ async function hydrateAttachmentImagePreviews(items: IssueAttachment[]) {
   const next: Record<string, string> = {}
   for (const p of pairs) {
     if (p) next[p[0]] = p[1]
+  }
+  for (const att of imageAtts) {
+    if (!next[att.id]) next[att.id] = attachmentPublicUrl(att.filePath)
   }
   attachmentPreviewUrls.value = next
 }

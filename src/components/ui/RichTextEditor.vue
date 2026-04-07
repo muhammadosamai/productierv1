@@ -32,7 +32,7 @@ const editor = useEditor({
   ],
   editorProps: {
     attributes: {
-      class: 'prose prose-sm max-w-none outline-none px-4 py-3 min-h-[120px] text-sm text-gray-800',
+      class: 'prose prose-sm max-w-none outline-none px-4 py-3 min-h-[min(8rem,30vh)] text-sm text-gray-800',
     },
   },
   onUpdate: ({ editor }) => {
@@ -61,9 +61,14 @@ function setLink() {
 </script>
 
 <template>
-  <div class="border border-gray-200 rounded-lg overflow-hidden focus-within:border-[#4857FE] transition-colors">
-    <!-- Toolbar -->
-    <div v-if="editor" class="flex items-center gap-0.5 px-2 py-1.5 border-b border-gray-100 bg-gray-50/50 flex-wrap">
+  <div
+    class="border border-gray-200 rounded-lg overflow-hidden focus-within:border-[#4857FE] transition-colors flex flex-col min-h-[120px]"
+  >
+    <!-- Toolbar: fixed strip; body scrolls below -->
+    <div
+      v-if="editor"
+      class="flex items-center gap-0.5 px-2 py-1.5 border-b border-gray-100 bg-gray-50 shrink-0 flex-wrap z-10 shadow-[0_1px_0_rgba(0,0,0,0.06)]"
+    >
       <!-- Bold -->
       <button
         type="button"
@@ -189,8 +194,10 @@ function setLink() {
       </button>
     </div>
 
-    <!-- Editor content -->
-    <EditorContent :editor="editor" />
+    <!-- Scrollable editing surface -->
+    <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <EditorContent v-if="editor" :editor="editor" />
+    </div>
   </div>
 </template>
 

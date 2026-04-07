@@ -29,3 +29,34 @@ export function resolveUploadAssetUrl(path: string | null | undefined): string |
   }
   return p
 }
+
+/** Attachment `filePath` from the API (usually `/uploads/...`) for `<img src>` and download links. */
+export function attachmentPublicUrl(path: string | null | undefined): string {
+  if (path == null || path === '') return ''
+  return resolveUploadAssetUrl(path) ?? path
+}
+
+/**
+ * Rewrite `/uploads/...` in HTML (e.g. TipTap `img src`, `a href`, CSS `url()`) so assets load via `/api/uploads/...`
+ * when the host only proxies `/api/*`.
+ */
+export function rewriteUploadUrlsInHtml(html: string): string {
+  if (!html || !html.includes('/uploads/')) return html
+  const repl = (path: string) => resolveUploadAssetUrl(path) || path
+  let out = html
+  out = out.replace(/(\ssrc=["'])(\/uploads\/[^"']+)(["'])/gi, (_, a: string, path: string, b: string) => `${a}${repl(path)}${b}`)
+  out = out.replace(/(\shref=["'])(\/uploads\/[^"']+)(["'])/gi, (_, a: string, path: string, b: string) => `${a}${repl(path)}${b}`)
+  out = out.replace(/(url\(\s*["']?)(\/uploads\/[^)"'\s]+)(["']?\s*\))/gi, (_, a: string, path: string, b: string) => `${a}${repl(path)}${b}`)
+  return out
+}
+
+/** Convert browser `/api/uploads/...` (and optional `VITE_API_ORIGIN` prefix) back to stored `/uploads/...` paths. */
+export function normalizeUploadUrlsForStorage(html: string): string {
+  if (!html) return html
+  let out = html
+  if (API_ORIGIN) {
+    out = out.replaceAll(`${API_ORIGIN}/api/uploads/`, '/uploads/')
+  }
+  out = out.replaceAll('/api/uploads/', '/uploads/')
+  return out
+}

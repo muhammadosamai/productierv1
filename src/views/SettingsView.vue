@@ -10,6 +10,11 @@ import RolesSettings from '@/components/settings/RolesSettings.vue'
 import DeleteProductDialog from '@/components/product/DeleteProductDialog.vue'
 import { useProductStore } from '@/stores/products'
 import type { User } from '@/types/user'
+import { formatAccountRoleLabel, formatProductRoleLabel } from '@/utils/productRoleLabel'
+import { toast } from 'vue-sonner'
+
+const AVATAR_MAX_BYTES = 10 * 1024 * 1024
+const AVATAR_ACCEPT_MIMES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
 
 const authStore = useAuthStore()
 const productStore = useProductStore()
@@ -80,6 +85,15 @@ watch(activeTab, (tab) => {
   if (tab === 'email' && !emailPrefsLoaded.value) loadEmailPreferences()
 })
 const canViewRoles = computed(() => ['super_admin', 'admin', 'product_admin'].includes(authStore.user?.role || ''))
+
+/** Prefer per-product membership role; fall back to platform account role (users.role). */
+const profileRoleLabel = computed(() => {
+  const user = authStore.user
+  if (!user) return 'N/A'
+  const myRole = productStore.activeProduct?.myRole
+  if (myRole) return formatProductRoleLabel(myRole)
+  return formatAccountRoleLabel(user.role)
+})
 
 // Product settings
 const showDeleteProductDialog = ref(false)
@@ -219,10 +233,28 @@ function triggerFileUpload() {
   fileInput.value?.click()
 }
 
+function validateAvatarFile(file: File): string | null {
+  const typeOk = file.type ? AVATAR_ACCEPT_MIMES.has(file.type) : /\.(jpe?g|png|gif|webp)$/i.test(file.name)
+  if (!typeOk) {
+    return 'Please choose a JPG, PNG, GIF, or WebP image.'
+  }
+  if (file.size > AVATAR_MAX_BYTES) {
+    return 'Profile photo must be 10 MB or smaller.'
+  }
+  return null
+}
+
 function handleFileChange(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
   if (!file) return
+
+  const validationError = validateAvatarFile(file)
+  if (validationError) {
+    toast.error(validationError)
+    target.value = ''
+    return
+  }
 
   pendingFile.value = file
 
@@ -273,7 +305,9 @@ async function handleSubmit() {
       } else {
         const refreshed = await authStore.fetchMe()
         if (!refreshed) {
-          authStore.error = 'Avatar uploaded but profile could not be refreshed. Please reload the page.'
+          const refreshMsg = 'Avatar uploaded but profile could not be refreshed. Please reload the page.'
+          authStore.error = refreshMsg
+          toast.error(refreshMsg)
           return
         }
         if (authStore.user?.avatar) avatarPreview.value = authStore.user.avatar
@@ -286,13 +320,18 @@ async function handleSubmit() {
 
     if (Object.keys(data).length > 0) {
       const success = await authStore.updateProfile(data)
-      if (!success) return
+      if (!success) {
+        if (authStore.error) toast.error(authStore.error)
+        return
+      }
     }
 
     saved.value = true
     setTimeout(() => (saved.value = false), 3000)
   } catch (e) {
-    authStore.error = (e as Error).message
+    const msg = (e as Error).message || 'Something went wrong'
+    authStore.error = msg
+    toast.error(msg)
   } finally {
     uploading.value = false
   }
@@ -435,7 +474,7 @@ const userInitials = () => {
                 @change="handleFileChange"
               />
             </div>
-            <div>
+            <div class="min-w-0">
               <p class="text-sm font-medium text-gray-900">Profile photo</p>
               <button
                 type="button"
@@ -444,7 +483,9 @@ const userInitials = () => {
               >
                 Upload new photo
               </button>
-              <p class="text-xs text-gray-400 mt-0.5">JPG, PNG, GIF or WebP. Max 5MB.</p>
+              <p class="text-xs text-gray-500 mt-1.5 leading-relaxed max-w-sm">
+                Accepted formats: JPG, PNG, GIF, or WebP. Maximum file size 10&nbsp;MB.
+              </p>
             </div>
           </div>
 
@@ -470,13 +511,18 @@ const userInitials = () => {
             />
           </div>
 
-          <!-- Role (read-only) -->
+          <!-- Role (read-only): product membership when available, else platform account role -->
           <div class="space-y-1.5">
             <label class="text-sm font-medium text-gray-700">Role</label>
             <div class="flex items-center h-10 px-3 rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-500">
-              {{ authStore.user?.role?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'N/A' }}
+              {{ profileRoleLabel }}
             </div>
-            <p class="text-xs text-gray-400">Role can only be changed by an administrator</p>
+            <p v-if="productStore.activeProduct?.myRole" class="text-xs text-gray-400">
+              Your role in {{ productStore.activeProduct.name }}. A team admin can change this from Team.
+            </p>
+            <p v-else class="text-xs text-gray-400">
+              Account-wide role. Only an administrator can change this.
+            </p>
           </div>
 
           <!-- Submit -->

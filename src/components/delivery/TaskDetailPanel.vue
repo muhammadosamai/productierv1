@@ -17,6 +17,7 @@ import TaskStatusIcon from '@/components/shared/TaskStatusIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import type { Task, TaskSubtask, TaskStatus, TaskType, TaskPriority, TaskComment, TaskAttachment } from '@/types/backlog'
 import SubtaskDetailDialog from '@/components/delivery/SubtaskDetailDialog.vue'
+import { attachmentPublicUrl } from '@/utils/uploadAssetUrl'
 
 interface TeamUser {
   id: string
@@ -1900,7 +1901,7 @@ function onBackdropClick(e: MouseEvent) {
                     >
                       <img
                         v-if="isImageFile(att.mimeType)"
-                        :src="att.filePath"
+                        :src="attachmentPublicUrl(att.filePath)"
                         :alt="att.fileName"
                         class="w-10 h-10 object-cover rounded-lg"
                       />
@@ -1922,7 +1923,7 @@ function onBackdropClick(e: MouseEvent) {
                     <!-- Actions -->
                     <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover/att:opacity-100 transition-opacity">
                       <a
-                        :href="att.filePath"
+                        :href="attachmentPublicUrl(att.filePath)"
                         target="_blank"
                         download
                         class="p-1.5 rounded-md hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"

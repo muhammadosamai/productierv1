@@ -139,8 +139,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS issues_public_id_unique
   issueSchemaBootstrapped = true
 }
 
-const issueBody = t.Object({
-  title: t.String({ minLength: 1 }),
+const issueBodyShared = {
   description: t.Optional(t.Nullable(t.String())),
   type: t.Optional(t.Union([
     t.Literal('bug'), t.Literal('ui_issue'), t.Literal('performance'),
@@ -180,6 +179,17 @@ const issueBody = t.Object({
   storyId: t.Optional(t.Nullable(t.String())),
   taskId: t.Optional(t.Nullable(t.String())),
   testCycleId: t.Optional(t.Nullable(t.String())),
+} as const
+
+const issueCreateBody = t.Object({
+  title: t.String({ minLength: 1 }),
+  ...issueBodyShared,
+})
+
+/** Partial update: all fields optional (e.g. status-only from the detail panel). */
+const issueUpdateBody = t.Object({
+  title: t.Optional(t.String({ minLength: 1 })),
+  ...issueBodyShared,
 })
 
 async function getUserFromHeader(jwtVerify: any, headers: Record<string, string | undefined>) {
@@ -282,7 +292,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       },
     })
     return full
-  }, { body: issueBody })
+  }, { body: issueCreateBody })
 
   // GET /api/issues/:id
   .get('/:id', async ({ params: { id }, set }) => {
@@ -375,7 +385,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       },
     })
     return full
-  }, { body: issueBody })
+  }, { body: issueUpdateBody })
 
   // DELETE /api/issues/:id
   .delete('/:id', async ({ params: { id }, set, jwt: jwtInstance, headers }) => {

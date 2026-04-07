@@ -27,7 +27,7 @@ export const taskTypeEnum = pgEnum('task_type', [
 ])
 
 export const initiativeStatusEnum = pgEnum('initiative_status', [
-  'planning', 'active', 'paused', 'completed'
+  'planning', 'active', 'paused', 'completed', 'archived',
 ])
 
 export const deliveryStatusEnum = pgEnum('delivery_status', [

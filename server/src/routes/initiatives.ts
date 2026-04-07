@@ -12,7 +12,7 @@ const initiativeBody = t.Object({
   description: t.Optional(t.Nullable(t.String())),
   status: t.Optional(t.Union([
     t.Literal('planning'), t.Literal('active'),
-    t.Literal('paused'), t.Literal('completed')
+    t.Literal('paused'), t.Literal('completed'), t.Literal('archived'),
   ])),
   period: t.Optional(t.Nullable(t.String())),
   periodStart: t.Optional(t.Nullable(t.String())),

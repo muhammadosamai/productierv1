@@ -42,14 +42,9 @@ jobs:
             echo "Resetting to latest commit"
             git reset --hard origin/stage
 
-            echo "Pulling latest images (if any)"
-            docker compose pull || true
 
             echo "Rebuilding and starting containers"
-            docker compose up -d --build --remove-orphans
-
-            echo "Checking running containers"
-            docker compose ps
+            docker-compose up -d --build --remove-orphans
 
             echo "Deployment completed successfully"
           EOF

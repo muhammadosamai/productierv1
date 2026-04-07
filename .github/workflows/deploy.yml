@@ -29,8 +29,6 @@ jobs:
 
           ssh -o StrictHostKeyChecking=yes scripts@216.250.122.193 << 'EOF'
             set -euo pipefail
-            echo "Setting permissions"
-            chown -R scripts:scripts /var/www/productierv1
 
             echo "Navigating to project directory"
             cd /var/www/productierv1/server

@@ -4,6 +4,7 @@ import {
   passwordResetTemplate,
   welcomeTemplate,
   notificationTemplate,
+  roleChangeTemplate,
 } from './emailTemplates'
 
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || ''
@@ -87,4 +88,31 @@ export async function sendNotificationEmail(params: {
   const { email, ...rest } = params
   const { subject, html } = notificationTemplate(rest)
   return send(email, subject, html)
+}
+
+export async function sendRoleChangeEmail(params: {
+  email: string
+  userName: string
+  productName: string
+  previousRole: string
+  newRole: string
+  changedByName: string
+}): Promise<boolean> {
+  const teamUrl = `${APP_URL}/team?product=${encodeURIComponent(params.productName)}`
+  const { subject, html } = roleChangeTemplate({
+    userName: params.userName,
+    productName: params.productName,
+    previousRole: params.previousRole,
+    newRole: params.newRole,
+    changedByName: params.changedByName,
+    teamUrl,
+  })
+  const ok = await send(params.email, subject, html)
+  if (!ok) {
+    console.error('[Email] Role change notification was not delivered', {
+      to: params.email,
+      product: params.productName,
+    })
+  }
+  return ok
 }

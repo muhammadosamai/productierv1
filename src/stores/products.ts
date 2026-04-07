@@ -106,6 +106,14 @@ export const useProductStore = defineStore('products', () => {
     localStorage.setItem(ACTIVE_PRODUCT_KEY, activeProductName.value)
   }
 
+  /** Select by exact product name; returns false if not found. */
+  function selectProductByName(name: string): boolean {
+    const idx = products.value.findIndex(p => p.name === name)
+    if (idx === -1) return false
+    selectProduct(idx)
+    return true
+  }
+
   async function createProduct(data: {
     name: string
     logo?: string | null
@@ -205,5 +213,18 @@ export const useProductStore = defineStore('products', () => {
     localStorage.setItem('productier_sub_sidebar_collapsed', String(subSidebarCollapsed.value))
   }
 
-  return { products, activeIndex, activeProduct, activeProductName, selectProduct, createProduct, updateProduct, deleteProduct, fetchProducts, subSidebarCollapsed, toggleSubSidebar }
+  return {
+    products,
+    activeIndex,
+    activeProduct,
+    activeProductName,
+    selectProduct,
+    selectProductByName,
+    createProduct,
+    updateProduct,
+    deleteProduct,
+    fetchProducts,
+    subSidebarCollapsed,
+    toggleSubSidebar,
+  }
 })

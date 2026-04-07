@@ -5,6 +5,8 @@ import { eq, and, desc, inArray } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { sendRoleChangeEmail } from '../services/email'
+import { isProductMemberRole } from '../lib/productMemberRoles'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -16,6 +18,13 @@ async function getUserFromHeader(jwtVerify: any, headers: Record<string, string 
   if (!payload?.userId) return null
   const user = await db.query.users.findFirst({ where: eq(users.id, payload.userId as string) })
   return user || null
+}
+
+async function isProductAdmin(userId: string, product: string): Promise<boolean> {
+  const member = await db.query.productMembers.findFirst({
+    where: and(eq(productMembers.product, product), eq(productMembers.userId, userId)),
+  })
+  return member?.role === 'admin'
 }
 
 function normalizeProjectKeyBase(input: string) {
@@ -180,6 +189,101 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     body: t.Object({
       userId: t.String(),
       role: t.Optional(t.String()),
+    }),
+  })
+
+  // PATCH /api/products/:name/members/:userId — update product role (product admin or super_admin)
+  .patch('/:name/members/:userId', async ({ params: { name, userId }, body, set, jwt: jwtInstance, headers }) => {
+    const user = await getUserFromHeader(jwtInstance.verify, headers)
+    if (!user) {
+      set.status = 401
+      return { error: 'Unauthorized' }
+    }
+
+    const canManage = user.role === 'super_admin' || await isProductAdmin(user.id, name)
+    if (!canManage) {
+      set.status = 403
+      return { error: 'Only product admins can change member roles' }
+    }
+
+    if (user.role !== 'super_admin' && user.id === userId) {
+      set.status = 403
+      return { error: 'Ask another admin to change your own role' }
+    }
+
+    const role = body.role
+    if (!isProductMemberRole(role)) {
+      set.status = 400
+      return { error: 'Invalid role' }
+    }
+
+    const existing = await db.query.productMembers.findFirst({
+      where: and(eq(productMembers.product, name), eq(productMembers.userId, userId)),
+    })
+    if (!existing) {
+      set.status = 404
+      return { error: 'Member not found' }
+    }
+
+    const targetUser = await db.query.users.findFirst({ where: eq(users.id, userId) })
+
+    if (existing.role === role) {
+      return {
+        id: existing.id,
+        product: existing.product,
+        role: existing.role,
+        addedAt: existing.addedAt,
+        userId,
+        userName: targetUser?.name,
+        userEmail: targetUser?.email,
+        userAvatar: targetUser?.avatar,
+        userRole: targetUser?.role,
+      }
+    }
+
+    if (existing.role === 'admin' && role !== 'admin') {
+      const admins = await db
+        .select({ id: productMembers.id })
+        .from(productMembers)
+        .where(and(eq(productMembers.product, name), eq(productMembers.role, 'admin')))
+      if (admins.length <= 1) {
+        set.status = 400
+        return { error: 'Cannot remove the last product admin' }
+      }
+    }
+
+    const [updated] = await db
+      .update(productMembers)
+      .set({ role })
+      .where(and(eq(productMembers.product, name), eq(productMembers.userId, userId)))
+      .returning()
+
+    if (targetUser?.email) {
+      const previousRole = existing.role
+      void sendRoleChangeEmail({
+        email: targetUser.email,
+        userName: targetUser.name || 'there',
+        productName: name,
+        previousRole,
+        newRole: role,
+        changedByName: user.name || 'An administrator',
+      })
+    }
+
+    return {
+      id: updated!.id,
+      product: updated!.product,
+      role: updated!.role,
+      addedAt: updated!.addedAt,
+      userId,
+      userName: targetUser?.name,
+      userEmail: targetUser?.email,
+      userAvatar: targetUser?.avatar,
+      userRole: targetUser?.role,
+    }
+  }, {
+    body: t.Object({
+      role: t.String(),
     }),
   })
 

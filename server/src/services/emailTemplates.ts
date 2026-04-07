@@ -1,3 +1,6 @@
+import { escapeHtml, sanitizeEmailSubject } from '../lib/htmlEscape'
+import { formatProductRoleLabel } from '../lib/productMemberRoles'
+
 const BRAND_COLOR = '#4857FE'
 const BRAND_COLOR_HOVER = '#3a47d4'
 
@@ -134,6 +137,39 @@ export function notificationTemplate(params: {
         Hi <strong style="color:#111827">${userName}</strong>, ${descriptions[eventType]}
       </p>
       ${button(`View ${entityType.charAt(0).toUpperCase() + entityType.slice(1)}`, entityUrl)}
+    `),
+  }
+}
+
+export function roleChangeTemplate(params: {
+  userName: string
+  productName: string
+  previousRole: string
+  newRole: string
+  changedByName: string
+  teamUrl: string
+}): { subject: string; html: string } {
+  const safeName = escapeHtml(params.userName)
+  const safeActor = escapeHtml(params.changedByName)
+  const safeProduct = escapeHtml(params.productName)
+  const prev = escapeHtml(formatProductRoleLabel(params.previousRole))
+  const next = escapeHtml(formatProductRoleLabel(params.newRole))
+  const subjectProduct = sanitizeEmailSubject(params.productName)
+  return {
+    subject: `Your role on ${subjectProduct} was updated`,
+    html: layout(`
+      <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827">Your role was updated</h1>
+      <p style="margin:0 0 20px;font-size:15px;color:#6b7280;line-height:1.6">
+        Hi <strong style="color:#111827">${safeName}</strong>,
+        <strong style="color:#111827">${safeActor}</strong> changed your role in
+        <strong style="color:#111827">${safeProduct}</strong> from
+        <strong style="color:${BRAND_COLOR}">${prev}</strong> to
+        <strong style="color:${BRAND_COLOR}">${next}</strong>.
+      </p>
+      ${button('View team', params.teamUrl)}
+      <p style="margin:0;font-size:13px;color:#9ca3af;line-height:1.5">
+        If this looks wrong, contact a product admin.
+      </p>
     `),
   }
 }

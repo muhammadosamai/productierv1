@@ -2,9 +2,8 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { tasks, taskComments, taskAttachments, taskSubtasks, stories, users, deliveries, taskStatusHistory, products } from '../db/schema'
 import { randomUUID } from 'crypto'
-import { mkdir } from 'fs/promises'
 import path from 'path'
-import { eq } from 'drizzle-orm'
+import { eq, type InferSelectModel } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
@@ -130,19 +129,20 @@ function hasAnyRoleAssigned(task: Record<string, any>): boolean {
   )
 }
 
+type DeliveryStatus = InferSelectModel<typeof deliveries>['status']
+
 /**
- * Auto-update delivery status based on its tasks:
- * - "initialized" → no tasks with 'todo' status (all cards are non-todo or no cards)
- * - "pending"     → has tasks, but none are in_progress
- * - "active"      → any task is in_progress
- * - "completed"   → all tasks are done (or review/done — non-active terminal states)
+ * Auto-update delivery status based on its tasks (matches `delivery_status` enum):
+ * - "initialized" → no tasks, or tasks exist but none are actively in progress
+ * - "in_progress" → any task is in_progress, in_review, overdue, or blocked
+ * - "completed"   → all tasks are done
  */
 async function autoUpdateDeliveryStatus(deliveryId: string) {
   const delivery = await db.query.deliveries.findFirst({ where: eq(deliveries.id, deliveryId) })
   if (!delivery) return
 
-  // Skip if delivery is manually set to archived or canceled
-  if (delivery.status === 'archived' || delivery.status === 'canceled') return
+  // Skip if delivery is manually set to archived
+  if (delivery.status === 'archived') return
 
   const taskList = await db.query.tasks.findMany({
     where: eq(tasks.deliveryId, deliveryId),
@@ -161,14 +161,14 @@ async function autoUpdateDeliveryStatus(deliveryId: string) {
   const hasActive = taskList.some(t => t.status === 'in_progress' || t.status === 'in_review' || t.status === 'overdue' || t.status === 'blocked')
   const allDone = taskList.every(t => t.status === 'done')
 
-  let newStatus: string
+  let newStatus: DeliveryStatus
 
   if (allDone) {
     newStatus = 'completed'
   } else if (hasActive) {
-    newStatus = 'active'
+    newStatus = 'in_progress'
   } else if (hasCreatedOrAssigned) {
-    newStatus = 'pending'
+    newStatus = 'initialized'
   } else {
     newStatus = 'initialized'
   }
@@ -759,9 +759,7 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     const file = (body as any).file as File
     if (!file) { set.status = 400; return { error: 'No file provided' } }
 
-    // Create uploads/attachments dir
     const uploadsDir = path.join(process.cwd(), 'uploads', 'attachments')
-    await mkdir(uploadsDir, { recursive: true })
 
     // Save file with unique name
     const ext = path.extname(file.name) || ''

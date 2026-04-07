@@ -3,7 +3,7 @@ import { db } from '../db'
 import { products, productMembers, users, stories, tasks, initiatives, deliveries, releases, servers, testCycles, favorites, assetTypes, assets, featureRequests, consumerFeedbacks, taskStatusHistory, activities } from '../db/schema'
 import { eq, and, desc, inArray } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
-import { writeFile, mkdir } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
@@ -215,7 +215,6 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     }
 
     const uploadsDir = join(import.meta.dir, '../../uploads/logos')
-    await mkdir(uploadsDir, { recursive: true })
 
     const ext = file.name.split('.').pop() || 'png'
     const filename = `product-${Date.now()}.${ext}`

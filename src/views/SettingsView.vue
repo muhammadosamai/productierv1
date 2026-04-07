@@ -4,7 +4,7 @@ import { useAuthStore } from '@/stores/auth'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { Loader2, Camera, CheckCircle2, ArrowLeft, User, Shield, Box, AlertTriangle, ImagePlus, X, Mail } from 'lucide-vue-next'
+import { Loader2, Camera, CheckCircle2, ArrowLeft, User as UserIcon, Shield, Box, AlertTriangle, ImagePlus, X, Mail } from 'lucide-vue-next'
 import { useRouter, useRoute } from 'vue-router'
 import RolesSettings from '@/components/settings/RolesSettings.vue'
 import DeleteProductDialog from '@/components/product/DeleteProductDialog.vue'
@@ -335,7 +335,7 @@ const userInitials = () => {
           : 'text-gray-500 hover:text-gray-700'"
         @click="activeTab = 'profile'"
       >
-        <User :size="16" />
+        <UserIcon :size="16" />
         Profile
         <span
           v-if="activeTab === 'profile'"

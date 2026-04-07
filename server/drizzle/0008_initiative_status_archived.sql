@@ -1,0 +1,1 @@
+ALTER TYPE "public"."initiative_status" ADD VALUE 'archived';

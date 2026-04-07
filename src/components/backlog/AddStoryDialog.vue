@@ -552,7 +552,7 @@ async function handleSubmit(withBreakdown = false) {
             <label class="text-sm font-medium text-gray-700">Product</label>
             <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 bg-gray-50 text-sm text-gray-500 cursor-not-allowed">
               <div v-if="activeProduct?.logo" class="w-5 h-5 rounded overflow-hidden shrink-0">
-                <img :src="activeProduct.logo" class="w-full h-full object-cover" :alt="activeProduct.name" />
+                <UploadAssetImg :src="activeProduct.logo" class="w-full h-full object-cover" :alt="activeProduct.name" />
               </div>
               <span class="truncate">{{ activeProduct?.name || 'Product' }}</span>
             </div>
@@ -563,7 +563,7 @@ async function handleSubmit(withBreakdown = false) {
             <!-- Selected owner display -->
             <div v-if="owner" class="flex items-center gap-2.5 border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white">
               <div class="w-6 h-6 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[9px] font-medium overflow-hidden shrink-0">
-                <img v-if="ownerAvatar" :src="ownerAvatar" class="w-6 h-6 rounded-full object-cover" :alt="owner" />
+                <UploadAssetImg v-if="ownerAvatar" :src="ownerAvatar" class="w-6 h-6 rounded-full object-cover" :alt="owner" />
                 <span v-else>{{ owner.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2) }}</span>
               </div>
               <span class="text-sm font-medium text-gray-900 flex-1 truncate">{{ owner }}</span>
@@ -601,7 +601,7 @@ async function handleSubmit(withBreakdown = false) {
                   @click="selectOwner(user)"
                 >
                   <div class="w-6 h-6 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[9px] font-medium overflow-hidden shrink-0">
-                    <img v-if="user.avatar" :src="user.avatar" class="w-6 h-6 rounded-full object-cover" :alt="user.name" />
+                    <UploadAssetImg v-if="user.avatar" :src="user.avatar" class="w-6 h-6 rounded-full object-cover" :alt="user.name" />
                     <span v-else>{{ user.name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2) }}</span>
                   </div>
                   <div class="flex flex-col min-w-0">

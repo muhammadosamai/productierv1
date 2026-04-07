@@ -759,7 +759,7 @@ function onIssueCreated() {
                 v-if="child.avatar"
                 class="flex items-center justify-center w-5 h-5 rounded-full bg-[#7C5CFC] text-white text-[8px] font-medium overflow-hidden shrink-0"
               >
-                <img v-if="child.avatarUrl" :src="child.avatarUrl" class="w-5 h-5 rounded-full object-cover" :alt="child.label" />
+                <UploadAssetImg v-if="child.avatarUrl" :src="child.avatarUrl" class="w-5 h-5 rounded-full object-cover" :alt="child.label" />
                 <span v-else>{{ child.avatar }}</span>
               </div>
               <span class="truncate">{{ child.label }}</span>
@@ -843,7 +843,7 @@ function onIssueCreated() {
                   v-if="child.avatar"
                   class="flex items-center justify-center w-5 h-5 rounded-full bg-[#7C5CFC] text-white text-[8px] font-medium overflow-hidden shrink-0"
                 >
-                  <img
+                  <UploadAssetImg
                     v-if="child.avatarUrl"
                     :src="child.avatarUrl"
                     class="w-5 h-5 rounded-full object-cover"

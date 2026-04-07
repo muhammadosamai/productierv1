@@ -106,7 +106,7 @@ watch(() => [props.period, productStore.activeProduct?.name], fetchData, { immed
               <td class="px-5 py-3 text-gray-400">{{ Number(idx) + 1 }}</td>
               <td class="px-5 py-3">
                 <div class="flex items-center gap-2">
-                  <img v-if="a.avatar" :src="a.avatar" class="w-6 h-6 rounded-full object-cover" />
+                  <UploadAssetImg v-if="a.avatar" :src="a.avatar" class="w-6 h-6 rounded-full object-cover" />
                   <div v-else class="w-6 h-6 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[10px] font-semibold text-[#4857FE]">
                     {{ getInitials(a.name) }}
                   </div>

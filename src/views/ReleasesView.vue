@@ -361,7 +361,7 @@ const columns = [
               <!-- Manager -->
               <td class="px-5 py-3.5">
                 <div v-if="release.releaseManager" class="flex items-center gap-2">
-                  <img v-if="release.releaseManager.avatar" :src="release.releaseManager.avatar" :alt="release.releaseManager.name" class="w-6 h-6 rounded-full object-cover" />
+                  <UploadAssetImg v-if="release.releaseManager.avatar" :src="release.releaseManager.avatar" :alt="release.releaseManager.name" class="w-6 h-6 rounded-full object-cover" />
                   <div v-else class="w-6 h-6 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[10px] font-semibold text-[#4857FE]">
                     {{ release.releaseManager.name.charAt(0).toUpperCase() }}
                   </div>
@@ -456,7 +456,7 @@ const columns = [
           <div class="flex items-center justify-between pt-3 border-t border-gray-100">
             <div class="flex items-center gap-2">
               <template v-if="release.releaseManager">
-                <img v-if="release.releaseManager.avatar" :src="release.releaseManager.avatar" :alt="release.releaseManager.name" class="w-5 h-5 rounded-full object-cover" />
+                <UploadAssetImg v-if="release.releaseManager.avatar" :src="release.releaseManager.avatar" :alt="release.releaseManager.name" class="w-5 h-5 rounded-full object-cover" />
                 <div v-else class="w-5 h-5 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[9px] font-semibold text-[#4857FE]">
                   {{ release.releaseManager.name.charAt(0).toUpperCase() }}
                 </div>

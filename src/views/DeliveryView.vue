@@ -655,7 +655,7 @@ function taskShortId(task: Task) {
             >
               <template v-if="filterUserId && filterUserId !== 'unassigned' && getUserById(filterUserId)">
                 <div class="w-5 h-5 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold overflow-hidden shrink-0">
-                  <img v-if="getUserById(filterUserId)?.avatar" :src="getUserById(filterUserId)!.avatar!" class="w-5 h-5 rounded-full object-cover" />
+                  <UploadAssetImg v-if="getUserById(filterUserId)?.avatar" :src="getUserById(filterUserId)!.avatar!" class="w-5 h-5 rounded-full object-cover" />
                   <span v-else>{{ getUserById(filterUserId)!.name[0] }}</span>
                 </div>
               </template>
@@ -710,7 +710,7 @@ function taskShortId(task: Task) {
                 @click="selectFilter(user.id)"
               >
                 <div class="w-5 h-5 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold overflow-hidden shrink-0">
-                  <img v-if="user.avatar" :src="user.avatar" class="w-5 h-5 rounded-full object-cover" />
+                  <UploadAssetImg v-if="user.avatar" :src="user.avatar" class="w-5 h-5 rounded-full object-cover" />
                   <span v-else>{{ user.name[0] }}</span>
                 </div>
                 <span class="flex-1 truncate">{{ user.name }}</span>
@@ -860,7 +860,7 @@ function taskShortId(task: Task) {
                               :style="{ zIndex: 3 - Number(i) }"
                               :title="getUserById(userId)?.name || userId"
                             >
-                              <img v-if="getUserById(userId)?.avatar" :src="getUserById(userId)!.avatar!" class="w-6 h-6 rounded-full object-cover" />
+                              <UploadAssetImg v-if="getUserById(userId)?.avatar" :src="getUserById(userId)!.avatar!" class="w-6 h-6 rounded-full object-cover" />
                               <span v-else>{{ (getUserById(userId)?.name || '?')[0] }}</span>
                             </div>
                             <div

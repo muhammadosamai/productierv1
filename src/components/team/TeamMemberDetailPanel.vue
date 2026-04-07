@@ -168,7 +168,7 @@ function tabCount(key: string): number {
           <!-- Profile Section -->
           <div class="px-6 pt-5 pb-4 flex items-center gap-4">
             <div class="w-14 h-14 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-xl font-bold shrink-0">
-              <img v-if="member.avatar" :src="member.avatar" class="w-14 h-14 rounded-full object-cover" />
+              <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-14 h-14 rounded-full object-cover" />
               <span v-else>{{ getInitials(member.name) }}</span>
             </div>
             <div class="min-w-0">

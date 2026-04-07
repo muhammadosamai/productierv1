@@ -24,13 +24,23 @@ import { formConfigRoutes, customFieldRoutes } from './routes/formConfigs'
 import { searchRoutes } from './routes/search'
 import { startDeadlineReminder } from './services/deadlineReminder'
 
+const corsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean)
+  : ['http://localhost:5173', 'https://productier.wonderbyte.io']
+
 const app = new Elysia()
   .use(cors({
-    origin: 'http://localhost:5173',
+    origin: corsOrigins,
   }))
+  // /uploads — direct path when reverse proxy allows it
   .use(staticPlugin({
     assets: 'uploads',
     prefix: '/uploads',
+  }))
+  // /api/uploads — same files; works when the host only proxies /api/* (no /uploads rule)
+  .use(staticPlugin({
+    assets: 'uploads',
+    prefix: '/api/uploads',
   }))
   .use(storyRoutes)
   .use(taskRoutes)

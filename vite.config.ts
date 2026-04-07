@@ -18,6 +18,7 @@ export default defineConfig({
     },
   },
   server: {
+    // Production: set VITE_API_ORIGIN to your API origin so <UploadAssetImg> can load /uploads/* (avatars, logos).
     proxy: {
       '/api': {
         target: 'http://localhost:3001',

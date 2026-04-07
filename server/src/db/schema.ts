@@ -27,7 +27,7 @@ export const taskTypeEnum = pgEnum('task_type', [
 ])
 
 export const initiativeStatusEnum = pgEnum('initiative_status', [
-  'planning', 'active', 'paused', 'completed'
+  'planning', 'active', 'paused', 'completed', 'archived',
 ])
 
 export const deliveryStatusEnum = pgEnum('delivery_status', [
@@ -167,6 +167,7 @@ export const issues = pgTable('issues', {
   storyId: uuid('story_id').references(() => stories.id, { onDelete: 'set null' }),
   taskId: uuid('task_id'),
   testCycleId: uuid('test_cycle_id'),
+  archived: boolean('archived').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 })

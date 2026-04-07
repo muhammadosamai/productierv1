@@ -138,6 +138,21 @@ watch(() => productStore.activeProduct?.name, () => {
   fetchTeamMembers()
 })
 
+/** Deep-link from email: /team?product=ProductName */
+function applyProductFromQuery() {
+  const raw = route.query.product
+  if (raw == null || Array.isArray(raw)) return
+  const name = String(raw).trim()
+  if (!name) return
+  productStore.selectProductByName(name)
+}
+
+watch(
+  () => [route.query.product, productStore.products.map(p => p.name).join('\0')] as const,
+  () => applyProductFromQuery(),
+  { immediate: true },
+)
+
 // Role-filtered member groups
 const membersByRole = computed(() => {
   const all = teamMembers.value
@@ -183,7 +198,78 @@ function toggleSort(field: SortField) {
   }
 }
 
-const roleOrder: Record<string, number> = { super_admin: 0, admin: 1, product_admin: 2, product_manager: 3, business_analyst: 4, developer: 5, viewer: 6 }
+const roleOrder: Record<string, number> = { super_admin: 0, admin: 1, product_admin: 2, product_manager: 3, business_analyst: 4, developer: 5, viewer: 6, member: 7 }
+
+/** Product-scoped roles (matches invites / API). */
+const productRoleOptions = [
+  { value: 'admin', label: 'Admin' },
+  { value: 'member', label: 'Member' },
+  { value: 'product_manager', label: 'Product Manager' },
+  { value: 'business_analyst', label: 'Business Analyst' },
+  { value: 'developer', label: 'Developer' },
+  { value: 'viewer', label: 'Viewer' },
+] as const
+
+function roleOptionsForMember(member: TeamUser): { value: string; label: string }[] {
+  const base = productRoleOptions.map(r => ({ value: r.value, label: r.label }))
+  if (!base.some(r => r.value === member.role)) {
+    return [{ value: member.role, label: roleLabel(member.role) }, ...base]
+  }
+  return base
+}
+
+const roleUpdatingId = ref<string | null>(null)
+const roleUpdateError = ref('')
+
+function canChangeRoleFor(member: TeamUser): boolean {
+  const u = authStore.user
+  if (!u || !authStore.token) return false
+  if (u.role === 'super_admin') return true
+  const self = teamMembers.value.find(m => m.id === u.id)
+  if (self?.role !== 'admin') return false
+  return member.id !== u.id
+}
+
+async function onMemberRoleChange(member: TeamUser, newRole: string) {
+  if (member.role === newRole) return
+  const productName = productStore.activeProduct?.name
+  if (!productName) return
+  roleUpdateError.value = ''
+  roleUpdatingId.value = member.id
+  try {
+    const res = await fetch(
+      `/api/products/${encodeURIComponent(productName)}/members/${encodeURIComponent(member.id)}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authStore.token}`,
+        },
+        body: JSON.stringify({ role: newRole }),
+      },
+    )
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      roleUpdateError.value = (data as { error?: string }).error || 'Failed to update role'
+      return
+    }
+    const newRoleVal = (data as { role?: string }).role
+    if (!newRoleVal) return
+    const idx = teamMembers.value.findIndex(m => m.id === member.id)
+    if (idx !== -1) {
+      const cur = teamMembers.value[idx]!
+      teamMembers.value[idx] = { ...cur, role: newRoleVal }
+    }
+    if (selectedMember.value?.id === member.id) {
+      const sm = selectedMember.value
+      selectedMember.value = { ...sm, role: newRoleVal }
+    }
+  } catch {
+    roleUpdateError.value = 'Network error'
+  } finally {
+    roleUpdatingId.value = null
+  }
+}
 
 function compareStr(a: string | null | undefined, b: string | null | undefined): number {
   return (a || '').localeCompare(b || '')
@@ -475,7 +561,8 @@ function roleStyle(role: string) {
     case 'product_manager': return 'bg-purple-100 text-purple-700 border border-purple-200'
     case 'business_analyst': return 'bg-blue-100 text-blue-700 border border-blue-200'
     case 'developer': return 'bg-green-100 text-green-700 border border-green-200'
-    case 'viewer': return 'bg-gray-100 text-gray-600 border border-gray-200'
+    case 'viewer':
+    case 'member': return 'bg-gray-100 text-gray-600 border border-gray-200'
     default: return 'bg-gray-100 text-gray-600 border border-gray-200'
   }
 }
@@ -547,6 +634,7 @@ function statusBadgeStyle(status: string) {
           Invite Member
         </button>
       </div>
+      <p v-if="roleUpdateError" class="mt-3 text-sm text-red-600">{{ roleUpdateError }}</p>
     </div>
 
     <!-- Role Tabs + View Toggle -->
@@ -803,7 +891,7 @@ function statusBadgeStyle(status: string) {
                 <!-- Member (name + avatar) -->
                 <div v-if="col.field === 'name'" class="flex items-center gap-3 min-w-0">
                   <div class="w-8 h-8 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-xs font-bold shrink-0">
-                    <img v-if="member.avatar" :src="member.avatar" class="w-8 h-8 rounded-full object-cover" />
+                    <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-8 h-8 rounded-full object-cover" />
                     <span v-else>{{ getInitials(member.name) }}</span>
                   </div>
                   <span class="text-sm font-medium text-gray-800 truncate">{{ member.name }}</span>
@@ -817,8 +905,22 @@ function statusBadgeStyle(status: string) {
                 </div>
 
                 <!-- Role -->
-                <div v-else-if="col.field === 'role'">
+                <div v-else-if="col.field === 'role'" @click.stop>
+                  <div v-if="canChangeRoleFor(member)" class="flex items-center gap-2 min-w-0">
+                    <select
+                      :value="member.role"
+                      :disabled="roleUpdatingId === member.id"
+                      class="max-w-full rounded-md border border-gray-200 bg-white py-1 pl-2 pr-6 text-[11px] font-semibold text-gray-800 shadow-sm cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#4857FE] focus:border-[#4857FE] disabled:opacity-60 [field-sizing:content] w-auto min-w-0"
+                      @change="onMemberRoleChange(member, ($event.target as HTMLSelectElement).value)"
+                    >
+                      <option v-for="r in roleOptionsForMember(member)" :key="r.value" :value="r.value">
+                        {{ r.label }}
+                      </option>
+                    </select>
+                    <Loader2 v-if="roleUpdatingId === member.id" :size="14" class="animate-spin text-[#4857FE] shrink-0" />
+                  </div>
                   <span
+                    v-else
                     class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold"
                     :class="roleStyle(member.role)"
                   >
@@ -883,13 +985,27 @@ function statusBadgeStyle(status: string) {
           >
             <div class="p-5">
               <!-- Row 1: Avatar + Role badge -->
-              <div class="flex items-center justify-between mb-4">
+              <div class="flex items-center justify-between mb-4 gap-2">
                 <div class="w-12 h-12 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-lg font-bold shrink-0">
-                  <img v-if="member.avatar" :src="member.avatar" class="w-12 h-12 rounded-full object-cover" />
+                  <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-12 h-12 rounded-full object-cover" />
                   <span v-else>{{ getInitials(member.name) }}</span>
                 </div>
+                <div v-if="canChangeRoleFor(member)" class="flex items-center gap-1.5 shrink-0" @click.stop>
+                  <select
+                    :value="member.role"
+                    :disabled="roleUpdatingId === member.id"
+                    class="max-w-full rounded-md border border-gray-200 bg-white py-1 pl-2 pr-5 text-[10px] font-semibold text-gray-800 cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#4857FE] disabled:opacity-60 [field-sizing:content] w-auto min-w-0"
+                    @change="onMemberRoleChange(member, ($event.target as HTMLSelectElement).value)"
+                  >
+                    <option v-for="r in roleOptionsForMember(member)" :key="r.value" :value="r.value">
+                      {{ r.label }}
+                    </option>
+                  </select>
+                  <Loader2 v-if="roleUpdatingId === member.id" :size="12" class="animate-spin text-[#4857FE]" />
+                </div>
                 <span
-                  class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold"
+                  v-else
+                  class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold shrink-0"
                   :class="roleStyle(member.role)"
                 >
                   <Shield :size="10" />

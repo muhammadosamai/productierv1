@@ -30,6 +30,8 @@ export interface Issue {
   storyId: string | null
   taskId: string | null
   testCycleId: string | null
+  /** Hidden from lists/search when true; only product admins can archive or view. */
+  archived?: boolean
   createdAt: string
   updatedAt: string
   reportedBy?: { id: string; name: string; email: string; avatar: string | null }
@@ -82,4 +84,5 @@ export interface CreateIssuePayload {
   storyId?: string | null
   taskId?: string | null
   testCycleId?: string | null
+  archived?: boolean
 }

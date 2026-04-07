@@ -9,6 +9,7 @@ import { useRouter, useRoute } from 'vue-router'
 import RolesSettings from '@/components/settings/RolesSettings.vue'
 import DeleteProductDialog from '@/components/product/DeleteProductDialog.vue'
 import { useProductStore } from '@/stores/products'
+import type { User } from '@/types/user'
 
 const authStore = useAuthStore()
 const productStore = useProductStore()
@@ -131,22 +132,22 @@ function removeProductLogo() {
   if (productLogoInputRef.value) productLogoInputRef.value.value = ''
 }
 
-async function uploadProductLogo(): Promise<string | null> {
-  if (!productLogoFile.value) return null
+async function uploadProductLogo(): Promise<string> {
+  if (!productLogoFile.value) throw new Error('No file selected')
   const formData = new FormData()
   formData.append('file', productLogoFile.value)
-  try {
-    const res = await fetch('/api/products/upload-logo', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${authStore.token}` },
-      body: formData,
-    })
-    if (res.ok) {
-      const data = await res.json()
-      return data.logo
-    }
-  } catch { /* ignore */ }
-  return null
+  const res = await fetch('/api/products/upload-logo', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${authStore.token}` },
+    body: formData,
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error || 'Logo upload failed')
+  }
+  const logo = (data as { logo?: string }).logo
+  if (!logo) throw new Error('Invalid response from logo upload')
+  return logo
 }
 
 async function handleProductSave() {
@@ -158,8 +159,15 @@ async function handleProductSave() {
   try {
     let logoUrl: string | null | undefined = undefined
     if (productLogoFile.value) {
-      logoUrl = await uploadProductLogo()
-      productLogoFile.value = null
+      try {
+        logoUrl = await uploadProductLogo()
+        productLogoFile.value = null
+        if (productLogoInputRef.value) productLogoInputRef.value.value = ''
+        productLogoPreview.value = logoUrl
+      } catch (e) {
+        productError.value = (e as Error).message || 'Logo upload failed'
+        return
+      }
     } else if (!productLogoPreview.value && productStore.activeProduct.logo) {
       logoUrl = null // Logo was removed
     }
@@ -225,8 +233,8 @@ function handleFileChange(event: Event) {
   reader.readAsDataURL(file)
 }
 
-async function uploadAvatar(): Promise<string | null> {
-  if (!pendingFile.value) return null
+async function uploadAvatar(): Promise<{ avatar: string; user: User | null }> {
+  if (!pendingFile.value) throw new Error('No file selected')
 
   const formData = new FormData()
   formData.append('file', pendingFile.value)
@@ -239,13 +247,15 @@ async function uploadAvatar(): Promise<string | null> {
     body: formData,
   })
 
+  const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    const data = await res.json()
-    throw new Error(data.error || 'Avatar upload failed')
+    throw new Error((data as { error?: string }).error || 'Avatar upload failed')
   }
 
-  const data = await res.json()
-  return data.avatar
+  const avatar = (data as { avatar?: string; user?: User | null }).avatar
+  const user = (data as { user?: User | null }).user ?? null
+  if (!avatar) throw new Error('Invalid response from avatar upload')
+  return { avatar, user }
 }
 
 async function handleSubmit() {
@@ -254,10 +264,20 @@ async function handleSubmit() {
   uploading.value = true
 
   try {
-    let avatarUrl: string | null = null
     if (pendingFile.value) {
-      avatarUrl = await uploadAvatar()
+      const { user: uploadedUser } = await uploadAvatar()
       pendingFile.value = null
+      if (uploadedUser) {
+        authStore.$patch({ user: uploadedUser })
+        avatarPreview.value = uploadedUser.avatar || null
+      } else {
+        const refreshed = await authStore.fetchMe()
+        if (!refreshed) {
+          authStore.error = 'Avatar uploaded but profile could not be refreshed. Please reload the page.'
+          return
+        }
+        if (authStore.user?.avatar) avatarPreview.value = authStore.user.avatar
+      }
     }
 
     const data: { name?: string; email?: string } = {}
@@ -267,8 +287,6 @@ async function handleSubmit() {
     if (Object.keys(data).length > 0) {
       const success = await authStore.updateProfile(data)
       if (!success) return
-    } else if (avatarUrl) {
-      await authStore.fetchMe()
     }
 
     saved.value = true
@@ -394,7 +412,7 @@ const userInitials = () => {
               <div
                 class="w-20 h-20 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-xl font-semibold overflow-hidden"
               >
-                <img
+                <UploadAssetImg
                   v-if="avatarPreview"
                   :src="avatarPreview"
                   class="w-20 h-20 rounded-full object-cover"
@@ -618,7 +636,7 @@ const userInitials = () => {
                 class="w-20 h-20 rounded-xl bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden cursor-pointer transition-colors hover:border-[#4857FE] hover:bg-[#4857FE]/5"
                 @click="triggerProductLogoUpload"
               >
-                <img
+                <UploadAssetImg
                   v-if="productLogoPreview"
                   :src="productLogoPreview"
                   class="w-full h-full object-cover rounded-xl"

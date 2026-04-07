@@ -101,7 +101,7 @@ watch(() => [props.period, productStore.activeProduct?.name], fetchData, { immed
         <h3 class="text-sm font-semibold text-gray-700 mb-4">Review Load by Reviewer</h3>
         <div v-if="data.reviewLoad.length > 0" class="space-y-3">
           <div v-for="r in data.reviewLoad" :key="r.userId" class="flex items-center gap-3">
-            <img v-if="r.avatar" :src="r.avatar" class="w-6 h-6 rounded-full object-cover" />
+            <UploadAssetImg v-if="r.avatar" :src="r.avatar" class="w-6 h-6 rounded-full object-cover" />
             <div v-else class="w-6 h-6 rounded-full bg-violet-50 flex items-center justify-center text-[10px] font-semibold text-violet-600">
               {{ getInitials(r.name) }}
             </div>

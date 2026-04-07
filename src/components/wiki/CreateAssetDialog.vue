@@ -279,7 +279,7 @@ async function handleSubmit() {
                   @mousedown.prevent="selectOwner(user)"
                 >
                   <div class="w-5 h-5 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-medium overflow-hidden shrink-0">
-                    <img v-if="user.avatar" :src="user.avatar" class="w-5 h-5 rounded-full object-cover" />
+                    <UploadAssetImg v-if="user.avatar" :src="user.avatar" class="w-5 h-5 rounded-full object-cover" />
                     <span v-else>{{ user.name[0] }}</span>
                   </div>
                   <span class="text-sm text-gray-900">{{ user.name }}</span>

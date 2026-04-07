@@ -720,7 +720,7 @@ function priorityBarColor(priority: string) {
         <!-- Distinct owner avatars from stories -->
         <div v-if="distinctOwners.length > 0" class="flex items-center">
           <div class="flex -space-x-2">
-            <img
+            <UploadAssetImg
               v-for="owner in distinctOwners.slice(0, 3)"
               :key="owner.name"
               :src="owner.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${owner.name}`"
@@ -747,7 +747,7 @@ function priorityBarColor(priority: string) {
                 :key="owner.name"
                 class="flex items-center gap-2.5 px-3 py-1.5 hover:bg-gray-50"
               >
-                <img
+                <UploadAssetImg
                   :src="owner.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${owner.name}`"
                   class="w-6 h-6 rounded-full object-cover"
                   :alt="owner.name"
@@ -1035,7 +1035,7 @@ function priorityBarColor(priority: string) {
 
               <!-- Owner -->
               <div class="flex">
-                <img
+                <UploadAssetImg
                   v-if="item.owner"
                   :src="item.ownerAvatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${item.owner}`"
                   class="w-9 h-9 rounded-full border-2 border-white shadow-sm"
@@ -1178,7 +1178,7 @@ function priorityBarColor(priority: string) {
 
                   <!-- Owner avatar -->
                   <div class="shrink-0">
-                    <img
+                    <UploadAssetImg
                       v-if="item.owner"
                       :src="item.ownerAvatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${item.owner}`"
                       class="w-7 h-7 rounded-full border-2 border-white shadow-sm"
@@ -1449,7 +1449,7 @@ function priorityBarColor(priority: string) {
                 :key="user.id"
                 class="flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-0.5"
               >
-                <img
+                <UploadAssetImg
                   :src="user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.name}`"
                   class="w-5 h-5 rounded-full"
                   :alt="user.name"
@@ -1486,7 +1486,7 @@ function priorityBarColor(priority: string) {
                   :class="selectedTaskAssignees.find(u => u.id === user.id) ? 'opacity-50' : ''"
                   @mousedown.prevent="addTaskAssignee(user)"
                 >
-                  <img
+                  <UploadAssetImg
                     :src="user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.name}`"
                     class="w-6 h-6 rounded-full border border-gray-200"
                     :alt="user.name"

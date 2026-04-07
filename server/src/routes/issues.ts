@@ -1,7 +1,7 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
-import { issues, issueComments, issueAttachments, users } from '../db/schema'
-import { eq, sql } from 'drizzle-orm'
+import { issues, issueComments, issueAttachments, users, productMembers } from '../db/schema'
+import { eq, sql, and } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
@@ -15,6 +15,34 @@ let issueSchemaBootstrapped = false
 function optionalUuid(value: string | null | undefined) {
   if (!value) return null
   return UUID_REGEX.test(value) ? value : null
+}
+
+async function isProductAdmin(userId: string, product: string): Promise<boolean> {
+  const member = await db.query.productMembers.findFirst({
+    where: and(eq(productMembers.product, product), eq(productMembers.userId, userId)),
+  })
+  return member?.role === 'admin'
+}
+
+/** Product member admin or super_admin — same bar as invites. */
+async function canManageIssueArchive(user: { id: string; role: string } | null, product: string): Promise<boolean> {
+  if (!user) return false
+  if (user.role === 'super_admin') return true
+  return isProductAdmin(user.id, product)
+}
+
+/** Resolves issue row or null if missing / archived without admin access. */
+async function issueRowForAccess(
+  id: string,
+  user: { id: string; role: string } | null,
+): Promise<{ id: string; product: string; archived: boolean } | null> {
+  const row = await db.query.issues.findFirst({
+    where: eq(issues.id, id),
+    columns: { id: true, product: true, archived: true },
+  })
+  if (!row) return null
+  if (row.archived && !(await canManageIssueArchive(user, row.product))) return null
+  return row
 }
 
 async function ensureIssueSchema() {
@@ -136,6 +164,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS issues_public_id_unique
   WHERE public_id IS NOT NULL;
 `)
 
+  await db.execute(sql`ALTER TABLE issues ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false;`)
+
   issueSchemaBootstrapped = true
 }
 
@@ -189,6 +219,7 @@ const issueCreateBody = t.Object({
 /** Partial update: all fields optional (e.g. status-only from the detail panel). */
 const issueUpdateBody = t.Object({
   title: t.Optional(t.String({ minLength: 1 })),
+  archived: t.Optional(t.Boolean()),
   ...issueBodyShared,
 })
 
@@ -208,9 +239,28 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     await ensureIssueSchema()
   })
 
-  // GET /api/issues?product=X&testCycleId=X
-  .get('/', async ({ query }) => {
+  // GET /api/issues?product=X&testCycleId=X&includeArchived=true (admins only, requires product when not super_admin)
+  .get('/', async ({ query, headers, jwt: jwtInstance }) => {
+    const user = await getUserFromHeader(jwtInstance.verify, headers)
+    const productFilter = query.product?.trim()
+    const wantsArchived = String(query.includeArchived ?? '') === 'true'
+
+    let includeArchived = false
+    if (wantsArchived && user) {
+      if (user.role === 'super_admin') {
+        includeArchived = true
+      } else if (productFilter && (await isProductAdmin(user.id, productFilter))) {
+        includeArchived = true
+      }
+    }
+
+    const conditions = []
+    if (productFilter) conditions.push(eq(issues.product, productFilter))
+    if (query.testCycleId) conditions.push(eq(issues.testCycleId, query.testCycleId))
+    if (!includeArchived) conditions.push(eq(issues.archived, false))
+
     const all = await db.query.issues.findMany({
+      where: conditions.length ? and(...conditions) : undefined,
       with: {
         reportedBy: { columns: { id: true, name: true, email: true, avatar: true } },
         assignedTo: { columns: { id: true, name: true, email: true, avatar: true } },
@@ -218,14 +268,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       },
       orderBy: (items, { desc }) => [desc(items.createdAt)],
     })
-    let filtered = all
-    if (query.product) {
-      filtered = filtered.filter(i => i.product === query.product)
-    }
-    if (query.testCycleId) {
-      filtered = filtered.filter(i => i.testCycleId === query.testCycleId)
-    }
-    return filtered
+    return all
   })
 
   // POST /api/issues
@@ -295,7 +338,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
   }, { body: issueCreateBody })
 
   // GET /api/issues/:id
-  .get('/:id', async ({ params: { id }, set }) => {
+  .get('/:id', async ({ params: { id }, set, headers, jwt: jwtInstance }) => {
     const issue = await db.query.issues.findFirst({
       where: eq(issues.id, id),
       with: {
@@ -306,6 +349,13 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       },
     })
     if (!issue) { set.status = 404; return { error: 'Issue not found' } }
+    if (issue.archived) {
+      const user = await getUserFromHeader(jwtInstance.verify, headers)
+      if (!(await canManageIssueArchive(user, issue.product))) {
+        set.status = 404
+        return { error: 'Issue not found' }
+      }
+    }
     return issue
   })
 
@@ -317,6 +367,18 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const existing = await db.query.issues.findFirst({ where: eq(issues.id, id) })
     if (!existing) { set.status = 404; return { error: 'Issue not found' } }
 
+    const canArchive = await canManageIssueArchive(user, existing.product)
+
+    if (existing.archived && !canArchive) {
+      set.status = 403
+      return { error: 'Cannot modify an archived issue' }
+    }
+
+    if ('archived' in body && body.archived !== existing.archived && !canArchive) {
+      set.status = 403
+      return { error: 'Only product admins can change archive status' }
+    }
+
     const updatePayload: Record<string, any> = { ...body }
     if ('assignedToUserId' in updatePayload) updatePayload.assignedToUserId = optionalUuid(updatePayload.assignedToUserId)
     if ('storyId' in updatePayload) updatePayload.storyId = optionalUuid(updatePayload.storyId)
@@ -327,7 +389,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
 
     const changes = computeChanges(existing, updated!, [
       'title', 'description', 'type', 'severity', 'priority', 'status',
-      'assignedToUserId', 'module', 'environment', 'browser', 'operatingSystem',
+      'assignedToUserId', 'module', 'environment', 'browser', 'operatingSystem', 'archived',
     ])
 
     if (changes.length > 0) {
@@ -392,6 +454,13 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
+    const existingDel = await db.query.issues.findFirst({ where: eq(issues.id, id) })
+    if (!existingDel) { set.status = 404; return { error: 'Issue not found' } }
+    if (existingDel.archived && !(await canManageIssueArchive(user, existingDel.product))) {
+      set.status = 403
+      return { error: 'Only product admins can delete archived issues' }
+    }
+
     const [deleted] = await db.delete(issues).where(eq(issues.id, id)).returning()
     if (!deleted) { set.status = 404; return { error: 'Issue not found' } }
 
@@ -413,7 +482,12 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
   // ============ COMMENTS ============
 
   // GET /api/issues/:id/comments
-  .get('/:id/comments', async ({ params: { id } }) => {
+  .get('/:id/comments', async ({ params: { id }, set, headers, jwt: jwtInstance }) => {
+    const user = await getUserFromHeader(jwtInstance.verify, headers)
+    if (!(await issueRowForAccess(id, user))) {
+      set.status = 404
+      return { error: 'Issue not found' }
+    }
     return db.query.issueComments.findMany({
       where: eq(issueComments.issueId, id),
       with: { user: true },
@@ -425,6 +499,12 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
   .post('/:id/comments', async ({ params: { id }, body, set, jwt: jwtInstance, headers }) => {
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+
+    const accessible = await issueRowForAccess(id, user)
+    if (!accessible) {
+      set.status = 404
+      return { error: 'Issue not found' }
+    }
 
     const issue = await db.query.issues.findFirst({ where: eq(issues.id, id) })
 
@@ -464,6 +544,11 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
+    if (!(await issueRowForAccess(params.id, user))) {
+      set.status = 404
+      return { error: 'Issue not found' }
+    }
+
     const [deleted] = await db.delete(issueComments)
       .where(eq(issueComments.id, params.commentId))
       .returning()
@@ -473,8 +558,44 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
 
   // ============ ATTACHMENTS ============
 
+  // GET /api/issues/attachments/:attachmentId/download — stream file with correct name/type (avoids SPA /uploads → .htm)
+  .get('/attachments/:attachmentId/download', async ({ params: { attachmentId }, set, jwt: jwtInstance, headers }) => {
+    const user = await getUserFromHeader(jwtInstance.verify, headers)
+    if (!user) {
+      set.status = 401
+      return { error: 'Unauthorized' }
+    }
+
+    const att = await db.query.issueAttachments.findFirst({ where: eq(issueAttachments.id, attachmentId) })
+    if (!att || !(await issueRowForAccess(att.issueId, user))) {
+      set.status = 404
+      return { error: 'Attachment not found' }
+    }
+
+    const rel = att.filePath.replace(/^\/+/, '')
+    const diskPath = path.join(process.cwd(), rel)
+    const file = Bun.file(diskPath)
+    if (!(await file.exists())) {
+      set.status = 404
+      return { error: 'File not found' }
+    }
+
+    const safeName = att.fileName.replace(/[\r\n"]/g, '_') || 'attachment'
+    const utfName = encodeURIComponent(att.fileName).replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+    set.headers['Content-Type'] = att.mimeType || 'application/octet-stream'
+    set.headers['Content-Disposition'] =
+      `attachment; filename="${safeName}"; filename*=UTF-8''${utfName}`
+
+    return file
+  })
+
   // GET /api/issues/:id/attachments
-  .get('/:id/attachments', async ({ params: { id } }) => {
+  .get('/:id/attachments', async ({ params: { id }, set, headers, jwt: jwtInstance }) => {
+    const user = await getUserFromHeader(jwtInstance.verify, headers)
+    if (!(await issueRowForAccess(id, user))) {
+      set.status = 404
+      return { error: 'Issue not found' }
+    }
     return db.query.issueAttachments.findMany({
       where: eq(issueAttachments.issueId, id),
       with: { user: true },
@@ -486,6 +607,11 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
   .post('/:id/attachments', async ({ params: { id }, body, set, jwt: jwtInstance, headers }) => {
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+
+    if (!(await issueRowForAccess(id, user))) {
+      set.status = 404
+      return { error: 'Issue not found' }
+    }
 
     const file = (body as any).file as File
     if (!file) { set.status = 400; return { error: 'No file provided' } }
@@ -518,6 +644,12 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
   .delete('/attachments/:attachmentId', async ({ params: { attachmentId }, set, jwt: jwtInstance, headers }) => {
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+
+    const att = await db.query.issueAttachments.findFirst({ where: eq(issueAttachments.id, attachmentId) })
+    if (att && !(await issueRowForAccess(att.issueId, user))) {
+      set.status = 404
+      return { error: 'Attachment not found' }
+    }
 
     const [deleted] = await db.delete(issueAttachments)
       .where(eq(issueAttachments.id, attachmentId))

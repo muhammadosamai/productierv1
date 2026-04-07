@@ -335,7 +335,7 @@ function progressPercent() {
                 <div class="flex items-center gap-2">
                   <template v-if="delivery.createdByUser">
                     <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                      <img v-if="delivery.createdByUser.avatar" :src="delivery.createdByUser.avatar" class="w-6 h-6 rounded-full object-cover" />
+                      <UploadAssetImg v-if="delivery.createdByUser.avatar" :src="delivery.createdByUser.avatar" class="w-6 h-6 rounded-full object-cover" />
                       <span v-else>{{ delivery.createdByUser.name[0] }}</span>
                     </div>
                     <span class="text-sm text-gray-700">{{ delivery.createdByUser.name }}</span>

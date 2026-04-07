@@ -569,7 +569,7 @@ function renderStars(rating: number) {
               >
                 <div class="flex items-start gap-4">
                   <div class="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden" :style="{ backgroundColor: item.bgColor + '12' }">
-                    <img :src="item.logo" :alt="item.name" class="w-8 h-8 rounded-lg object-contain" @error="($event.target as HTMLImageElement).style.display='none'" />
+                    <UploadAssetImg :src="item.logo" :alt="item.name" class="w-8 h-8 rounded-lg object-contain" @error="($event.target as HTMLImageElement).style.display='none'" />
                   </div>
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
@@ -616,7 +616,7 @@ function renderStars(rating: number) {
                 </div>
                 <div class="flex items-center gap-3 mb-3">
                   <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden" :style="{ backgroundColor: item.bgColor + '12' }">
-                    <img :src="item.logo" :alt="item.name" class="w-7 h-7 rounded-lg object-contain" @error="($event.target as HTMLImageElement).style.display='none'" />
+                    <UploadAssetImg :src="item.logo" :alt="item.name" class="w-7 h-7 rounded-lg object-contain" @error="($event.target as HTMLImageElement).style.display='none'" />
                   </div>
                   <div>
                     <h3 class="text-sm font-semibold text-gray-800">{{ item.name }}</h3>
@@ -641,7 +641,7 @@ function renderStars(rating: number) {
               >
                 <div class="flex items-start gap-4">
                   <div class="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden" :style="{ backgroundColor: item.bgColor + '12' }">
-                    <img :src="item.logo" :alt="item.name" class="w-9 h-9 rounded-lg object-contain" @error="($event.target as HTMLImageElement).style.display='none'" />
+                    <UploadAssetImg :src="item.logo" :alt="item.name" class="w-9 h-9 rounded-lg object-contain" @error="($event.target as HTMLImageElement).style.display='none'" />
                   </div>
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
@@ -684,7 +684,7 @@ function renderStars(rating: number) {
               >
                 <div class="flex items-center gap-3 mb-2.5">
                   <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden" :style="{ backgroundColor: item.bgColor + '12' }">
-                    <img :src="item.logo" :alt="item.name" class="w-7 h-7 rounded-lg object-contain" @error="($event.target as HTMLImageElement).style.display='none'" />
+                    <UploadAssetImg :src="item.logo" :alt="item.name" class="w-7 h-7 rounded-lg object-contain" @error="($event.target as HTMLImageElement).style.display='none'" />
                   </div>
                   <div>
                     <h3 class="text-sm font-semibold text-gray-800">{{ item.name }}</h3>
@@ -720,7 +720,7 @@ function renderStars(rating: number) {
                 class="group flex items-center gap-3 bg-white rounded-lg border border-gray-100 px-4 py-3 hover:border-gray-200 hover:shadow-sm transition-all cursor-pointer"
               >
                 <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden" :style="{ backgroundColor: item.bgColor + '12' }">
-                  <img :src="item.logo" :alt="item.name" class="w-6 h-6 rounded-md object-contain" @error="($event.target as HTMLImageElement).style.display='none'" />
+                  <UploadAssetImg :src="item.logo" :alt="item.name" class="w-6 h-6 rounded-md object-contain" @error="($event.target as HTMLImageElement).style.display='none'" />
                 </div>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-1.5">

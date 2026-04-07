@@ -362,7 +362,7 @@ function formatDate(dateStr: string | null) {
                   >
                     <template v-if="initiative.leader">
                       <div class="w-5 h-5 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                        <img v-if="initiative.leaderAvatar" :src="initiative.leaderAvatar" class="w-5 h-5 rounded-full object-cover" />
+                        <UploadAssetImg v-if="initiative.leaderAvatar" :src="initiative.leaderAvatar" class="w-5 h-5 rounded-full object-cover" />
                         <span v-else>{{ initiative.leader[0] }}</span>
                       </div>
                       <span class="text-gray-700">{{ initiative.leader }}</span>
@@ -385,7 +385,7 @@ function formatDate(dateStr: string | null) {
                         @click="selectLeader(user.name, user.avatar)"
                       >
                         <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                          <img v-if="user.avatar" :src="user.avatar" class="w-6 h-6 rounded-full object-cover" />
+                          <UploadAssetImg v-if="user.avatar" :src="user.avatar" class="w-6 h-6 rounded-full object-cover" />
                           <span v-else>{{ user.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) }}</span>
                         </div>
                         <span class="truncate">{{ user.name }}</span>

@@ -202,7 +202,7 @@ function taskShortId(task: Task) {
                       :style="{ zIndex: 3 - i }"
                       :title="getUserById(userId)?.name || userId"
                     >
-                      <img v-if="getUserById(userId)?.avatar" :src="getUserById(userId)!.avatar!" class="w-7 h-7 rounded-full object-cover" />
+                      <UploadAssetImg v-if="getUserById(userId)?.avatar" :src="getUserById(userId)!.avatar!" class="w-7 h-7 rounded-full object-cover" />
                       <span v-else>{{ (getUserById(userId)?.name || '?')[0] }}</span>
                     </div>
                     <div

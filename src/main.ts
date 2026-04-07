@@ -6,8 +6,10 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
 import { useAuthStore } from './stores/auth'
+import UploadAssetImg from './components/shared/UploadAssetImg.vue'
 
 const app = createApp(App)
+app.component('UploadAssetImg', UploadAssetImg)
 const pinia = createPinia()
 
 app.use(pinia)

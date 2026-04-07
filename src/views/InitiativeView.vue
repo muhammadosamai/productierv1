@@ -369,7 +369,7 @@ function cycleTaskStatus(taskId: string, currentStatus: TaskStatus) {
           <!-- Leader avatar -->
           <div v-if="initiative.leader" class="flex items-center gap-2">
             <div class="w-8 h-8 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-xs font-medium overflow-hidden border-2 border-white shadow-sm">
-              <img
+              <UploadAssetImg
                 v-if="initiative.leaderAvatar"
                 :src="initiative.leaderAvatar"
                 class="w-8 h-8 rounded-full object-cover"
@@ -419,7 +419,7 @@ function cycleTaskStatus(taskId: string, currentStatus: TaskStatus) {
             <div class="bg-white rounded-xl border border-gray-100 p-5">
               <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Product</p>
               <div class="flex items-center gap-2.5 mt-2">
-                <img
+                <UploadAssetImg
                   v-if="initiativeProduct"
                   :src="initiativeProduct.logo"
                   :alt="initiativeProduct.name"
@@ -521,7 +521,7 @@ function cycleTaskStatus(taskId: string, currentStatus: TaskStatus) {
                       @mousedown.prevent="selectLeader(user)"
                     >
                       <div class="w-7 h-7 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden shrink-0">
-                        <img
+                        <UploadAssetImg
                           v-if="user.avatar"
                           :src="user.avatar"
                           class="w-7 h-7 rounded-full object-cover"
@@ -547,7 +547,7 @@ function cycleTaskStatus(taskId: string, currentStatus: TaskStatus) {
               </div>
               <div v-else class="flex items-center gap-2 mt-2">
                 <div v-if="initiative.leader" class="w-7 h-7 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden shrink-0">
-                  <img
+                  <UploadAssetImg
                     v-if="initiative.leaderAvatar"
                     :src="initiative.leaderAvatar"
                     class="w-7 h-7 rounded-full object-cover"

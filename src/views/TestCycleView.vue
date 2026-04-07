@@ -352,7 +352,7 @@ const resolvedIssues = computed(() => cycleIssues.value?.filter(i => i.status ==
                     <!-- Footer: reporter + date -->
                     <div class="flex items-center justify-between pt-2 border-t border-gray-100">
                       <div v-if="issue.reportedBy" class="flex items-center gap-1.5">
-                        <img v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-5 h-5 rounded-full object-cover" />
+                        <UploadAssetImg v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-5 h-5 rounded-full object-cover" />
                         <div v-else class="w-5 h-5 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[8px] font-semibold text-[#4857FE]">{{ issue.reportedBy.name[0] }}</div>
                         <span class="text-[10px] text-gray-500">{{ issue.reportedBy.name.split(' ')[0] }}</span>
                       </div>
@@ -415,7 +415,7 @@ const resolvedIssues = computed(() => cycleIssues.value?.filter(i => i.status ==
                 </td>
                 <td class="px-5 py-3.5">
                   <div v-if="issue.reportedBy" class="flex items-center gap-2">
-                    <img v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-5 h-5 rounded-full object-cover" />
+                    <UploadAssetImg v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-5 h-5 rounded-full object-cover" />
                     <div v-else class="w-5 h-5 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[8px] font-semibold text-[#4857FE]">{{ issue.reportedBy.name[0] }}</div>
                     <span class="text-sm text-gray-600">{{ issue.reportedBy.name }}</span>
                   </div>

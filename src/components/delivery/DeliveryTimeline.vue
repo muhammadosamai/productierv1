@@ -354,7 +354,7 @@ function avatarZIndex(index: unknown): number {
                             :style="{ zIndex: avatarZIndex(i) }"
                             :title="getUserById(userId)?.name || userId"
                           >
-                            <img v-if="getUserById(userId)?.avatar" :src="getUserById(userId)!.avatar!" class="w-5 h-5 rounded-full object-cover" />
+                            <UploadAssetImg v-if="getUserById(userId)?.avatar" :src="getUserById(userId)!.avatar!" class="w-5 h-5 rounded-full object-cover" />
                             <span v-else>{{ (getUserById(userId)?.name || '?')[0] }}</span>
                           </div>
                           <div

@@ -1,0 +1,48 @@
+name: Deploy Productier Production
+
+on:
+  push:
+    branches: ["sarimbranch"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Production Server
+    runs-on: self-hosted
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 216.250.122.193 >> ~/.ssh/known_hosts
+
+      - name: Deploy via SSH
+        run: |
+          set -euo pipefail
+
+          ssh -o StrictHostKeyChecking=yes scripts@216.250.122.193 << 'EOF'
+            set -euo pipefail
+            echo "Setting permissions"
+            chown -R scripts:scripts /var/www/productierv1
+
+            echo "Navigating to project directory"
+            cd /var/www/productierv1/server
+
+            echo "Fetching latest changes"
+            git fetch origin sarimbranch
+
+            echo "Resetting to latest commit"
+            git reset --hard origin/sarimbranch
+
+            echo "Rebuilding and starting containers"
+            docker-compose up -d --build 
+
+            echo "Deployment completed successfully"
+          EOF

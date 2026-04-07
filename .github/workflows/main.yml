@@ -32,6 +32,9 @@ jobs:
             echo "Navigating to project directory"
             cd /var/www/stage-productier/server
             
+            echo "Ensuring git safe directory"
+            git config --global --add safe.directory /var/www/stage-productier/server
+            
             echo "Fetching latest changes"
             git fetch origin stage
             

@@ -1,4 +1,4 @@
-name: Deploy Productier Stagging
+name: Deploy Productier Staging
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   deploy:
-    name: Deploy to Stagging
+    name: Deploy to Staging
     runs-on: self-hosted
     timeout-minutes: 15
 
@@ -15,34 +15,41 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup SSH
+      - name: Setup SSH (Runner → Server)
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 216.250.122.193 >> ~/.ssh/known_hosts
-          
+
       - name: Deploy via SSH
         run: |
           set -euo pipefail
+
           ssh -o StrictHostKeyChecking=yes scripts@216.250.122.193 << 'EOF'
             set -euo pipefail
-            
+
             echo "Navigating to project directory"
             cd /var/www/stage-productier/server
-            
+
             echo "Ensuring git safe directory"
             git config --global --add safe.directory /var/www/stage-productier/server
-            
+
             echo "Fetching latest changes"
             git fetch origin stage
-            
+
             echo "Resetting to latest commit"
             git reset --hard origin/stage
-            
+
+            echo "Pulling latest images (if any)"
+            docker compose pull || true
+
             echo "Rebuilding and starting containers"
-            docker-compose up -d --build 
-            
+            docker compose up -d --build --remove-orphans
+
+            echo "Checking running containers"
+            docker compose ps
+
             echo "Deployment completed successfully"
           EOF

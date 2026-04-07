@@ -333,7 +333,7 @@ function timeAgo(dateStr: string) {
               </td>
               <td class="px-5 py-3.5">
                 <div v-if="item.assignedToUser" class="flex items-center gap-1.5">
-                  <img v-if="item.assignedToUser.avatar" :src="item.assignedToUser.avatar" class="w-5 h-5 rounded-full object-cover" />
+                  <UploadAssetImg v-if="item.assignedToUser.avatar" :src="item.assignedToUser.avatar" class="w-5 h-5 rounded-full object-cover" />
                   <div v-else class="w-5 h-5 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[9px] font-semibold text-[#4857FE]">{{ item.assignedToUser.name[0] }}</div>
                   <span class="text-sm text-gray-600 truncate">{{ item.assignedToUser.name }}</span>
                 </div>

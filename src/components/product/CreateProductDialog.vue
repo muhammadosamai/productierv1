@@ -233,7 +233,7 @@ async function handleSubmit() {
               class="w-16 h-16 rounded-xl bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden cursor-pointer transition-colors hover:border-[#4857FE] hover:bg-[#4857FE]/5"
               @click="triggerLogoUpload"
             >
-              <img
+              <UploadAssetImg
                 v-if="logoPreview"
                 :src="logoPreview"
                 class="w-full h-full object-cover rounded-xl"
@@ -296,7 +296,7 @@ async function handleSubmit() {
               class="flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-0.5"
             >
               <div class="w-5 h-5 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-medium overflow-hidden shrink-0">
-                <img
+                <UploadAssetImg
                   v-if="member.avatar"
                   :src="member.avatar"
                   class="w-5 h-5 rounded-full object-cover"
@@ -342,7 +342,7 @@ async function handleSubmit() {
                 @click="addMember(user)"
               >
                 <div class="w-7 h-7 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden shrink-0">
-                  <img
+                  <UploadAssetImg
                     v-if="user.avatar"
                     :src="user.avatar"
                     class="w-7 h-7 rounded-full object-cover"

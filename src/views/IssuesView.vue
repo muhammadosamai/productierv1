@@ -16,6 +16,7 @@ import { useIssuesStore } from '@/stores/issues'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { useRolesStore } from '@/stores/roles'
+import { useProductMembersStore } from '@/stores/productMembers'
 import type { Activity } from '@/stores/activities'
 import FavoriteStar from '@/components/shared/FavoriteStar.vue'
 import CreateIssueDialog from '@/components/issue/CreateIssueDialog.vue'
@@ -36,6 +37,29 @@ const issuesStore = useIssuesStore()
 const productStore = useProductStore()
 const authStore = useAuthStore()
 const rolesStore = useRolesStore()
+const productMembersStore = useProductMembersStore()
+
+const showArchived = ref(false)
+
+const canIncludeArchived = computed(() => {
+  const u = authStore.user
+  const p = productStore.activeProduct?.name
+  if (!u || !p) return false
+  if (u.role === 'super_admin') return true
+  return productMembersStore.members.some(m => m.userId === u.id && m.role === 'admin')
+})
+
+function issueListFetchOpts() {
+  return {
+    includeArchived: showArchived.value && canIncludeArchived.value,
+  }
+}
+
+async function loadIssuesForProduct() {
+  const p = productStore.activeProduct?.name
+  if (p && authStore.token) await productMembersStore.fetchMembers(p)
+  await issuesStore.fetchIssues(p || '', undefined, issueListFetchOpts())
+}
 
 const searchQuery = ref('')
 const activeTab = ref<'all' | 'open' | 'in_progress' | 'resolved' | 'closed' | 'deferred'>('all')
@@ -150,7 +174,7 @@ function closeIssuePanel() {
 }
 
 async function onIssueUpdated() {
-  await issuesStore.fetchIssues(productStore.activeProduct?.name || '')
+  await loadIssuesForProduct()
   if (selectedIssue.value) {
     const fresh = issuesStore.issues.find(i => i.id === selectedIssue.value!.id)
     if (fresh) {
@@ -160,7 +184,7 @@ async function onIssueUpdated() {
 }
 
 onMounted(async () => {
-  await issuesStore.fetchIssues(productStore.activeProduct?.name || '')
+  await loadIssuesForProduct()
   fetchTeamMembers()
   loadUserSettings()
   // Auto-open issue from query param
@@ -172,8 +196,13 @@ onMounted(async () => {
 })
 
 watch(() => productStore.activeProduct?.name, () => {
-  issuesStore.fetchIssues(productStore.activeProduct?.name || '')
+  showArchived.value = false
+  loadIssuesForProduct()
   fetchTeamMembers()
+})
+
+watch(showArchived, async () => {
+  await issuesStore.fetchIssues(productStore.activeProduct?.name || '', undefined, issueListFetchOpts())
 })
 
 // Watch for issue query param changes
@@ -778,7 +807,7 @@ function formatDate(dateStr: string | null) {
     <!-- Status Tabs + View Toggle -->
     <div class="bg-white px-8 pt-4 pb-3 border-b border-gray-100">
       <div class="flex items-center justify-between">
-        <div class="flex items-center gap-1">
+        <div class="flex items-center gap-1 flex-wrap">
           <!-- All -->
           <button
             class="flex items-center gap-1.5 px-2.5 py-2.5 text-sm font-medium border-b-2 transition-colors cursor-pointer"
@@ -807,6 +836,17 @@ function formatDate(dateStr: string | null) {
 
         <!-- Controls -->
         <div class="flex items-center gap-3">
+          <label
+            v-if="canIncludeArchived"
+            class="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none shrink-0"
+          >
+            <input
+              v-model="showArchived"
+              type="checkbox"
+              class="rounded border-gray-300 text-red-500 focus:ring-red-500"
+            />
+            Show archived
+          </label>
           <!-- Closed -->
           <button
             class="flex items-center gap-1.5 p-1.5 rounded-lg transition-colors cursor-pointer"
@@ -868,7 +908,7 @@ function formatDate(dateStr: string | null) {
                           <div class="flex items-start gap-3">
                             <div class="relative shrink-0 z-10">
                               <div class="w-8 h-8 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden ring-2 ring-white">
-                                <img v-if="activity.userAvatar" :src="activity.userAvatar" class="w-8 h-8 rounded-full object-cover" :alt="activity.userName" />
+                                <UploadAssetImg v-if="activity.userAvatar" :src="activity.userAvatar" class="w-8 h-8 rounded-full object-cover" :alt="activity.userName" />
                                 <span v-else>{{ activityUserInitials(activity.userName) }}</span>
                               </div>
                               <div class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white" :class="activityActionColor(activity.action)"></div>
@@ -1104,7 +1144,8 @@ function formatDate(dateStr: string | null) {
               :class="[
                 selectedIssue?.id === issue.id
                   ? 'bg-red-500/5 hover:bg-red-500/8 border-l-2 border-l-red-500'
-                  : inlineEditMode ? 'hover:bg-red-50/40 border-l-2 border-l-transparent' : 'hover:bg-gray-50/60 border-l-2 border-l-transparent'
+                  : inlineEditMode ? 'hover:bg-red-50/40 border-l-2 border-l-transparent' : 'hover:bg-gray-50/60 border-l-2 border-l-transparent',
+                issue.archived ? 'opacity-65' : '',
               ]"
               :style="{ gridTemplateColumns: gridTemplateCols, minWidth: minTableWidth + 'px' }"
               @click="inlineEditMode ? null : openIssueDetail(issue)"
@@ -1130,7 +1171,14 @@ function formatDate(dateStr: string | null) {
                   <template v-else>
                     <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProduct?.name || ''" />
                     <Bug :size="16" class="shrink-0 text-red-500" />
-                    <span class="text-sm font-medium truncate" :class="issue.status === 'closed' ? 'text-gray-400 line-through' : 'text-gray-800'">{{ issue.title }}</span>
+                    <span
+                      class="text-sm font-medium truncate"
+                      :class="issue.status === 'closed' ? 'text-gray-400 line-through' : issue.archived ? 'text-gray-500' : 'text-gray-800'"
+                    >{{ issue.title }}</span>
+                    <span
+                      v-if="issue.archived"
+                      class="shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-gray-200 text-gray-600"
+                    >Archived</span>
                     <ChevronRight v-if="!inlineEditMode" :size="14" class="text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                   </template>
                 </div>
@@ -1252,7 +1300,7 @@ function formatDate(dateStr: string | null) {
                   <div class="flex items-center gap-2 min-w-0">
                     <template v-if="issue.assignedTo">
                       <div class="w-8 h-8 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-bold shrink-0">
-                        <img v-if="issue.assignedTo.avatar" :src="issue.assignedTo.avatar" class="w-8 h-8 rounded-full object-cover" />
+                        <UploadAssetImg v-if="issue.assignedTo.avatar" :src="issue.assignedTo.avatar" class="w-8 h-8 rounded-full object-cover" />
                         <span v-else>{{ issue.assignedTo.name[0] }}</span>
                       </div>
                       <span class="text-sm text-gray-600 truncate">{{ issue.assignedTo.name }}</span>
@@ -1284,7 +1332,7 @@ function formatDate(dateStr: string | null) {
                         @click.stop="saveAssigneeInline(issue.id, member)"
                       >
                         <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[9px] font-bold shrink-0">
-                          <img v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
+                          <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
                           <span v-else>{{ member.name[0] }}</span>
                         </div>
                         <span class="truncate">{{ member.name }}</span>
@@ -1297,7 +1345,7 @@ function formatDate(dateStr: string | null) {
                 <div v-else-if="col.field === 'reportedBy'" class="flex items-center gap-2 min-w-0">
                   <template v-if="issue.reportedBy">
                     <div class="w-8 h-8 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-bold shrink-0">
-                      <img v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-8 h-8 rounded-full object-cover" />
+                      <UploadAssetImg v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-8 h-8 rounded-full object-cover" />
                       <span v-else>{{ issue.reportedBy.name[0] }}</span>
                     </div>
                     <span class="text-sm text-gray-600 truncate">{{ issue.reportedBy.name }}</span>
@@ -1355,9 +1403,12 @@ function formatDate(dateStr: string | null) {
             v-for="issue in sortedIssues"
             :key="issue.id"
             class="rounded-xl border transition-all duration-200 cursor-pointer group/card relative"
-            :class="selectedIssue?.id === issue.id
-              ? 'bg-red-500/5 border-red-500/30 shadow-md ring-1 ring-red-500/10'
-              : 'bg-white border-gray-200/80 hover:shadow-lg hover:border-gray-300/80'"
+            :class="[
+              selectedIssue?.id === issue.id
+                ? 'bg-red-500/5 border-red-500/30 shadow-md ring-1 ring-red-500/10'
+                : 'bg-white border-gray-200/80 hover:shadow-lg hover:border-gray-300/80',
+              issue.archived ? 'opacity-65' : '',
+            ]"
             @click="openIssueDetail(issue)"
           >
             <div class="p-5">
@@ -1379,8 +1430,15 @@ function formatDate(dateStr: string | null) {
               </div>
 
               <!-- Title -->
-              <div class="mb-1.5">
-                <h4 class="text-base font-semibold text-gray-900 line-clamp-2 leading-snug group-hover/card:text-red-500 transition-colors">{{ issue.title }}</h4>
+              <div class="mb-1.5 flex items-start gap-2 flex-wrap">
+                <h4
+                  class="text-base font-semibold line-clamp-2 leading-snug group-hover/card:text-red-500 transition-colors flex-1 min-w-0"
+                  :class="issue.archived ? 'text-gray-500' : 'text-gray-900'"
+                >{{ issue.title }}</h4>
+                <span
+                  v-if="issue.archived"
+                  class="shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-gray-200 text-gray-600"
+                >Archived</span>
               </div>
 
               <!-- Description -->
@@ -1406,7 +1464,7 @@ function formatDate(dateStr: string | null) {
                 <div class="flex items-center gap-2">
                   <template v-if="issue.reportedBy">
                     <div class="w-7 h-7 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[9px] font-bold">
-                      <img v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-7 h-7 rounded-full object-cover" />
+                      <UploadAssetImg v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-7 h-7 rounded-full object-cover" />
                       <span v-else>{{ issue.reportedBy.name[0] }}</span>
                     </div>
                     <span class="text-xs text-gray-500 truncate">{{ issue.reportedBy.name }}</span>

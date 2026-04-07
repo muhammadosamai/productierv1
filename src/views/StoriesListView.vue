@@ -868,7 +868,7 @@ function formatDate(dateStr: string | null) {
                           <div class="flex items-start gap-3">
                             <div class="relative shrink-0 z-10">
                               <div class="w-8 h-8 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden ring-2 ring-white">
-                                <img v-if="activity.userAvatar" :src="activity.userAvatar" class="w-8 h-8 rounded-full object-cover" :alt="activity.userName" />
+                                <UploadAssetImg v-if="activity.userAvatar" :src="activity.userAvatar" class="w-8 h-8 rounded-full object-cover" :alt="activity.userName" />
                                 <span v-else>{{ activityUserInitials(activity.userName) }}</span>
                               </div>
                               <div class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white" :class="activityActionColor(activity.action)"></div>
@@ -1248,7 +1248,7 @@ function formatDate(dateStr: string | null) {
                   <div class="flex items-center gap-2 min-w-0">
                     <template v-if="story.owner">
                       <div class="w-8 h-8 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-bold shrink-0">
-                        <img v-if="story.ownerAvatar" :src="story.ownerAvatar" class="w-8 h-8 rounded-full object-cover" />
+                        <UploadAssetImg v-if="story.ownerAvatar" :src="story.ownerAvatar" class="w-8 h-8 rounded-full object-cover" />
                         <span v-else>{{ story.owner[0] }}</span>
                       </div>
                       <span class="text-sm text-gray-600 truncate">{{ story.owner }}</span>
@@ -1280,7 +1280,7 @@ function formatDate(dateStr: string | null) {
                         @click.stop="saveOwnerInline(story.id, member)"
                       >
                         <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[9px] font-bold shrink-0">
-                          <img v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
+                          <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
                           <span v-else>{{ member.name[0] }}</span>
                         </div>
                         <span class="truncate">{{ member.name }}</span>
@@ -1407,7 +1407,7 @@ function formatDate(dateStr: string | null) {
                 <div class="flex items-center gap-2">
                   <template v-if="story.owner">
                     <div class="w-7 h-7 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[9px] font-bold">
-                      <img v-if="story.ownerAvatar" :src="story.ownerAvatar" class="w-7 h-7 rounded-full object-cover" />
+                      <UploadAssetImg v-if="story.ownerAvatar" :src="story.ownerAvatar" class="w-7 h-7 rounded-full object-cover" />
                       <span v-else>{{ story.owner[0] }}</span>
                     </div>
                   </template>

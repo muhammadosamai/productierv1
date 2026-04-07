@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, nextTick } from 'vue'
+import { ref, watch, computed, nextTick, onBeforeUnmount } from 'vue'
 import {
   X, Maximize2, Copy, Loader2, ChevronDown, Check,
   Clock, CalendarDays, FileText, Shield,
@@ -9,9 +9,11 @@ import {
   MessageSquare, Send, Trash2,
   Upload, Download, ImageIcon, FileIcon, Paperclip,
   AlertTriangle, Eye, Monitor, Smartphone, Globe, Zap, Database, LayoutDashboard, Lock,
+  Archive, RotateCcw,
 } from 'lucide-vue-next'
 import { useIssuesStore } from '@/stores/issues'
 import { useAuthStore } from '@/stores/auth'
+import { useProductMembersStore } from '@/stores/productMembers'
 import type {
   Issue, IssueType, IssueStatus, IssueSeverity, IssuePriority,
   IssueReproducibility, IssueEnvironment, IssueBrowser, IssueOs,
@@ -49,6 +51,36 @@ const emit = defineEmits<{
 
 const issuesStore = useIssuesStore()
 const authStore = useAuthStore()
+const productMembersStore = useProductMembersStore()
+
+const archiving = ref(false)
+
+const isProductIssueAdmin = computed(() => {
+  const u = authStore.user
+  const iss = props.issue
+  if (!u || !iss) return false
+  if (u.role === 'super_admin') return true
+  return productMembersStore.members.some(m => m.userId === u.id && m.role === 'admin')
+})
+
+watch(
+  () => [props.issue?.product, props.open] as const,
+  async ([product, open]) => {
+    if (product && open) await productMembersStore.fetchMembers(product)
+  },
+  { immediate: true },
+)
+
+async function setIssueArchived(archived: boolean) {
+  if (!props.issue || !isProductIssueAdmin.value) return
+  archiving.value = true
+  try {
+    await issuesStore.updateIssue(props.issue.id, { archived })
+    emit('updated')
+  } finally {
+    archiving.value = false
+  }
+}
 
 // Active tab
 const activeTab = ref<'description' | 'reproduction' | 'comments' | 'attachments' | 'activities'>('description')
@@ -95,6 +127,55 @@ const uploadingFiles = ref(false)
 const isDragging = ref(false)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const deletingAttachmentId = ref<string | null>(null)
+const downloadingAttachmentId = ref<string | null>(null)
+/** Blob URLs for image thumbnails (authenticated fetch; avoids broken /uploads on frontend host). */
+const attachmentPreviewUrls = ref<Record<string, string>>({})
+
+function revokeAllAttachmentPreviewUrls() {
+  for (const url of Object.values(attachmentPreviewUrls.value)) {
+    try {
+      URL.revokeObjectURL(url)
+    } catch { /* ignore */ }
+  }
+  attachmentPreviewUrls.value = {}
+}
+
+async function hydrateAttachmentImagePreviews(items: IssueAttachment[]) {
+  revokeAllAttachmentPreviewUrls()
+  const imageAtts = items.filter(a => isImageFile(a.mimeType))
+  if (imageAtts.length === 0) return
+
+  if (!authStore.token) {
+    const next: Record<string, string> = {}
+    for (const att of imageAtts) next[att.id] = att.filePath
+    attachmentPreviewUrls.value = next
+    return
+  }
+
+  const pairs = await Promise.all(
+    imageAtts.map(async (att) => {
+      try {
+        const res = await fetch(`/api/issues/attachments/${att.id}/download`, {
+          headers: { Authorization: `Bearer ${authStore.token}` },
+        })
+        if (!res.ok) return null
+        const blob = await res.blob()
+        return [att.id, URL.createObjectURL(blob)] as const
+      } catch {
+        return null
+      }
+    }),
+  )
+  const next: Record<string, string> = {}
+  for (const p of pairs) {
+    if (p) next[p[0]] = p[1]
+  }
+  attachmentPreviewUrls.value = next
+}
+
+onBeforeUnmount(() => {
+  revokeAllAttachmentPreviewUrls()
+})
 
 // Comments (loaded from issue or fetched)
 const comments = ref<IssueComment[]>([])
@@ -187,6 +268,7 @@ const filteredAssigneeMembers = computed(() => {
 // Reset state when issue changes
 watch(() => props.issue?.id, async (id) => {
   if (!id) return
+  revokeAllAttachmentPreviewUrls()
   editingField.value = null
   closeAllDropdowns()
   activeTab.value = 'description'
@@ -207,7 +289,9 @@ watch(activeTab, (tab) => {
 async function loadComments(issueId: string) {
   commentsLoading.value = true
   try {
-    const res = await fetch(`/api/issues/${issueId}/comments`)
+    const headers: Record<string, string> = {}
+    if (authStore.token) headers.Authorization = `Bearer ${authStore.token}`
+    const res = await fetch(`/api/issues/${issueId}/comments`, { headers })
     if (res.ok) comments.value = await res.json()
   } catch { comments.value = [] }
   finally { commentsLoading.value = false }
@@ -216,9 +300,17 @@ async function loadComments(issueId: string) {
 async function loadAttachments(issueId: string) {
   attachmentsLoading.value = true
   try {
-    const res = await fetch(`/api/issues/${issueId}/attachments`)
-    if (res.ok) attachments.value = await res.json()
-  } catch { attachments.value = [] }
+    const headers: Record<string, string> = {}
+    if (authStore.token) headers.Authorization = `Bearer ${authStore.token}`
+    const res = await fetch(`/api/issues/${issueId}/attachments`, { headers })
+    if (res.ok) {
+      attachments.value = await res.json()
+      await hydrateAttachmentImagePreviews(attachments.value)
+    }
+  } catch {
+    attachments.value = []
+    revokeAllAttachmentPreviewUrls()
+  }
   finally { attachmentsLoading.value = false }
 }
 
@@ -248,6 +340,7 @@ async function uploadFiles(files: FileList | File[]) {
       if (res.ok) {
         const att = await res.json()
         attachments.value.unshift(att)
+        await hydrateAttachmentImagePreviews(attachments.value)
       }
     }
   } finally { uploadingFiles.value = false }
@@ -260,8 +353,39 @@ async function deleteAttachment(attachmentId: string) {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${authStore.token}` },
     })
-    if (res.ok) attachments.value = attachments.value.filter(a => a.id !== attachmentId)
+    if (res.ok) {
+      const url = attachmentPreviewUrls.value[attachmentId]
+      if (url) {
+        try { URL.revokeObjectURL(url) } catch { /* ignore */ }
+        const { [attachmentId]: _removed, ...rest } = attachmentPreviewUrls.value
+        attachmentPreviewUrls.value = rest
+      }
+      attachments.value = attachments.value.filter(a => a.id !== attachmentId)
+    }
   } finally { deletingAttachmentId.value = null }
+}
+
+async function downloadIssueAttachment(att: IssueAttachment) {
+  if (!authStore.token) return
+  downloadingAttachmentId.value = att.id
+  try {
+    const res = await fetch(`/api/issues/attachments/${att.id}/download`, {
+      headers: { Authorization: `Bearer ${authStore.token}` },
+    })
+    if (!res.ok) return
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = att.fileName || 'attachment'
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } finally {
+    downloadingAttachmentId.value = null
+  }
 }
 
 function onDragOver(e: DragEvent) { e.preventDefault(); isDragging.value = true }
@@ -285,7 +409,9 @@ function formatFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
-function isImageFile(mimeType: string): boolean { return mimeType.startsWith('image/') }
+function isImageFile(mimeType: string | null | undefined): boolean {
+  return !!mimeType && mimeType.startsWith('image/')
+}
 function fileIcon(mimeType: string) { return mimeType.startsWith('image/') ? ImageIcon : FileIcon }
 
 function formatRelativeTime(dateStr: string) {
@@ -687,6 +813,7 @@ function activityFormatField(field: string) {
 
 function changeFieldLabel(field: string): string {
   switch (field) {
+    case 'archived': return 'Archived'
     case 'assignedToUserId': return 'Assigned to'
     case 'reportedByUserId': return 'Reported by'
     case 'stepsToReproduce': return 'Steps to reproduce'
@@ -706,6 +833,7 @@ function changeActionType(change: { from: string | null; to: string | null }): '
 
 function changeFieldIcon(field: string) {
   switch (field) {
+    case 'archived': return Archive
     case 'status': return Circle
     case 'priority': return Signal
     case 'severity': return AlertTriangle
@@ -790,6 +918,26 @@ const groupedActivities = computed(() => {
           </div>
           <div class="flex items-center gap-1">
             <button
+              v-if="isProductIssueAdmin && !issue.archived"
+              type="button"
+              class="p-1 rounded-md hover:bg-amber-50 text-gray-400 hover:text-amber-700 transition-colors disabled:opacity-40"
+              title="Archive issue (admins only)"
+              :disabled="archiving || saving"
+              @click="setIssueArchived(true)"
+            >
+              <Archive :size="14" />
+            </button>
+            <button
+              v-if="isProductIssueAdmin && issue.archived"
+              type="button"
+              class="p-1 rounded-md hover:bg-green-50 text-gray-400 hover:text-green-700 transition-colors disabled:opacity-40"
+              title="Restore issue to the list"
+              :disabled="archiving || saving"
+              @click="setIssueArchived(false)"
+            >
+              <RotateCcw :size="14" />
+            </button>
+            <button
               class="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
               title="Expand"
             >
@@ -812,6 +960,14 @@ const groupedActivities = computed(() => {
 
         <!-- Scrollable Body -->
         <div class="flex-1 overflow-y-auto">
+          <div
+            v-if="issue.archived"
+            class="mx-6 mt-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200/80 text-xs text-amber-900"
+          >
+            <span class="font-semibold">Archived.</span>
+            Hidden from the default issues list and search.
+            <template v-if="isProductIssueAdmin"> Use restore (↺) above to bring it back.</template>
+          </div>
           <!-- Sticky Title -->
           <div class="sticky top-0 z-20 bg-white border-b border-gray-100">
             <div class="px-6 py-3">
@@ -983,7 +1139,7 @@ const groupedActivities = computed(() => {
                     <template v-if="issue.assignedTo">
                       <div class="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/assignee">
                         <div class="w-5 h-5 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                          <img v-if="issue.assignedTo.avatar" :src="issue.assignedTo.avatar" class="w-5 h-5 rounded-full object-cover" />
+                          <UploadAssetImg v-if="issue.assignedTo.avatar" :src="issue.assignedTo.avatar" class="w-5 h-5 rounded-full object-cover" />
                           <span v-else>{{ issue.assignedTo.name[0] }}</span>
                         </div>
                         <span class="text-xs font-medium text-gray-700">{{ issue.assignedTo.name }}</span>
@@ -1036,7 +1192,7 @@ const groupedActivities = computed(() => {
                         @click="selectAssignee(member)"
                       >
                         <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                          <img v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
+                          <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
                           <span v-else>{{ member.name[0] }}</span>
                         </div>
                         <div class="flex-1 text-left min-w-0">
@@ -1058,7 +1214,7 @@ const groupedActivities = computed(() => {
                 </span>
                 <div v-if="issue.reportedBy" class="inline-flex items-center gap-1.5 bg-gray-50 rounded-full pl-1 pr-2.5 py-1">
                   <div class="w-5 h-5 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                    <img v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-5 h-5 rounded-full object-cover" />
+                    <UploadAssetImg v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-5 h-5 rounded-full object-cover" />
                     <span v-else>{{ issue.reportedBy.name[0] }}</span>
                   </div>
                   <span class="text-xs font-medium text-gray-600">{{ issue.reportedBy.name }}</span>
@@ -1464,7 +1620,7 @@ const groupedActivities = computed(() => {
                     >
                       <div class="flex items-start gap-2">
                         <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-bold shrink-0 mt-0.5">
-                          <img v-if="comment.user?.avatar" :src="comment.user.avatar" class="w-6 h-6 rounded-full object-cover" />
+                          <UploadAssetImg v-if="comment.user?.avatar" :src="comment.user.avatar" class="w-6 h-6 rounded-full object-cover" />
                           <span v-else>{{ (comment.user?.name || '?')[0] }}</span>
                         </div>
                         <div class="flex-1 min-w-0">
@@ -1545,10 +1701,15 @@ const groupedActivities = computed(() => {
                       :class="isImageFile(att.mimeType) ? 'bg-gray-200' : 'bg-blue-50'"
                     >
                       <img
-                        v-if="isImageFile(att.mimeType)"
-                        :src="att.filePath"
+                        v-if="isImageFile(att.mimeType) && attachmentPreviewUrls[att.id]"
+                        :src="attachmentPreviewUrls[att.id]"
                         :alt="att.fileName"
                         class="w-10 h-10 object-cover rounded-lg"
+                      />
+                      <ImageIcon
+                        v-else-if="isImageFile(att.mimeType)"
+                        :size="18"
+                        class="text-gray-400"
                       />
                       <component v-else :is="fileIcon(att.mimeType)" :size="18" class="text-blue-500" />
                     </div>
@@ -1565,16 +1726,16 @@ const groupedActivities = computed(() => {
                     </div>
 
                     <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover/att:opacity-100 transition-opacity">
-                      <a
-                        :href="att.filePath"
-                        target="_blank"
-                        download
-                        class="p-1.5 rounded-md hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
+                      <button
+                        type="button"
+                        class="p-1.5 rounded-md hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer disabled:opacity-40"
                         title="Download"
-                        @click.stop
+                        :disabled="downloadingAttachmentId === att.id"
+                        @click.stop="downloadIssueAttachment(att)"
                       >
-                        <Download :size="13" />
-                      </a>
+                        <Loader2 v-if="downloadingAttachmentId === att.id" :size="13" class="animate-spin" />
+                        <Download v-else :size="13" />
+                      </button>
                       <button
                         class="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
                         title="Delete"
@@ -1622,7 +1783,7 @@ const groupedActivities = computed(() => {
                           <!-- Avatar with action dot -->
                           <div class="relative shrink-0 z-10">
                             <div class="w-8 h-8 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden ring-2 ring-white">
-                              <img
+                              <UploadAssetImg
                                 v-if="activity.userAvatar"
                                 :src="activity.userAvatar"
                                 class="w-8 h-8 rounded-full object-cover"

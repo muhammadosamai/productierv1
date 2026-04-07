@@ -268,7 +268,7 @@ async function handleSubmit() {
           <!-- Selected leader display -->
           <div v-if="leader" class="flex items-center gap-2.5 border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white">
             <div class="w-7 h-7 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden shrink-0">
-              <img
+              <UploadAssetImg
                 v-if="leaderAvatar"
                 :src="leaderAvatar"
                 class="w-7 h-7 rounded-full object-cover"
@@ -313,7 +313,7 @@ async function handleSubmit() {
                 @click="selectLeader(user)"
               >
                 <div class="w-7 h-7 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden shrink-0">
-                  <img
+                  <UploadAssetImg
                     v-if="user.avatar"
                     :src="user.avatar"
                     class="w-7 h-7 rounded-full object-cover"

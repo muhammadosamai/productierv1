@@ -198,7 +198,7 @@ function getInitials(name: string): string {
             <UserCheck :size="14" class="text-blue-500" />
             <div class="flex items-center gap-2 min-w-0">
               <div class="w-5 h-5 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-medium overflow-hidden shrink-0">
-                <img
+                <UploadAssetImg
                   v-if="matchedUser.avatar"
                   :src="matchedUser.avatar"
                   class="w-5 h-5 rounded-full object-cover"

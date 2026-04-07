@@ -195,7 +195,7 @@ function trendColor(dir: string, positive = true) {
             <tr v-for="m in data.team.workload" :key="m.id" class="border-b border-gray-50 hover:bg-gray-50/50">
               <td class="px-5 py-3">
                 <div class="flex items-center gap-2">
-                  <img v-if="m.avatar" :src="m.avatar" class="w-6 h-6 rounded-full object-cover" />
+                  <UploadAssetImg v-if="m.avatar" :src="m.avatar" class="w-6 h-6 rounded-full object-cover" />
                   <div v-else class="w-6 h-6 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[10px] font-semibold text-[#4857FE]">
                     {{ getInitials(m.name) }}
                   </div>

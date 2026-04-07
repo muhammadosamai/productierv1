@@ -1198,7 +1198,7 @@ function renderUserAvatar(userId: string | null) {
                             <!-- Avatar with action dot -->
                             <div class="relative shrink-0 z-10">
                               <div class="w-8 h-8 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden ring-2 ring-white">
-                                <img
+                                <UploadAssetImg
                                   v-if="activity.userAvatar"
                                   :src="activity.userAvatar"
                                   class="w-8 h-8 rounded-full object-cover"
@@ -1268,14 +1268,14 @@ function renderUserAvatar(userId: string | null) {
                                       <template v-else-if="isUserField(change.field)">
                                         <span v-if="change.to && getUserById(change.to)" class="inline-flex items-center gap-1 ml-1 align-middle">
                                           <span class="w-4 h-4 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[7px] font-medium overflow-hidden inline-flex shrink-0">
-                                            <img v-if="getUserById(change.to)?.avatar" :src="getUserById(change.to)!.avatar!" class="w-4 h-4 rounded-full object-cover" />
+                                            <UploadAssetImg v-if="getUserById(change.to)?.avatar" :src="getUserById(change.to)!.avatar!" class="w-4 h-4 rounded-full object-cover" />
                                             <span v-else>{{ activityUserInitials(getUserById(change.to)!.name) }}</span>
                                           </span>
                                           <span class="font-medium text-gray-700">{{ getUserById(change.to)!.name }}</span>
                                         </span>
                                         <span v-else-if="change.from && getUserById(change.from)" class="inline-flex items-center gap-1 ml-1 align-middle">
                                           <span class="w-4 h-4 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[7px] font-medium overflow-hidden inline-flex shrink-0">
-                                            <img v-if="getUserById(change.from)?.avatar" :src="getUserById(change.from)!.avatar!" class="w-4 h-4 rounded-full object-cover" />
+                                            <UploadAssetImg v-if="getUserById(change.from)?.avatar" :src="getUserById(change.from)!.avatar!" class="w-4 h-4 rounded-full object-cover" />
                                             <span v-else>{{ activityUserInitials(getUserById(change.from)!.name) }}</span>
                                           </span>
                                           <span class="font-medium text-gray-700">{{ getUserById(change.from)!.name }}</span>
@@ -1614,7 +1614,7 @@ function renderUserAvatar(userId: string | null) {
                   <div class="flex items-center gap-2 min-w-0">
                     <template v-if="task.ownerUserId && getUserById(task.ownerUserId)">
                       <div class="w-8 h-8 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-bold shrink-0">
-                        <img v-if="getUserById(task.ownerUserId)?.avatar" :src="getUserById(task.ownerUserId)!.avatar!" class="w-8 h-8 rounded-full object-cover" />
+                        <UploadAssetImg v-if="getUserById(task.ownerUserId)?.avatar" :src="getUserById(task.ownerUserId)!.avatar!" class="w-8 h-8 rounded-full object-cover" />
                         <span v-else>{{ (getUserById(task.ownerUserId)?.name || '?')[0] }}</span>
                       </div>
                       <span class="text-sm text-gray-600 truncate">{{ getUserById(task.ownerUserId)?.name }}</span>
@@ -1646,7 +1646,7 @@ function renderUserAvatar(userId: string | null) {
                         @click.stop="saveTaskOwnerInline(task.id, member)"
                       >
                         <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[9px] font-bold shrink-0">
-                          <img v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
+                          <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
                           <span v-else>{{ member.name[0] }}</span>
                         </div>
                         <span class="truncate">{{ member.name }}</span>
@@ -1669,7 +1669,7 @@ function renderUserAvatar(userId: string | null) {
                         :style="{ zIndex: 3 - i }"
                         :title="getUserById(userId)?.name || userId"
                       >
-                        <img v-if="getUserById(userId)?.avatar" :src="getUserById(userId)!.avatar!" class="w-8 h-8 rounded-full object-cover" />
+                        <UploadAssetImg v-if="getUserById(userId)?.avatar" :src="getUserById(userId)!.avatar!" class="w-8 h-8 rounded-full object-cover" />
                         <span v-else>{{ (getUserById(userId)?.name || '?')[0] }}</span>
                       </div>
                       <div
@@ -1700,7 +1700,7 @@ function renderUserAvatar(userId: string | null) {
                         @click.stop="saveTaskAssigneesToggle(task.id, task.assigneeUserIds, member.id)"
                       >
                         <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[9px] font-bold shrink-0">
-                          <img v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
+                          <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
                           <span v-else>{{ member.name[0] }}</span>
                         </div>
                         <span class="truncate flex-1">{{ member.name }}</span>
@@ -1724,7 +1724,7 @@ function renderUserAvatar(userId: string | null) {
                         :style="{ zIndex: 3 - i }"
                         :title="getUserById(userId)?.name || userId"
                       >
-                        <img v-if="getUserById(userId)?.avatar" :src="getUserById(userId)!.avatar!" class="w-8 h-8 rounded-full object-cover" />
+                        <UploadAssetImg v-if="getUserById(userId)?.avatar" :src="getUserById(userId)!.avatar!" class="w-8 h-8 rounded-full object-cover" />
                         <span v-else>{{ (getUserById(userId)?.name || '?')[0] }}</span>
                       </div>
                       <div
@@ -1755,7 +1755,7 @@ function renderUserAvatar(userId: string | null) {
                         @click.stop="saveTaskReviewersToggle(task.id, task.reviewerUserIds, member.id)"
                       >
                         <div class="w-6 h-6 rounded-full overflow-hidden bg-[#579bfc] flex items-center justify-center text-white text-[9px] font-bold shrink-0">
-                          <img v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
+                          <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
                           <span v-else>{{ member.name[0] }}</span>
                         </div>
                         <span class="truncate flex-1">{{ member.name }}</span>
@@ -1812,7 +1812,7 @@ function renderUserAvatar(userId: string | null) {
                 <div v-else-if="col.field === 'createdBy'" class="flex items-center gap-2 min-w-0">
                   <template v-if="task.createdByUserId && getUserById(task.createdByUserId)">
                     <div class="w-8 h-8 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-bold shrink-0">
-                      <img v-if="getUserById(task.createdByUserId)?.avatar" :src="getUserById(task.createdByUserId)!.avatar!" class="w-8 h-8 rounded-full object-cover" />
+                      <UploadAssetImg v-if="getUserById(task.createdByUserId)?.avatar" :src="getUserById(task.createdByUserId)!.avatar!" class="w-8 h-8 rounded-full object-cover" />
                       <span v-else>{{ (getUserById(task.createdByUserId)?.name || '?')[0] }}</span>
                     </div>
                     <span class="text-sm text-gray-600 truncate">{{ getUserById(task.createdByUserId)?.name }}</span>
@@ -1960,7 +1960,7 @@ function renderUserAvatar(userId: string | null) {
                       :style="{ zIndex: 3 - i }"
                       :title="getUserById(userId)?.name || userId"
                     >
-                      <img v-if="getUserById(userId)?.avatar" :src="getUserById(userId)!.avatar!" class="w-7 h-7 rounded-full object-cover" />
+                      <UploadAssetImg v-if="getUserById(userId)?.avatar" :src="getUserById(userId)!.avatar!" class="w-7 h-7 rounded-full object-cover" />
                       <span v-else>{{ (getUserById(userId)?.name || '?')[0] }}</span>
                     </div>
                     <div

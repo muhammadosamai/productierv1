@@ -570,7 +570,7 @@ function getInitials(name: string) {
                   @click="navigateToProduct(product.name)"
                 >
                   <div class="w-9 h-9 rounded-xl overflow-hidden shrink-0 shadow-sm">
-                    <img v-if="product.logo" :src="product.logo" class="w-full h-full object-cover" />
+                    <UploadAssetImg v-if="product.logo" :src="product.logo" class="w-full h-full object-cover" />
                     <div v-else class="w-full h-full bg-gradient-to-br from-[#4857FE] to-[#7C5CFC] flex items-center justify-center text-[10px] font-bold text-white">
                       {{ product.name.slice(0, 2).toUpperCase() }}
                     </div>
@@ -598,7 +598,7 @@ function getInitials(name: string) {
                   class="flex items-start gap-2 px-4 py-2"
                 >
                   <div class="w-6 h-6 rounded-full overflow-hidden shrink-0 mt-0.5">
-                    <img v-if="activity.userAvatar" :src="activity.userAvatar" class="w-full h-full object-cover" />
+                    <UploadAssetImg v-if="activity.userAvatar" :src="activity.userAvatar" class="w-full h-full object-cover" />
                     <div v-else class="w-full h-full bg-[#4857FE]/10 flex items-center justify-center text-[8px] font-bold text-[#4857FE]">
                       {{ getInitials(activity.userName || 'U') }}
                     </div>

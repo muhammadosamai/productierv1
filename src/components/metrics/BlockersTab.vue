@@ -142,7 +142,7 @@ watch(() => [props.period, productStore.activeProduct?.name], fetchData, { immed
                 <td class="px-5 py-3 text-gray-500 max-w-[200px] truncate">{{ t.blockedReason }}</td>
                 <td class="px-5 py-3">
                   <div v-if="t.assignee" class="flex items-center gap-1.5">
-                    <img v-if="t.assignee.avatar" :src="t.assignee.avatar" class="w-5 h-5 rounded-full object-cover" />
+                    <UploadAssetImg v-if="t.assignee.avatar" :src="t.assignee.avatar" class="w-5 h-5 rounded-full object-cover" />
                     <div v-else class="w-5 h-5 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[9px] font-semibold text-[#4857FE]">
                       {{ getInitials(t.assignee.name) }}
                     </div>

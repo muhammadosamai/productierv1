@@ -221,7 +221,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
       )
     }
 
-    const issueConditions: any[] = [inArray(issues.product, allowedProducts)]
+    const issueConditions: any[] = [inArray(issues.product, allowedProducts), eq(issues.archived, false)]
     if (textPattern) {
       issueConditions.push(
         or(

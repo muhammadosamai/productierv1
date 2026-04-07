@@ -394,7 +394,7 @@ const userInitials = () => {
               <div
                 class="w-20 h-20 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-xl font-semibold overflow-hidden"
               >
-                <img
+                <UploadAssetImg
                   v-if="avatarPreview"
                   :src="avatarPreview"
                   class="w-20 h-20 rounded-full object-cover"
@@ -618,7 +618,7 @@ const userInitials = () => {
                 class="w-20 h-20 rounded-xl bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden cursor-pointer transition-colors hover:border-[#4857FE] hover:bg-[#4857FE]/5"
                 @click="triggerProductLogoUpload"
               >
-                <img
+                <UploadAssetImg
                   v-if="productLogoPreview"
                   :src="productLogoPreview"
                   class="w-full h-full object-cover rounded-xl"

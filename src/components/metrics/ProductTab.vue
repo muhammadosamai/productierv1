@@ -303,7 +303,7 @@ function userInitials(name: string) {
                     <!-- Avatar with action dot -->
                     <div class="relative shrink-0 z-10">
                       <div class="w-8 h-8 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden ring-2 ring-white">
-                        <img
+                        <UploadAssetImg
                           v-if="activity.userAvatar"
                           :src="activity.userAvatar"
                           class="w-8 h-8 rounded-full object-cover"
@@ -394,7 +394,7 @@ function userInitials(name: string) {
         <div class="bg-white rounded-xl border border-gray-100 overflow-hidden">
           <div class="p-5">
             <div class="flex items-center gap-3.5 mb-4">
-              <img
+              <UploadAssetImg
                 v-if="productStore.activeProduct?.logo"
                 :src="productStore.activeProduct.logo"
                 :alt="activeProductName || 'Product'"
@@ -460,7 +460,7 @@ function userInitials(name: string) {
                   @click="addMember(user)"
                 >
                   <div class="w-7 h-7 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden shrink-0">
-                    <img v-if="user.avatar" :src="user.avatar" class="w-7 h-7 rounded-full object-cover" :alt="user.name" />
+                    <UploadAssetImg v-if="user.avatar" :src="user.avatar" class="w-7 h-7 rounded-full object-cover" :alt="user.name" />
                     <span v-else>{{ userInitials(user.name) }}</span>
                   </div>
                   <div class="flex flex-col min-w-0">
@@ -498,7 +498,7 @@ function userInitials(name: string) {
               class="flex items-center gap-3 px-5 py-3 hover:bg-gray-50/50 transition-colors group"
             >
               <div class="w-8 h-8 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden shrink-0">
-                <img v-if="member.userAvatar" :src="member.userAvatar" class="w-8 h-8 rounded-full object-cover" :alt="member.userName" />
+                <UploadAssetImg v-if="member.userAvatar" :src="member.userAvatar" class="w-8 h-8 rounded-full object-cover" :alt="member.userName" />
                 <span v-else>{{ userInitials(member.userName) }}</span>
               </div>
               <div class="flex-1 min-w-0">

@@ -10,15 +10,19 @@ export const useIssuesStore = defineStore('issues', () => {
 
   const issueCount = computed(() => issues.value.length)
 
-  async function fetchIssues(productName?: string, testCycleId?: string) {
+  async function fetchIssues(productName?: string, testCycleId?: string, opts?: { includeArchived?: boolean }) {
     loading.value = true
     error.value = null
     try {
       const params = new URLSearchParams()
       if (productName) params.set('product', productName)
       if (testCycleId) params.set('testCycleId', testCycleId)
+      if (opts?.includeArchived) params.set('includeArchived', 'true')
       const url = `/api/issues${params.toString() ? '?' + params.toString() : ''}`
-      const res = await fetch(url)
+      const authStore = useAuthStore()
+      const headers: Record<string, string> = {}
+      if (authStore.token) headers.Authorization = `Bearer ${authStore.token}`
+      const res = await fetch(url, { headers })
       if (res.ok) {
         issues.value = await res.json()
       }

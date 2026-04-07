@@ -932,7 +932,7 @@ async function deleteComment(comment: UnifiedComment) {
                     <template v-if="story.owner">
                       <div class="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/owner">
                         <div class="w-5 h-5 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                          <img v-if="story.ownerAvatar" :src="story.ownerAvatar" class="w-5 h-5 rounded-full object-cover" />
+                          <UploadAssetImg v-if="story.ownerAvatar" :src="story.ownerAvatar" class="w-5 h-5 rounded-full object-cover" />
                           <span v-else>{{ story.owner[0] }}</span>
                         </div>
                         <span class="text-xs font-medium text-gray-700">{{ story.owner }}</span>
@@ -985,7 +985,7 @@ async function deleteComment(comment: UnifiedComment) {
                         @click="selectOwner(member)"
                       >
                         <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                          <img v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
+                          <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
                           <span v-else>{{ member.name[0] }}</span>
                         </div>
                         <div class="flex-1 text-left min-w-0">
@@ -1309,7 +1309,7 @@ async function deleteComment(comment: UnifiedComment) {
                   >
                     <div class="flex items-start gap-2">
                       <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-bold shrink-0 mt-0.5">
-                        <img v-if="comment.user?.avatar" :src="comment.user.avatar" class="w-6 h-6 rounded-full object-cover" />
+                        <UploadAssetImg v-if="comment.user?.avatar" :src="comment.user.avatar" class="w-6 h-6 rounded-full object-cover" />
                         <span v-else>{{ (comment.user?.name || '?')[0] }}</span>
                       </div>
                       <div class="flex-1 min-w-0">
@@ -1473,7 +1473,7 @@ async function deleteComment(comment: UnifiedComment) {
                         <!-- Avatar with action dot -->
                         <div class="relative shrink-0 z-10">
                           <div class="w-8 h-8 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden ring-2 ring-white">
-                            <img
+                            <UploadAssetImg
                               v-if="activity.userAvatar"
                               :src="activity.userAvatar"
                               class="w-8 h-8 rounded-full object-cover"

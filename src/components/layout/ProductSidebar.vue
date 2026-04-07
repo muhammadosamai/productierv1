@@ -50,7 +50,7 @@ function onProductCreated(name: string) {
           :title="element.name"
           @click="productStore.selectProduct(index)"
         >
-          <img
+          <UploadAssetImg
             v-if="element.logo"
             :src="element.logo"
             :alt="element.name"

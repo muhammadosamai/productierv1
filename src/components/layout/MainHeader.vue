@@ -319,7 +319,7 @@ function handleLogout() {
         <PopoverTrigger as-child>
           <button class="flex items-center gap-2 pl-1 rounded-lg hover:bg-gray-50 px-2 py-1.5 transition-colors">
             <div class="w-8 h-8 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-xs font-medium overflow-hidden shrink-0">
-              <img
+              <UploadAssetImg
                 v-if="authStore.user?.avatar"
                 :src="authStore.user.avatar"
                 class="w-8 h-8 rounded-full object-cover"
@@ -338,7 +338,7 @@ function handleLogout() {
           <!-- User info header -->
           <div class="flex items-center gap-2.5 px-2 py-2 mb-1">
             <div class="w-9 h-9 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-xs font-medium overflow-hidden shrink-0">
-              <img
+              <UploadAssetImg
                 v-if="authStore.user?.avatar"
                 :src="authStore.user.avatar"
                 class="w-9 h-9 rounded-full object-cover"

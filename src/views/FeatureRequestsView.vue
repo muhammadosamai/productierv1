@@ -300,7 +300,7 @@ function timeAgo(dateStr: string) {
               </div>
               <div class="flex items-center gap-1.5">
                 <template v-if="item.createdByUser">
-                  <img v-if="item.createdByUser.avatar" :src="item.createdByUser.avatar" class="w-5 h-5 rounded-full object-cover" />
+                  <UploadAssetImg v-if="item.createdByUser.avatar" :src="item.createdByUser.avatar" class="w-5 h-5 rounded-full object-cover" />
                   <div v-else class="w-5 h-5 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[8px] font-semibold text-[#4857FE]">{{ item.createdByUser.name[0] }}</div>
                 </template>
                 <span class="text-[10px] text-gray-400">{{ timeAgo(item.createdAt) }}</span>
@@ -379,7 +379,7 @@ function timeAgo(dateStr: string) {
               <!-- Author -->
               <td class="px-5 py-3.5">
                 <div v-if="item.createdByUser" class="flex items-center gap-2">
-                  <img v-if="item.createdByUser.avatar" :src="item.createdByUser.avatar" class="w-5 h-5 rounded-full object-cover" />
+                  <UploadAssetImg v-if="item.createdByUser.avatar" :src="item.createdByUser.avatar" class="w-5 h-5 rounded-full object-cover" />
                   <div v-else class="w-5 h-5 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[9px] font-semibold text-[#4857FE]">{{ item.createdByUser.name[0] }}</div>
                   <span class="text-sm text-gray-600">{{ item.createdByUser.name }}</span>
                 </div>

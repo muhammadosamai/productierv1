@@ -816,7 +816,7 @@ function progressPercent(delivery: Delivery) {
                           <div class="flex items-start gap-3">
                             <div class="relative shrink-0 z-10">
                               <div class="w-8 h-8 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden ring-2 ring-white">
-                                <img v-if="activity.userAvatar" :src="activity.userAvatar" class="w-8 h-8 rounded-full object-cover" :alt="activity.userName" />
+                                <UploadAssetImg v-if="activity.userAvatar" :src="activity.userAvatar" class="w-8 h-8 rounded-full object-cover" :alt="activity.userName" />
                                 <span v-else>{{ activityUserInitials(activity.userName) }}</span>
                               </div>
                               <div class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white" :class="activityActionColor(activity.action)"></div>
@@ -1151,7 +1151,7 @@ function progressPercent(delivery: Delivery) {
                 <div v-else-if="col.field === 'createdBy'" class="flex items-center gap-2 min-w-0">
                   <template v-if="delivery.createdByUser">
                     <div class="w-7 h-7 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[9px] font-bold shrink-0">
-                      <img v-if="delivery.createdByUser.avatar" :src="delivery.createdByUser.avatar" class="w-7 h-7 rounded-full object-cover" />
+                      <UploadAssetImg v-if="delivery.createdByUser.avatar" :src="delivery.createdByUser.avatar" class="w-7 h-7 rounded-full object-cover" />
                       <span v-else>{{ delivery.createdByUser.name[0] }}</span>
                     </div>
                     <span class="text-sm text-gray-600 truncate">{{ delivery.createdByUser.name }}</span>
@@ -1253,7 +1253,7 @@ function progressPercent(delivery: Delivery) {
                 <div class="flex items-center gap-2">
                   <template v-if="delivery.createdByUser">
                     <div class="w-7 h-7 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[9px] font-bold">
-                      <img v-if="delivery.createdByUser.avatar" :src="delivery.createdByUser.avatar" class="w-7 h-7 rounded-full object-cover" />
+                      <UploadAssetImg v-if="delivery.createdByUser.avatar" :src="delivery.createdByUser.avatar" class="w-7 h-7 rounded-full object-cover" />
                       <span v-else>{{ delivery.createdByUser.name[0] }}</span>
                     </div>
                   </template>

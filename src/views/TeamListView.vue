@@ -803,7 +803,7 @@ function statusBadgeStyle(status: string) {
                 <!-- Member (name + avatar) -->
                 <div v-if="col.field === 'name'" class="flex items-center gap-3 min-w-0">
                   <div class="w-8 h-8 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-xs font-bold shrink-0">
-                    <img v-if="member.avatar" :src="member.avatar" class="w-8 h-8 rounded-full object-cover" />
+                    <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-8 h-8 rounded-full object-cover" />
                     <span v-else>{{ getInitials(member.name) }}</span>
                   </div>
                   <span class="text-sm font-medium text-gray-800 truncate">{{ member.name }}</span>
@@ -885,7 +885,7 @@ function statusBadgeStyle(status: string) {
               <!-- Row 1: Avatar + Role badge -->
               <div class="flex items-center justify-between mb-4">
                 <div class="w-12 h-12 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-lg font-bold shrink-0">
-                  <img v-if="member.avatar" :src="member.avatar" class="w-12 h-12 rounded-full object-cover" />
+                  <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-12 h-12 rounded-full object-cover" />
                   <span v-else>{{ getInitials(member.name) }}</span>
                 </div>
                 <span

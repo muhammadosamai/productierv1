@@ -1142,7 +1142,7 @@ function onBackdropClick(e: MouseEvent) {
                         class="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/owner"
                       >
                         <div class="w-5 h-5 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                          <img v-if="getUserById(task.ownerUserId)?.avatar" :src="getUserById(task.ownerUserId)!.avatar!" class="w-5 h-5 rounded-full object-cover" />
+                          <UploadAssetImg v-if="getUserById(task.ownerUserId)?.avatar" :src="getUserById(task.ownerUserId)!.avatar!" class="w-5 h-5 rounded-full object-cover" />
                           <span v-else>{{ (getUserById(task.ownerUserId)?.name || '?')[0] }}</span>
                         </div>
                         <span class="text-xs font-medium text-gray-700">{{ getUserById(task.ownerUserId)?.name || 'Unknown' }}</span>
@@ -1186,7 +1186,7 @@ function onBackdropClick(e: MouseEvent) {
                         @click="selectOwner(member.id)"
                       >
                         <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                          <img v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
+                          <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
                           <span v-else>{{ member.name[0] }}</span>
                         </div>
                         <div class="flex-1 text-left min-w-0">
@@ -1215,7 +1215,7 @@ function onBackdropClick(e: MouseEvent) {
                         class="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/assignee"
                       >
                         <div class="w-5 h-5 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                          <img v-if="getUserById(uid)?.avatar" :src="getUserById(uid)!.avatar!" class="w-5 h-5 rounded-full object-cover" />
+                          <UploadAssetImg v-if="getUserById(uid)?.avatar" :src="getUserById(uid)!.avatar!" class="w-5 h-5 rounded-full object-cover" />
                           <span v-else>{{ (getUserById(uid)?.name || '?')[0] }}</span>
                         </div>
                         <span class="text-xs font-medium text-gray-700">{{ getUserById(uid)?.name || 'Unknown' }}</span>
@@ -1259,7 +1259,7 @@ function onBackdropClick(e: MouseEvent) {
                         @click="toggleAssignee(member.id)"
                       >
                         <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                          <img v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
+                          <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
                           <span v-else>{{ member.name[0] }}</span>
                         </div>
                         <div class="flex-1 text-left min-w-0">
@@ -1288,7 +1288,7 @@ function onBackdropClick(e: MouseEvent) {
                         class="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/reviewer"
                       >
                         <div class="w-5 h-5 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                          <img v-if="getUserById(uid)?.avatar" :src="getUserById(uid)!.avatar!" class="w-5 h-5 rounded-full object-cover" />
+                          <UploadAssetImg v-if="getUserById(uid)?.avatar" :src="getUserById(uid)!.avatar!" class="w-5 h-5 rounded-full object-cover" />
                           <span v-else>{{ (getUserById(uid)?.name || '?')[0] }}</span>
                         </div>
                         <span class="text-xs font-medium text-gray-700">{{ getUserById(uid)?.name || 'Unknown' }}</span>
@@ -1332,7 +1332,7 @@ function onBackdropClick(e: MouseEvent) {
                         @click="toggleReviewer(member.id)"
                       >
                         <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                          <img v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
+                          <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
                           <span v-else>{{ member.name[0] }}</span>
                         </div>
                         <div class="flex-1 text-left min-w-0">
@@ -1588,7 +1588,7 @@ function onBackdropClick(e: MouseEvent) {
                     >
                       <div class="flex items-start gap-2">
                         <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-bold shrink-0 mt-0.5">
-                          <img v-if="comment.user?.avatar" :src="comment.user.avatar" class="w-6 h-6 rounded-full object-cover" />
+                          <UploadAssetImg v-if="comment.user?.avatar" :src="comment.user.avatar" class="w-6 h-6 rounded-full object-cover" />
                           <span v-else>{{ (comment.user?.name || '?')[0] }}</span>
                         </div>
                         <div class="flex-1 min-w-0">
@@ -1642,7 +1642,7 @@ function onBackdropClick(e: MouseEvent) {
                           <!-- Avatar with action dot -->
                           <div class="relative shrink-0 z-10">
                             <div class="w-8 h-8 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[10px] font-medium overflow-hidden ring-2 ring-white">
-                              <img
+                              <UploadAssetImg
                                 v-if="activity.userAvatar"
                                 :src="activity.userAvatar"
                                 class="w-8 h-8 rounded-full object-cover"
@@ -1703,14 +1703,14 @@ function onBackdropClick(e: MouseEvent) {
                                     <template v-else-if="isUserField(change.field)">
                                       <span v-if="change.to && getUserById(change.to)" class="inline-flex items-center gap-1 ml-1 align-middle">
                                         <span class="w-4 h-4 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[7px] font-medium overflow-hidden inline-flex shrink-0">
-                                          <img v-if="getUserById(change.to)?.avatar" :src="getUserById(change.to)!.avatar!" class="w-4 h-4 rounded-full object-cover" />
+                                          <UploadAssetImg v-if="getUserById(change.to)?.avatar" :src="getUserById(change.to)!.avatar!" class="w-4 h-4 rounded-full object-cover" />
                                           <span v-else>{{ activityUserInitials(getUserById(change.to)!.name) }}</span>
                                         </span>
                                         <span class="font-medium text-gray-700">{{ getUserById(change.to)!.name }}</span>
                                       </span>
                                       <span v-else-if="change.from && getUserById(change.from)" class="inline-flex items-center gap-1 ml-1 align-middle">
                                         <span class="w-4 h-4 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[7px] font-medium overflow-hidden inline-flex shrink-0">
-                                          <img v-if="getUserById(change.from)?.avatar" :src="getUserById(change.from)!.avatar!" class="w-4 h-4 rounded-full object-cover" />
+                                          <UploadAssetImg v-if="getUserById(change.from)?.avatar" :src="getUserById(change.from)!.avatar!" class="w-4 h-4 rounded-full object-cover" />
                                           <span v-else>{{ activityUserInitials(getUserById(change.from)!.name) }}</span>
                                         </span>
                                         <span class="font-medium text-gray-700">{{ getUserById(change.from)!.name }}</span>

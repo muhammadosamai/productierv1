@@ -368,7 +368,7 @@ const selected = computed(() => wikiStore.selectedAsset)
                   {{ selected.visibility }}
                 </span>
                 <span v-if="selected.ownerUser" class="inline-flex items-center gap-1.5 text-xs text-gray-500">
-                  <img v-if="selected.ownerUser.avatar" :src="selected.ownerUser.avatar" class="w-4 h-4 rounded-full object-cover" />
+                  <UploadAssetImg v-if="selected.ownerUser.avatar" :src="selected.ownerUser.avatar" class="w-4 h-4 rounded-full object-cover" />
                   <User2 v-else :size="12" class="text-gray-400" />
                   {{ selected.ownerUser.name }}
                 </span>

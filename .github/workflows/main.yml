@@ -1,42 +1,45 @@
-name: Deploy Productierv1 (Stage)
+name: Deploy Productier Stagging
 
 on:
   push:
     branches: ["stage"]
   workflow_dispatch:
 
-permissions:
-  contents: read
-
-concurrency:
-  group: stage-deploy
-  cancel-in-progress: false
-
 jobs:
   deploy:
-    name: Deploy productierv1 (stage)
+    name: Deploy to Stagging
     runs-on: self-hosted
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup SSH
-        shell: bash
         run: |
           set -euo pipefail
-          eval "$(ssh-agent -s)"
           mkdir -p ~/.ssh
-          ssh-add <(printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}")
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H 216.250.122.193 >> ~/.ssh/known_hosts
-
-      - name: Deploy to Stage Server
-        shell: bash
+          
+      - name: Deploy via SSH
         run: |
           set -euo pipefail
-          ssh scripts@216.250.122.193 << 'EOF'
-          set -e
-          echo "Running deployment script..."
-          bash /var/www/deploy-scripts/productierv1-stage-deploy.sh
-          echo "Productierv1 stage deployment completed."
+          ssh -o StrictHostKeyChecking=yes scripts@216.250.122.193 << 'EOF'
+            set -euo pipefail
+            
+            echo "Navigating to project directory"
+            cd /var/www/stage-productier/server
+            
+            echo "Fetching latest changes"
+            git fetch origin stage
+            
+            echo "Resetting to latest commit"
+            git reset --hard origin/stage
+            
+            echo "Rebuilding and starting containers"
+            docker-compose up -d --build 
+            
+            echo "Deployment completed successfully"
           EOF

@@ -100,7 +100,7 @@ async function handleSubmit() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-[520px] !overflow-visible">
+    <DialogContent class="sm:max-w-[520px]">
       <DialogHeader>
         <DialogTitle>Create Delivery</DialogTitle>
         <DialogDescription>Plan a new delivery for your product.</DialogDescription>
@@ -121,13 +121,16 @@ async function handleSubmit() {
           />
         </div>
 
-        <!-- Description -->
-        <div class="space-y-1.5">
+        <!-- Description (scrollable so long content does not hide fields below) -->
+        <div class="space-y-1.5 min-h-0">
           <label class="text-sm font-medium text-gray-700">Description</label>
-          <RichTextEditor
-            v-model="description"
-            placeholder="Describe the delivery goals and scope..."
-          />
+          <div class="h-[min(40vh,280px)] min-h-[160px] flex flex-col rounded-lg">
+            <RichTextEditor
+              v-model="description"
+              placeholder="Describe the delivery goals and scope..."
+              class="min-h-0 flex-1"
+            />
+          </div>
         </div>
 
         <!-- Status -->

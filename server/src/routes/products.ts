@@ -55,11 +55,24 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
   .get('/', async ({ jwt: jwtInstance, headers }) => {
     const user = await getUserFromHeader(jwtInstance.verify, headers)
 
+    let roleByProduct: Record<string, string> = {}
+    if (user) {
+      const membershipRows = await db
+        .select({ product: productMembers.product, role: productMembers.role })
+        .from(productMembers)
+        .where(eq(productMembers.userId, user.id))
+      roleByProduct = Object.fromEntries(membershipRows.map((r) => [r.product, r.role]))
+    }
+
+    const attachMyRole = <T extends { name: string }>(list: T[]) =>
+      list.map((p) => ({ ...p, myRole: roleByProduct[p.name] ?? null }))
+
     // Unauthenticated or super_admin: return all
     if (!user || user.role === 'super_admin') {
-      return db.query.products.findMany({
+      const list = await db.query.products.findMany({
         orderBy: (items, { asc }) => [asc(items.name)],
       })
+      return attachMyRole(list)
     }
 
     // Return only products the user is a member of
@@ -75,7 +88,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       orderBy: (items, { asc }) => [asc(items.name)],
     })
 
-    return allProducts.filter(p => productNames.includes(p.name))
+    return attachMyRole(allProducts.filter(p => productNames.includes(p.name)))
   })
 
   // POST /api/products - Create a new product

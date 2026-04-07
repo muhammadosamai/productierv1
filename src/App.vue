@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { Toaster } from 'vue-sonner'
 import MainSidebar from '@/components/layout/MainSidebar.vue'
 import ProductSidebar from '@/components/layout/ProductSidebar.vue'
 import SubProductSidebar from '@/components/layout/SubProductSidebar.vue'
@@ -49,4 +50,6 @@ const showProductSidebars = computed(() => {
       </main>
     </div>
   </div>
+
+  <Toaster position="top-center" :rich-colors="true" :close-button="true" />
 </template>

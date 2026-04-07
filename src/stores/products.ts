@@ -10,6 +10,8 @@ export interface Product {
   dotColor: string
   description?: string
   createdByUserId?: string
+  /** Current user's role in this product (product_members.role); null if not a member. */
+  myRole?: string | null
 }
 
 const STORAGE_KEY = 'productier_product_order'
@@ -46,6 +48,7 @@ export const useProductStore = defineStore('products', () => {
         dotColor: '',
         description: p.description,
         createdByUserId: p.createdByUserId,
+        myRole: p.myRole ?? null,
       }))
 
       // Apply saved order if available
@@ -141,6 +144,7 @@ export const useProductStore = defineStore('products', () => {
         dotColor: '',
         description: body.description,
         createdByUserId: body.createdByUserId,
+        myRole: 'admin',
       }
       products.value.push(newProduct)
       activeProductName.value = newProduct.name
@@ -167,11 +171,13 @@ export const useProductStore = defineStore('products', () => {
       const updated = await res.json()
       const idx = products.value.findIndex(p => p.name === currentName)
       if (idx !== -1) {
+        const prev = products.value[idx]!
         products.value[idx] = {
-          ...products.value[idx]!,
+          ...prev,
           name: updated.name,
           description: updated.description,
           logo: updated.logo || '',
+          myRole: prev.myRole ?? null,
         }
       }
       if (activeProductName.value === currentName && updated.name !== currentName) {

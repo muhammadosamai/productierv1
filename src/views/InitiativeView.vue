@@ -12,6 +12,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import type { Initiative, InitiativeStatus, InitiativePriority } from '@/types/initiative'
 import type { TaskStatus } from '@/types/backlog'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
+import { rewriteUploadUrlsInHtml, normalizeUploadUrlsForStorage } from '@/utils/uploadAssetUrl'
 
 const route = useRoute()
 const initiativesStore = useInitiativesStore()
@@ -27,6 +28,11 @@ const initiativeProduct = computed(() => {
 
 const initiative = ref<Initiative | null>(null)
 const loading = ref(true)
+
+const descriptionDisplayHtml = computed(() => {
+  const d = initiative.value?.description
+  return d ? rewriteUploadUrlsInHtml(d) : ''
+})
 const activeTab = ref('Initiative Overview')
 const expandedItems = ref<Set<string>>(new Set())
 
@@ -179,12 +185,14 @@ function saveLeader() {
 
 function startEditDescription() {
   if (!initiative.value) return
-  editDescription.value = initiative.value.description || ''
+  editDescription.value = rewriteUploadUrlsInHtml(initiative.value.description || '')
   editingField.value = 'description'
 }
 
 function saveDescription() {
-  updateField('description', editDescription.value.trim() || null)
+  const raw = editDescription.value.trim() || null
+  const stored = raw ? normalizeUploadUrlsForStorage(raw) : null
+  updateField('description', stored)
 }
 
 function updateStatus(status: InitiativeStatus) {
@@ -631,7 +639,7 @@ function cycleTaskStatus(taskId: string, currentStatus: TaskStatus) {
               </div>
             </div>
             <template v-else>
-              <div v-if="initiative.description" class="text-sm text-gray-600 leading-relaxed prose prose-sm max-w-none rich-text-content" v-html="initiative.description"></div>
+              <div v-if="initiative.description" class="text-sm text-gray-600 leading-relaxed prose prose-sm max-w-none rich-text-content" v-html="descriptionDisplayHtml"></div>
               <p v-else class="text-sm text-gray-400 italic">Click to add a description...</p>
             </template>
           </div>

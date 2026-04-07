@@ -41,6 +41,9 @@ __screenshots__/
 # Server
 server/node_modules
 server/.env
-server/uploads
+# Ignore uploaded files; directory layout is tracked via .gitkeep
+server/uploads/**/*
+!server/uploads/*/
+!server/uploads/*/.gitkeep
 # server/drizzle/ — migration files must be versioned and deployed
 

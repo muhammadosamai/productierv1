@@ -5,7 +5,6 @@ import { eq, sql } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
-import { mkdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
@@ -482,7 +481,6 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     if (!file) { set.status = 400; return { error: 'No file provided' } }
 
     const uploadsDir = path.join(process.cwd(), 'uploads', 'attachments')
-    await mkdir(uploadsDir, { recursive: true })
 
     const ext = path.extname(file.name) || ''
     const uniqueName = `${randomUUID()}${ext}`

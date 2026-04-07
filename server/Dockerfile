@@ -10,6 +10,9 @@ RUN bun install --frozen-lockfile
 
 COPY . .
 
+# uploads/ tree is copied from the repo (.gitkeep); ensure non-root can write
+RUN chown -R bun:bun /app/uploads
+
 # Drop to non-root user provided by the base image
 USER bun
 

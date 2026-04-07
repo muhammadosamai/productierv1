@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs'
 import { db } from '../db'
 import { users, tasks, stories, initiatives, deliveries, activities, productInvites, productMembers, passwordResetTokens, emailPreferences } from '../db/schema'
 import { eq, ilike, or, sql, arrayContains, and } from 'drizzle-orm'
-import { writeFile, mkdir } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { sendWelcomeEmail, sendPasswordResetEmail } from '../services/email'
@@ -682,9 +682,7 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
       return { error: 'No file provided' }
     }
 
-    // Create uploads/avatars directory if it doesn't exist
     const uploadsDir = join(import.meta.dir, '../../uploads/avatars')
-    await mkdir(uploadsDir, { recursive: true })
 
     // Generate unique filename
     const ext = file.name.split('.').pop() || 'png'

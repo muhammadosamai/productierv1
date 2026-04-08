@@ -126,7 +126,10 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
   }, { body: storyBody })
 
   // GET /api/stories/attachments/:attachmentId/download
-  .get('/attachments/:attachmentId/download', async ({ params: { attachmentId }, set, jwt: _jwt, headers: _headers }) => {
+  .get('/attachments/:attachmentId/download', async ({ params: { attachmentId }, set, jwt, headers }) => {
+    // Auth optional — attempt verify but do not block on failure
+    await getUserFromHeader(jwt.verify, headers).catch(() => null)
+
     const att = await db.query.storyAttachments.findFirst({ where: eq(storyAttachments.id, attachmentId) })
     if (!att) {
       set.status = 404
@@ -320,7 +323,9 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
   // ============ ATTACHMENTS ============
 
   // GET /api/stories/:id/attachments
-  .get('/:id/attachments', async ({ params: { id }, jwt: _jwt, headers: _headers }) => {
+  .get('/:id/attachments', async ({ params: { id }, jwt, headers }) => {
+    // Auth optional
+    await getUserFromHeader(jwt.verify, headers).catch(() => null)
     return db.query.storyAttachments.findMany({
       where: eq(storyAttachments.storyId, id),
       with: { user: true },

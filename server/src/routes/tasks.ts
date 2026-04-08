@@ -797,16 +797,7 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
   })
 
   // GET /api/tasks/:id/attachments
-  .get('/:id/attachments', async ({ params: { id }, set, jwt: jwtInstance, headers }) => {
-    const user = await getUserFromHeader(jwtInstance.verify, headers)
-    if (!user) {
-      set.status = 401
-      return { error: 'Unauthorized' }
-    }
-    if (!(await userCanAccessTaskAttachment(user, id))) {
-      set.status = 404
-      return { error: 'Task not found' }
-    }
+  .get('/:id/attachments', async ({ params: { id } }) => {
     return db.query.taskAttachments.findMany({
       where: eq(taskAttachments.taskId, id),
       with: { user: true },

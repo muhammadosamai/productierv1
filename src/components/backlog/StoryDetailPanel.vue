@@ -209,9 +209,7 @@ async function loadAttachments(storyId: string) {
   attachments.value = []
   revokeAllAttachmentPreviewUrls()
   try {
-    const headers: Record<string, string> = {}
-    if (authStore.token) headers.Authorization = `Bearer ${authStore.token}`
-    const res = await fetch(resolveApiPath(`/api/stories/${storyId}/attachments`), { headers })
+    const res = await fetch(resolveApiPath(`/api/stories/${storyId}/attachments`))
     if (res.ok) {
       attachments.value = await res.json()
       await hydrateAttachmentImagePreviews(attachments.value)

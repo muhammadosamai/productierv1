@@ -335,20 +335,7 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
   // ============ ATTACHMENTS ============
 
   // GET /api/stories/:id/attachments
-  .get('/:id/attachments', async ({ params: { id }, set, jwt, headers }) => {
-    const user = await getUserFromHeader(jwt.verify, headers)
-    if (!user) {
-      set.status = 401
-      return { error: 'Unauthorized' }
-    }
-    const storyRow = await db.query.stories.findFirst({
-      where: eq(stories.id, id),
-      columns: { product: true },
-    })
-    if (!storyRow || !(await userCanAccessStoryProduct(user, storyRow.product))) {
-      set.status = 404
-      return { error: 'Story not found' }
-    }
+  .get('/:id/attachments', async ({ params: { id } }) => {
     return db.query.storyAttachments.findMany({
       where: eq(storyAttachments.storyId, id),
       with: { user: true },

@@ -610,10 +610,7 @@ async function loadAttachments(taskId: string) {
   attachments.value = []
   revokeAllAttachmentPreviewUrls()
   try {
-    const token = authStore.token || localStorage.getItem('productier_token')
-    const headers: Record<string, string> = {}
-    if (token) headers.Authorization = `Bearer ${token}`
-    const res = await fetch(resolveApiPath(`/api/tasks/${taskId}/attachments`), { headers })
+    const res = await fetch(resolveApiPath(`/api/tasks/${taskId}/attachments`))
     if (res.ok) {
       attachments.value = await res.json()
       await hydrateAttachmentImagePreviews(attachments.value)

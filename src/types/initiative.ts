@@ -29,3 +29,15 @@ export interface CreateInitiativePayload {
   priority?: InitiativePriority
   product?: string
 }
+
+export interface InitiativeAttachment {
+  id: string
+  initiativeId: string
+  userId: string
+  fileName: string
+  fileSize: number
+  mimeType: string
+  filePath: string
+  createdAt: string
+  user?: { id: string; name: string; email: string; avatar: string | null }
+}

@@ -8,6 +8,15 @@
  */
 const API_ORIGIN = (import.meta.env.VITE_API_ORIGIN || '').replace(/\/$/, '')
 
+/**
+ * Prefix `/api/...` with `VITE_API_ORIGIN` when the SPA is served from a different host than the API.
+ * Use for `fetch()` (Authorization headers); relative URLs alone would hit the static origin.
+ */
+export function resolveApiPath(path: string): string {
+  const p = path.startsWith('/') ? path : `/${path}`
+  return API_ORIGIN ? `${API_ORIGIN}${p}` : p
+}
+
 function uploadsPathToBrowserUrl(pathAfterUploadsPrefix: string): string {
   const p = pathAfterUploadsPrefix.startsWith('/') ? pathAfterUploadsPrefix : `/${pathAfterUploadsPrefix}`
   return `/api/uploads${p}`

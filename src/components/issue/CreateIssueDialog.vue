@@ -26,6 +26,13 @@ import {
   ChevronLeft, ChevronRight, Check, Link, X, Search,
 } from 'lucide-vue-next'
 import type { IssueType, IssueSeverity, IssuePriority, IssueReproducibility, IssueEnvironment, IssueBrowser, IssueOs } from '@/types/issue'
+import {
+  partitionAllowedAttachmentFiles,
+  ATTACHMENT_FILE_ACCEPT,
+  ALLOWED_ATTACHMENT_TYPES_HINT,
+} from '@/utils/allowedAttachments'
+import { resolveApiPath } from '@/utils/uploadAssetUrl'
+import { toast } from 'vue-sonner'
 
 const open = defineModel<boolean>('open', { default: false })
 const emit = defineEmits<{ created: [id: string] }>()
@@ -182,11 +189,25 @@ function onDragOver(e: DragEvent) { e.preventDefault(); isDragging.value = true 
 function onDragLeave() { isDragging.value = false }
 function onDrop(e: DragEvent) {
   e.preventDefault(); isDragging.value = false
-  if (e.dataTransfer?.files) pendingFiles.value.push(...Array.from(e.dataTransfer.files))
+  if (!e.dataTransfer?.files?.length) return
+  const { allowed, rejectedNames } = partitionAllowedAttachmentFiles(Array.from(e.dataTransfer.files))
+  if (rejectedNames.length > 0) {
+    const preview = rejectedNames.slice(0, 3).join(', ')
+    const more = rejectedNames.length > 3 ? ` (+${rejectedNames.length - 3} more)` : ''
+    toast.error(`Skipped unsupported file(s): ${preview}${more}. ${ALLOWED_ATTACHMENT_TYPES_HINT}.`)
+  }
+  if (allowed.length) pendingFiles.value.push(...allowed)
 }
 function onFileSelect(e: Event) {
   const target = e.target as HTMLInputElement
-  if (target.files) pendingFiles.value.push(...Array.from(target.files))
+  if (!target.files?.length) return
+  const { allowed, rejectedNames } = partitionAllowedAttachmentFiles(Array.from(target.files))
+  if (rejectedNames.length > 0) {
+    const preview = rejectedNames.slice(0, 3).join(', ')
+    const more = rejectedNames.length > 3 ? ` (+${rejectedNames.length - 3} more)` : ''
+    toast.error(`Skipped unsupported file(s): ${preview}${more}. ${ALLOWED_ATTACHMENT_TYPES_HINT}.`)
+  }
+  if (allowed.length) pendingFiles.value.push(...allowed)
   target.value = ''
 }
 function removeFile(index: number) { pendingFiles.value.splice(index, 1) }
@@ -237,11 +258,17 @@ async function handleSubmit() {
     for (const file of pendingFiles.value) {
       const formData = new FormData()
       formData.append('file', file)
-      await fetch(`/api/issues/${issue.id}/attachments`, {
+      const res = await fetch(resolveApiPath(`/api/issues/${issue.id}/attachments`), {
         method: 'POST',
         headers: { Authorization: `Bearer ${authStore.token}` },
         body: formData,
       })
+      if (!res.ok) {
+        try {
+          const j = await res.json()
+          if (j?.error) toast.error(j.error)
+        } catch { /* ignore */ }
+      }
     }
   }
 
@@ -547,7 +574,14 @@ async function handleSubmit() {
               @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop"
               @click="fileInputRef?.click()"
             >
-              <input ref="fileInputRef" type="file" multiple class="hidden" @change="onFileSelect" />
+              <input
+                ref="fileInputRef"
+                type="file"
+                multiple
+                class="hidden"
+                :accept="ATTACHMENT_FILE_ACCEPT"
+                @change="onFileSelect"
+              />
               <div class="flex flex-col items-center gap-1.5 text-sm" :class="isDragging ? 'text-[#4857FE]' : 'text-gray-500'">
                 <Paperclip :size="20" />
                 <span>Drop files or click to upload</span>

@@ -275,6 +275,17 @@ export const initiatives = pgTable('initiatives', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 })
 
+export const initiativeAttachments = pgTable('initiative_attachments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  initiativeId: uuid('initiative_id').notNull().references(() => initiatives.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  fileName: varchar('file_name', { length: 500 }).notNull(),
+  fileSize: integer('file_size').notNull(),
+  mimeType: varchar('mime_type', { length: 255 }).notNull(),
+  filePath: varchar('file_path', { length: 1000 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const deliveries = pgTable('deliveries', {
   id: uuid('id').primaryKey().defaultRandom(),
   productId: varchar('product_id', { length: 255 }).notNull(),
@@ -672,6 +683,21 @@ export const deliveryInitiativesRelations = relations(deliveryInitiatives, ({ on
   }),
 }))
 
+export const initiativesRelations = relations(initiatives, ({ many }) => ({
+  attachments: many(initiativeAttachments),
+}))
+
+export const initiativeAttachmentsRelations = relations(initiativeAttachments, ({ one }) => ({
+  initiative: one(initiatives, {
+    fields: [initiativeAttachments.initiativeId],
+    references: [initiatives.id],
+  }),
+  user: one(users, {
+    fields: [initiativeAttachments.userId],
+    references: [users.id],
+  }),
+}))
+
 export const taskStatusHistory = pgTable('task_status_history', {
   id: uuid('id').primaryKey().defaultRandom(),
   taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
@@ -996,6 +1022,8 @@ export type TaskComment = typeof taskComments.$inferSelect
 export type NewTaskComment = typeof taskComments.$inferInsert
 export type Initiative = typeof initiatives.$inferSelect
 export type NewInitiative = typeof initiatives.$inferInsert
+export type InitiativeAttachmentRecord = typeof initiativeAttachments.$inferSelect
+export type NewInitiativeAttachment = typeof initiativeAttachments.$inferInsert
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Activity = typeof activities.$inferSelect

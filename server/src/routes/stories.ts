@@ -4,6 +4,7 @@ import { stories, storyComments, storyAttachments, users, productMembers } from 
 import { eq, sql, and } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
+import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
@@ -334,13 +335,25 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
   // ============ ATTACHMENTS ============
 
   // GET /api/stories/:id/attachments
-  .get('/:id/attachments', async ({ params: { id } }) => {
-    const results = await db.query.storyAttachments.findMany({
+  .get('/:id/attachments', async ({ params: { id }, set, jwt, headers }) => {
+    const user = await getUserFromHeader(jwt.verify, headers)
+    if (!user) {
+      set.status = 401
+      return { error: 'Unauthorized' }
+    }
+    const storyRow = await db.query.stories.findFirst({
+      where: eq(stories.id, id),
+      columns: { product: true },
+    })
+    if (!storyRow || !(await userCanAccessStoryProduct(user, storyRow.product))) {
+      set.status = 404
+      return { error: 'Story not found' }
+    }
+    return db.query.storyAttachments.findMany({
       where: eq(storyAttachments.storyId, id),
       with: { user: true },
       orderBy: (a, { desc }) => [desc(a.createdAt)],
     })
-    return results
   })
 
   // POST /api/stories/:id/attachments (multipart file upload)
@@ -348,8 +361,20 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
     const user = await getUserFromHeader(jwt.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
+    const storyRow = await db.query.stories.findFirst({
+      where: eq(stories.id, id),
+      columns: { product: true },
+    })
+    if (!storyRow || !(await userCanAccessStoryProduct(user, storyRow.product))) {
+      set.status = 404
+      return { error: 'Story not found' }
+    }
+
     const file = (body as any).file as File
     if (!file) { set.status = 400; return { error: 'No file provided' } }
+
+    const typeCheck = validateAttachmentFileName(file.name)
+    if (!typeCheck.ok) { set.status = 400; return { error: typeCheck.error } }
 
     const uploadsDir = path.join(process.cwd(), 'uploads', 'attachments')
 
@@ -358,6 +383,9 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
     const filePath = path.join(uploadsDir, uniqueName)
 
     const arrayBuffer = await file.arrayBuffer()
+    const contentCheck = await validateAttachmentContent(arrayBuffer, file.name)
+    if (!contentCheck.ok) { set.status = 400; return { error: contentCheck.error } }
+
     await Bun.write(filePath, arrayBuffer)
 
     const [attachment] = await db.insert(storyAttachments).values({
@@ -365,7 +393,7 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
       userId: user.id,
       fileName: file.name,
       fileSize: file.size,
-      mimeType: file.type || 'application/octet-stream',
+      mimeType: contentCheck.mime,
       filePath: `/uploads/attachments/${uniqueName}`,
     }).returning()
 
@@ -396,6 +424,22 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
   .delete('/attachments/:attachmentId', async ({ params: { attachmentId }, set, jwt, headers }) => {
     const user = await getUserFromHeader(jwt.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+
+    const existing = await db.query.storyAttachments.findFirst({
+      where: eq(storyAttachments.id, attachmentId),
+    })
+    if (!existing) {
+      set.status = 404
+      return { error: 'Attachment not found' }
+    }
+    const storyForAccess = await db.query.stories.findFirst({
+      where: eq(stories.id, existing.storyId),
+      columns: { product: true },
+    })
+    if (!storyForAccess || !(await userCanAccessStoryProduct(user, storyForAccess.product))) {
+      set.status = 404
+      return { error: 'Attachment not found' }
+    }
 
     const [deleted] = await db.delete(storyAttachments)
       .where(eq(storyAttachments.id, attachmentId))

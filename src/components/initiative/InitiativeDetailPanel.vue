@@ -1,12 +1,20 @@
 <script setup lang="ts">
-import { ref, watch, computed, nextTick } from 'vue'
+import { ref, watch, computed, nextTick, onBeforeUnmount } from 'vue'
 import {
   X, Maximize2, Copy, Loader2, ChevronDown, Check,
-  Clock, Target, CalendarDays, User2, FileText, Search,
+  Clock, CalendarDays, User2, FileText, Search,
+  Upload, FileIcon, ImageIcon, Download, Trash2, Paperclip,
 } from 'lucide-vue-next'
 import { useInitiativesStore } from '@/stores/initiatives'
 import { useAuthStore } from '@/stores/auth'
-import type { Initiative, InitiativeStatus, InitiativePriority } from '@/types/initiative'
+import type { Initiative, InitiativeStatus, InitiativePriority, InitiativeAttachment } from '@/types/initiative'
+import { resolveApiPath } from '@/utils/uploadAssetUrl'
+import {
+  partitionAllowedAttachmentFiles,
+  ATTACHMENT_FILE_ACCEPT,
+  ALLOWED_ATTACHMENT_TYPES_HINT,
+} from '@/utils/allowedAttachments'
+import { toast } from 'vue-sonner'
 
 interface TeamUser {
   id: string
@@ -27,6 +35,7 @@ const emit = defineEmits<{
 }>()
 
 const initiativesStore = useInitiativesStore()
+const authStore = useAuthStore()
 
 // Editing state
 const editingField = ref<string | null>(null)
@@ -68,11 +77,224 @@ const filteredTeamMembers = computed(() => {
   )
 })
 
-// Reset state when initiative changes
-watch(() => props.initiative?.id, () => {
-  editingField.value = null
-  closeAllDropdowns()
+const attachments = ref<InitiativeAttachment[]>([])
+const attachmentsLoading = ref(false)
+const uploadingFiles = ref(false)
+const isDragging = ref(false)
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const deletingAttachmentId = ref<string | null>(null)
+const downloadingAttachmentId = ref<string | null>(null)
+const attachmentPreviewUrls = ref<Record<string, string>>({})
+
+function revokeAllAttachmentPreviewUrls() {
+  for (const url of Object.values(attachmentPreviewUrls.value)) {
+    try {
+      URL.revokeObjectURL(url)
+    } catch { /* ignore */ }
+  }
+  attachmentPreviewUrls.value = {}
+}
+
+function isImageFile(mimeType: string): boolean {
+  return mimeType.startsWith('image/')
+}
+
+function fileIcon(mimeType: string) {
+  return isImageFile(mimeType) ? ImageIcon : FileIcon
+}
+
+async function hydrateAttachmentImagePreviews(items: InitiativeAttachment[]) {
+  revokeAllAttachmentPreviewUrls()
+  const imageAtts = items.filter(a => isImageFile(a.mimeType))
+  if (imageAtts.length === 0) return
+
+  if (!authStore.token) {
+    attachmentPreviewUrls.value = {}
+    return
+  }
+
+  const pairs = await Promise.all(
+    imageAtts.map(async (att) => {
+      try {
+        const res = await fetch(resolveApiPath(`/api/initiatives/attachments/${att.id}/download`), {
+          headers: { Authorization: `Bearer ${authStore.token}` },
+        })
+        if (!res.ok) return null
+        const ct = (res.headers.get('content-type') || '').toLowerCase()
+        if (ct.includes('application/json')) return null
+        const blob = await res.blob()
+        if (blob.size === 0) return null
+        return [att.id, URL.createObjectURL(blob)] as const
+      } catch {
+        return null
+      }
+    }),
+  )
+  const next: Record<string, string> = {}
+  for (const p of pairs) {
+    if (p) next[p[0]] = p[1]
+  }
+  attachmentPreviewUrls.value = next
+}
+
+async function loadAttachments(initiativeId: string) {
+  attachmentsLoading.value = true
+  attachments.value = []
+  revokeAllAttachmentPreviewUrls()
+  try {
+    const headers: Record<string, string> = {}
+    if (authStore.token) headers.Authorization = `Bearer ${authStore.token}`
+    const res = await fetch(resolveApiPath(`/api/initiatives/${initiativeId}/attachments`), { headers })
+    if (res.ok) {
+      attachments.value = await res.json()
+      await hydrateAttachmentImagePreviews(attachments.value)
+    }
+  } catch {
+    attachments.value = []
+    revokeAllAttachmentPreviewUrls()
+  } finally {
+    attachmentsLoading.value = false
+  }
+}
+
+async function uploadFiles(files: FileList | File[]) {
+  if (!props.initiative || files.length === 0) return
+  const { allowed, rejectedNames } = partitionAllowedAttachmentFiles(Array.from(files))
+  if (rejectedNames.length > 0) {
+    const preview = rejectedNames.slice(0, 3).join(', ')
+    const more = rejectedNames.length > 3 ? ` (+${rejectedNames.length - 3} more)` : ''
+    toast.error(`Skipped unsupported file(s): ${preview}${more}. ${ALLOWED_ATTACHMENT_TYPES_HINT}.`)
+  }
+  if (allowed.length === 0) return
+  uploadingFiles.value = true
+  try {
+    for (const file of allowed) {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch(resolveApiPath(`/api/initiatives/${props.initiative.id}/attachments`), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authStore.token}` },
+        body: formData,
+      })
+      if (!res.ok) {
+        try {
+          const j = await res.json()
+          if (j?.error) toast.error(j.error)
+        } catch { /* ignore */ }
+      }
+    }
+    await loadAttachments(props.initiative.id)
+    emit('updated')
+  } finally {
+    uploadingFiles.value = false
+  }
+}
+
+async function deleteAttachment(attachmentId: string) {
+  if (!props.initiative) return
+  deletingAttachmentId.value = attachmentId
+  try {
+    const res = await fetch(resolveApiPath(`/api/initiatives/attachments/${attachmentId}`), {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${authStore.token}` },
+    })
+    if (res.ok) {
+      await loadAttachments(props.initiative.id)
+      emit('updated')
+    }
+  } finally {
+    deletingAttachmentId.value = null
+  }
+}
+
+async function downloadInitiativeAttachment(att: InitiativeAttachment) {
+  if (!authStore.token) return
+  downloadingAttachmentId.value = att.id
+  try {
+    const res = await fetch(resolveApiPath(`/api/initiatives/attachments/${att.id}/download`), {
+      headers: { Authorization: `Bearer ${authStore.token}` },
+    })
+    if (!res.ok) return
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = att.fileName || 'attachment'
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } finally {
+    downloadingAttachmentId.value = null
+  }
+}
+
+function onDragOver(e: DragEvent) {
+  e.preventDefault()
+  isDragging.value = true
+}
+
+function onDragLeave(e: DragEvent) {
+  e.preventDefault()
+  isDragging.value = false
+}
+
+function onDrop(e: DragEvent) {
+  e.preventDefault()
+  isDragging.value = false
+  if (e.dataTransfer?.files) uploadFiles(e.dataTransfer.files)
+}
+
+function onFileSelect(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (input.files) {
+    uploadFiles(input.files)
+    input.value = ''
+  }
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+function formatRelativeTime(dateStr: string) {
+  const d = new Date(dateStr)
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+
+  if (diffMins < 1) return 'Just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  if (diffHours < 24) return `${diffHours}h ago`
+  if (diffDays < 7) return `${diffDays}d ago`
+  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
+}
+
+onBeforeUnmount(() => {
+  revokeAllAttachmentPreviewUrls()
 })
+
+// Reset state when panel / initiative changes; load attachments when open
+watch(
+  () => [props.open, props.initiative?.id] as const,
+  async ([open, id]) => {
+    editingField.value = null
+    closeAllDropdowns()
+    revokeAllAttachmentPreviewUrls()
+    attachments.value = []
+    if (!open || !id) {
+      attachmentsLoading.value = false
+      return
+    }
+    await loadAttachments(id)
+  },
+  { immediate: true },
+)
 
 function closeAllDropdowns() {
   showStatusDropdown.value = false
@@ -460,6 +682,116 @@ function formatDate(dateStr: string | null) {
               @click.stop="startEditDescription"
             >
               {{ initiative.description || 'Click to add a description...' }}
+            </div>
+          </div>
+
+          <!-- Attachments -->
+          <div class="px-6 py-4 border-t border-gray-100" @click.stop>
+            <div class="flex items-center gap-1.5 mb-3">
+              <Paperclip :size="13" class="text-gray-400" />
+              <span class="text-sm font-medium text-gray-700">Attachments</span>
+            </div>
+
+            <div
+              class="border-2 border-dashed rounded-xl p-5 text-center transition-all cursor-pointer mb-4"
+              :class="isDragging
+                ? 'border-[#4857FE] bg-[#4857FE]/5'
+                : 'border-gray-200 hover:border-gray-300 bg-gray-50/50 hover:bg-gray-50'"
+              @dragover="onDragOver"
+              @dragleave="onDragLeave"
+              @drop="onDrop"
+              @click="fileInputRef?.click()"
+            >
+              <input
+                ref="fileInputRef"
+                type="file"
+                multiple
+                class="hidden"
+                :accept="ATTACHMENT_FILE_ACCEPT"
+                @change="onFileSelect"
+              />
+              <div v-if="uploadingFiles" class="flex flex-col items-center gap-2">
+                <Loader2 :size="22" class="animate-spin text-[#4857FE]" />
+                <p class="text-sm text-[#4857FE] font-medium">Uploading...</p>
+              </div>
+              <div v-else class="flex flex-col items-center gap-2">
+                <div class="w-9 h-9 rounded-full flex items-center justify-center" :class="isDragging ? 'bg-[#4857FE]/10' : 'bg-gray-100'">
+                  <Upload :size="18" :class="isDragging ? 'text-[#4857FE]' : 'text-gray-400'" />
+                </div>
+                <div>
+                  <p class="text-sm font-medium" :class="isDragging ? 'text-[#4857FE]' : 'text-gray-600'">
+                    {{ isDragging ? 'Drop files here' : 'Drop files or click to upload' }}
+                  </p>
+                  <p class="text-xs text-gray-400 mt-0.5">{{ ALLOWED_ATTACHMENT_TYPES_HINT }}</p>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="attachmentsLoading" class="flex items-center justify-center py-6">
+              <Loader2 :size="18" class="animate-spin text-gray-400" />
+            </div>
+
+            <div v-else-if="attachments.length > 0" class="space-y-2">
+              <div
+                v-for="att in attachments"
+                :key="att.id"
+                class="bg-gray-50 rounded-lg border border-gray-100 p-3 flex items-center gap-3 group/att hover:bg-gray-100/70 transition-colors"
+              >
+                <div
+                  class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 overflow-hidden"
+                  :class="isImageFile(att.mimeType) ? 'bg-gray-200' : 'bg-blue-50'"
+                >
+                  <img
+                    v-if="isImageFile(att.mimeType) && attachmentPreviewUrls[att.id]"
+                    :src="attachmentPreviewUrls[att.id]"
+                    :alt="att.fileName"
+                    class="w-10 h-10 object-cover rounded-lg"
+                  />
+                  <ImageIcon
+                    v-else-if="isImageFile(att.mimeType)"
+                    :size="18"
+                    class="text-gray-400"
+                  />
+                  <component v-else :is="fileIcon(att.mimeType)" :size="18" class="text-blue-500" />
+                </div>
+
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium text-gray-800 truncate">{{ att.fileName }}</p>
+                  <div class="flex items-center gap-2 mt-0.5 flex-wrap">
+                    <span class="text-[10px] text-gray-400">{{ formatFileSize(att.fileSize) }}</span>
+                    <span class="text-[10px] text-gray-300">·</span>
+                    <span class="text-[10px] text-gray-400">{{ att.user?.name || 'Unknown' }}</span>
+                    <span class="text-[10px] text-gray-300">·</span>
+                    <span class="text-[10px] text-gray-400">{{ formatRelativeTime(att.createdAt) }}</span>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover/att:opacity-100 transition-opacity">
+                  <button
+                    type="button"
+                    class="p-1.5 rounded-md hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer disabled:opacity-40"
+                    title="Download"
+                    :disabled="downloadingAttachmentId === att.id"
+                    @click.stop="downloadInitiativeAttachment(att)"
+                  >
+                    <Loader2 v-if="downloadingAttachmentId === att.id" :size="13" class="animate-spin" />
+                    <Download v-else :size="13" />
+                  </button>
+                  <button
+                    class="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+                    title="Delete"
+                    :disabled="deletingAttachmentId === att.id"
+                    @click.stop="deleteAttachment(att.id)"
+                  >
+                    <Loader2 v-if="deletingAttachmentId === att.id" :size="13" class="animate-spin" />
+                    <Trash2 v-else :size="13" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div v-else class="text-center py-3">
+              <p class="text-xs text-gray-400">No attachments yet</p>
             </div>
           </div>
         </div>

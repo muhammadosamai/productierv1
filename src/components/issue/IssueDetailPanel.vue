@@ -19,7 +19,13 @@ import type {
   IssueReproducibility, IssueEnvironment, IssueBrowser, IssueOs,
   IssueComment, IssueAttachment,
 } from '@/types/issue'
-import { attachmentPublicUrl } from '@/utils/uploadAssetUrl'
+import { resolveApiPath } from '@/utils/uploadAssetUrl'
+import {
+  partitionAllowedAttachmentFiles,
+  ATTACHMENT_FILE_ACCEPT,
+  ALLOWED_ATTACHMENT_TYPES_HINT,
+} from '@/utils/allowedAttachments'
+import { toast } from 'vue-sonner'
 
 interface TeamUser {
   id: string
@@ -147,20 +153,21 @@ async function hydrateAttachmentImagePreviews(items: IssueAttachment[]) {
   if (imageAtts.length === 0) return
 
   if (!authStore.token) {
-    const next: Record<string, string> = {}
-    for (const att of imageAtts) next[att.id] = attachmentPublicUrl(att.filePath)
-    attachmentPreviewUrls.value = next
+    attachmentPreviewUrls.value = {}
     return
   }
 
   const pairs = await Promise.all(
     imageAtts.map(async (att) => {
       try {
-        const res = await fetch(`/api/issues/attachments/${att.id}/download`, {
+        const res = await fetch(resolveApiPath(`/api/issues/attachments/${att.id}/download`), {
           headers: { Authorization: `Bearer ${authStore.token}` },
         })
         if (!res.ok) return null
+        const ct = (res.headers.get('content-type') || '').toLowerCase()
+        if (ct.includes('application/json')) return null
         const blob = await res.blob()
+        if (blob.size === 0) return null
         return [att.id, URL.createObjectURL(blob)] as const
       } catch {
         return null
@@ -170,9 +177,6 @@ async function hydrateAttachmentImagePreviews(items: IssueAttachment[]) {
   const next: Record<string, string> = {}
   for (const p of pairs) {
     if (p) next[p[0]] = p[1]
-  }
-  for (const att of imageAtts) {
-    if (!next[att.id]) next[att.id] = attachmentPublicUrl(att.filePath)
   }
   attachmentPreviewUrls.value = next
 }
@@ -306,7 +310,7 @@ async function loadAttachments(issueId: string) {
   try {
     const headers: Record<string, string> = {}
     if (authStore.token) headers.Authorization = `Bearer ${authStore.token}`
-    const res = await fetch(`/api/issues/${issueId}/attachments`, { headers })
+    const res = await fetch(resolveApiPath(`/api/issues/${issueId}/attachments`), { headers })
     if (res.ok) {
       attachments.value = await res.json()
       await hydrateAttachmentImagePreviews(attachments.value)
@@ -331,12 +335,19 @@ async function loadActivities(issueId: string) {
 
 async function uploadFiles(files: FileList | File[]) {
   if (!props.issue || files.length === 0) return
+  const { allowed, rejectedNames } = partitionAllowedAttachmentFiles(Array.from(files))
+  if (rejectedNames.length > 0) {
+    const preview = rejectedNames.slice(0, 3).join(', ')
+    const more = rejectedNames.length > 3 ? ` (+${rejectedNames.length - 3} more)` : ''
+    toast.error(`Skipped unsupported file(s): ${preview}${more}. ${ALLOWED_ATTACHMENT_TYPES_HINT}.`)
+  }
+  if (allowed.length === 0) return
   uploadingFiles.value = true
   try {
-    for (const file of files) {
+    for (const file of allowed) {
       const formData = new FormData()
       formData.append('file', file)
-      const res = await fetch(`/api/issues/${props.issue.id}/attachments`, {
+      const res = await fetch(resolveApiPath(`/api/issues/${props.issue.id}/attachments`), {
         method: 'POST',
         headers: { Authorization: `Bearer ${authStore.token}` },
         body: formData,
@@ -345,6 +356,11 @@ async function uploadFiles(files: FileList | File[]) {
         const att = await res.json()
         attachments.value.unshift(att)
         await hydrateAttachmentImagePreviews(attachments.value)
+      } else {
+        try {
+          const j = await res.json()
+          if (j?.error) toast.error(j.error)
+        } catch { /* ignore */ }
       }
     }
   } finally { uploadingFiles.value = false }
@@ -353,7 +369,7 @@ async function uploadFiles(files: FileList | File[]) {
 async function deleteAttachment(attachmentId: string) {
   deletingAttachmentId.value = attachmentId
   try {
-    const res = await fetch(`/api/issues/attachments/${attachmentId}`, {
+    const res = await fetch(resolveApiPath(`/api/issues/attachments/${attachmentId}`), {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${authStore.token}` },
     })
@@ -373,7 +389,7 @@ async function downloadIssueAttachment(att: IssueAttachment) {
   if (!authStore.token) return
   downloadingAttachmentId.value = att.id
   try {
-    const res = await fetch(`/api/issues/attachments/${att.id}/download`, {
+    const res = await fetch(resolveApiPath(`/api/issues/attachments/${att.id}/download`), {
       headers: { Authorization: `Bearer ${authStore.token}` },
     })
     if (!res.ok) return
@@ -1670,6 +1686,7 @@ const groupedActivities = computed(() => {
                     type="file"
                     multiple
                     class="hidden"
+                    :accept="ATTACHMENT_FILE_ACCEPT"
                     @change="onFileSelect"
                   />
                   <div v-if="uploadingFiles" class="flex flex-col items-center gap-2">

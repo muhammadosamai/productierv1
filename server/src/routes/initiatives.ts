@@ -1,9 +1,12 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
-import { initiatives, users } from '../db/schema'
-import { eq } from 'drizzle-orm'
+import { initiatives, initiativeAttachments, users, productMembers } from '../db/schema'
+import { eq, and } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
+import { randomUUID } from 'node:crypto'
+import path from 'node:path'
+import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -36,6 +39,23 @@ async function getUserFromHeader(jwtVerify: any, headers: Record<string, string 
   return user || null
 }
 
+async function userCanAccessInitiativeAttachment(
+  user: { id: string; role: string } | null,
+  initiativeId: string,
+): Promise<boolean> {
+  if (!user) return false
+  if (user.role === 'super_admin') return true
+  const ini = await db.query.initiatives.findFirst({
+    where: eq(initiatives.id, initiativeId),
+    columns: { product: true },
+  })
+  if (!ini) return false
+  const member = await db.query.productMembers.findFirst({
+    where: and(eq(productMembers.product, ini.product), eq(productMembers.userId, user.id)),
+  })
+  return !!member
+}
+
 export const initiativeRoutes = new Elysia({ prefix: '/api/initiatives' })
   .use(jwt({ name: 'jwt', secret: JWT_SECRET }))
 
@@ -64,6 +84,153 @@ export const initiativeRoutes = new Elysia({ prefix: '/api/initiatives' })
     })
     return initiative
   }, { body: initiativeBody })
+
+  // ============ ATTACHMENTS (literal `attachments` before /:id) ============
+
+  .get('/attachments/:attachmentId/download', async ({ params: { attachmentId }, set, jwt, headers }) => {
+    const user = await getUserFromHeader(jwt.verify, headers)
+    if (!user) {
+      set.status = 401
+      return { error: 'Unauthorized' }
+    }
+
+    const att = await db.query.initiativeAttachments.findFirst({ where: eq(initiativeAttachments.id, attachmentId) })
+    if (!att || !(await userCanAccessInitiativeAttachment(user, att.initiativeId))) {
+      set.status = 404
+      return { error: 'Attachment not found' }
+    }
+
+    const rel = att.filePath.replace(/^\/+/, '')
+    const diskPath = path.join(process.cwd(), rel)
+    const file = Bun.file(diskPath)
+    if (!(await file.exists())) {
+      set.status = 404
+      return { error: 'File not found' }
+    }
+
+    const safeName = att.fileName.replace(/[\r\n"]/g, '_') || 'attachment'
+    const utfName = encodeURIComponent(att.fileName).replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+    set.headers['Content-Type'] = att.mimeType || 'application/octet-stream'
+    set.headers['Content-Disposition'] =
+      `attachment; filename="${safeName}"; filename*=UTF-8''${utfName}`
+
+    return file
+  })
+
+  .get('/:id/attachments', async ({ params: { id }, set, jwt, headers }) => {
+    const user = await getUserFromHeader(jwt.verify, headers)
+    if (!user) {
+      set.status = 401
+      return { error: 'Unauthorized' }
+    }
+    if (!(await userCanAccessInitiativeAttachment(user, id))) {
+      set.status = 404
+      return { error: 'Initiative not found' }
+    }
+    return db.query.initiativeAttachments.findMany({
+      where: eq(initiativeAttachments.initiativeId, id),
+      with: { user: true },
+      orderBy: (a, { desc }) => [desc(a.createdAt)],
+    })
+  })
+
+  .post('/:id/attachments', async ({ params: { id }, body, set, jwt, headers }) => {
+    const user = await getUserFromHeader(jwt.verify, headers)
+    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+
+    if (!(await userCanAccessInitiativeAttachment(user, id))) {
+      set.status = 404
+      return { error: 'Initiative not found' }
+    }
+
+    const file = (body as any).file as File
+    if (!file) { set.status = 400; return { error: 'No file provided' } }
+
+    const typeCheck = validateAttachmentFileName(file.name)
+    if (!typeCheck.ok) { set.status = 400; return { error: typeCheck.error } }
+
+    const uploadsDir = path.join(process.cwd(), 'uploads', 'attachments')
+    const ext = path.extname(file.name) || ''
+    const uniqueName = `${randomUUID()}${ext}`
+    const filePath = path.join(uploadsDir, uniqueName)
+
+    const arrayBuffer = await file.arrayBuffer()
+    const contentCheck = await validateAttachmentContent(arrayBuffer, file.name)
+    if (!contentCheck.ok) { set.status = 400; return { error: contentCheck.error } }
+
+    await Bun.write(filePath, arrayBuffer)
+
+    const [attachment] = await db.insert(initiativeAttachments).values({
+      initiativeId: id,
+      userId: user.id,
+      fileName: file.name,
+      fileSize: file.size,
+      mimeType: contentCheck.mime,
+      filePath: `/uploads/attachments/${uniqueName}`,
+    }).returning()
+
+    const ini = await db.query.initiatives.findFirst({ where: eq(initiatives.id, id) })
+    if (ini) {
+      logActivity({
+        product: ini.product,
+        userName: user.name,
+        userAvatar: user.avatar,
+        userId: user.id,
+        action: 'updated',
+        entityType: 'initiative',
+        entityId: ini.id,
+        entityTitle: ini.title,
+        changes: [{ field: 'attachment', from: null, to: file.name }],
+      })
+    }
+
+    return db.query.initiativeAttachments.findFirst({
+      where: eq(initiativeAttachments.id, attachment!.id),
+      with: { user: true },
+    })
+  })
+
+  .delete('/attachments/:attachmentId', async ({ params: { attachmentId }, set, jwt, headers }) => {
+    const user = await getUserFromHeader(jwt.verify, headers)
+    if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+
+    const existing = await db.query.initiativeAttachments.findFirst({
+      where: eq(initiativeAttachments.id, attachmentId),
+    })
+    if (!existing || !(await userCanAccessInitiativeAttachment(user, existing.initiativeId))) {
+      set.status = 404
+      return { error: 'Attachment not found' }
+    }
+
+    const [deleted] = await db.delete(initiativeAttachments)
+      .where(eq(initiativeAttachments.id, attachmentId))
+      .returning()
+    if (!deleted) { set.status = 404; return { error: 'Attachment not found' } }
+
+    const ini = await db.query.initiatives.findFirst({ where: eq(initiatives.id, deleted.initiativeId) })
+    if (ini) {
+      logActivity({
+        product: ini.product,
+        userName: user.name,
+        userAvatar: user.avatar,
+        userId: user.id,
+        action: 'updated',
+        entityType: 'initiative',
+        entityId: ini.id,
+        entityTitle: ini.title,
+        changes: [{ field: 'attachment', from: deleted.fileName, to: null }],
+      })
+    }
+
+    try {
+      const rel = deleted.filePath.replace(/^\/+/, '')
+      const fullPath = path.join(process.cwd(), rel)
+      const { unlink } = await import('fs/promises')
+      await unlink(fullPath)
+    } catch {}
+
+    return { success: true }
+  })
 
   // GET /api/initiatives/:id
   .get('/:id', async ({ params: { id }, set }) => {

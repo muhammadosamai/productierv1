@@ -644,14 +644,17 @@ async function uploadFiles(files: FileList | File[]) {
         },
         body: formData,
       })
-      if (!res.ok) {
+      if (res.ok) {
+        const att = await res.json()
+        attachments.value.unshift(att)
+        await hydrateAttachmentImagePreviews(attachments.value)
+      } else {
         try {
           const j = await res.json()
           if (j?.error) toast.error(j.error)
         } catch { /* ignore */ }
       }
     }
-    await loadAttachments(props.task.id)
   } catch {}
   finally { uploadingFiles.value = false }
 }

@@ -23,7 +23,7 @@ const showProductSidebars = computed(() => {
   return productRoutes.has(name)
 })
 
-console.log('fix: JWT ERROR')
+console.log('fix: 2')
 </script>
 
 <template>

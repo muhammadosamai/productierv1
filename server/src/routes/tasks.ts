@@ -766,7 +766,7 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
   // ============ ATTACHMENTS ============
 
   // GET /api/tasks/attachments/:attachmentId/download
-  .get('/attachments/:attachmentId/download', async ({ params: { attachmentId }, set }) => {
+  .get('/attachments/:attachmentId/download', async ({ params: { attachmentId }, set, jwt: _jwt, headers: _headers }) => {
     const att = await db.query.taskAttachments.findFirst({ where: eq(taskAttachments.id, attachmentId) })
     if (!att) {
       set.status = 404
@@ -791,7 +791,7 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
   })
 
   // GET /api/tasks/:id/attachments
-  .get('/:id/attachments', async ({ params: { id } }) => {
+  .get('/:id/attachments', async ({ params: { id }, jwt: _jwt, headers: _headers }) => {
     return db.query.taskAttachments.findMany({
       where: eq(taskAttachments.taskId, id),
       with: { user: true },

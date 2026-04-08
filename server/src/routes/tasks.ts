@@ -765,16 +765,10 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
 
   // ============ ATTACHMENTS ============
 
-  // GET /api/tasks/attachments/:attachmentId/download — authenticated stream (avoids SPA host serving HTML for static paths)
-  .get('/attachments/:attachmentId/download', async ({ params: { attachmentId }, set, jwt: jwtInstance, headers }) => {
-    const user = await getUserFromHeader(jwtInstance.verify, headers)
-    if (!user) {
-      set.status = 401
-      return { error: 'Unauthorized' }
-    }
-
+  // GET /api/tasks/attachments/:attachmentId/download
+  .get('/attachments/:attachmentId/download', async ({ params: { attachmentId }, set }) => {
     const att = await db.query.taskAttachments.findFirst({ where: eq(taskAttachments.id, attachmentId) })
-    if (!att || !(await userCanAccessTaskAttachment(user, att.taskId))) {
+    if (!att) {
       set.status = 404
       return { error: 'Attachment not found' }
     }

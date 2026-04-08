@@ -40,7 +40,8 @@ jobs:
             git reset --hard origin/sarimbranch
 
             echo "Rebuilding and starting containers"
-            docker-compose up -d --build --no-cache 
+            docker-compose build --no-cache
+            docker-compose up -d 
 
             echo "Deployment completed successfully"
           EOF

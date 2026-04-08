@@ -269,7 +269,9 @@ async function downloadStoryAttachment(att: StoryAttachment) {
   downloadingAttachmentId.value = att.id
   try {
     const res = await fetch(resolveApiPath(`/api/stories/attachments/${att.id}/download`))
-    if (!res.ok) return
+    if (!res.ok) { toast.error(`Download failed (${res.status})`); return }
+    const ct = res.headers.get('content-type') || ''
+    if (ct.includes('text/html')) { toast.error('Download failed: server returned HTML. Check nginx config.'); return }
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

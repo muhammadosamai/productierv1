@@ -23,7 +23,7 @@ const showProductSidebars = computed(() => {
   return productRoutes.has(name)
 })
 
-console.log('fix: 2')
+console.log('fix: 3')
 </script>
 
 <template>

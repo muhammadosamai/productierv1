@@ -657,7 +657,8 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     if (!deleted) { set.status = 404; return { error: 'Attachment not found' } }
 
     try {
-      const fullPath = path.join(process.cwd(), deleted.filePath)
+      const rel = deleted.filePath.replace(/^\/+/, '')
+      const fullPath = path.join(process.cwd(), rel)
       const { unlink } = await import('fs/promises')
       await unlink(fullPath)
     } catch {}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, nextTick } from 'vue'
+import { ref, watch, computed, nextTick, onBeforeUnmount } from 'vue'
 import {
   X, Maximize2, Copy, Loader2, ChevronDown, Check, Archive,
   Clock, CalendarDays, FileText, FolderOpen, Shield,
@@ -140,18 +140,6 @@ const filteredOwnerMembers = computed(() => {
   )
 })
 
-// Reset state when story changes
-watch(() => props.story?.id, async (id) => {
-  if (!id) return
-  editingField.value = null
-  closeAllDropdowns()
-  activeTab.value = 'description'
-  // Default comment target to story
-  commentTaskId.value = null
-  commentFilter.value = 'all'
-  newComment.value = ''
-}, { immediate: true })
-
 // Attachments state
 const attachments = ref<StoryAttachment[]>([])
 const attachmentsLoading = ref(false)
@@ -159,14 +147,71 @@ const uploadingFiles = ref(false)
 const isDragging = ref(false)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const deletingAttachmentId = ref<string | null>(null)
+const downloadingAttachmentId = ref<string | null>(null)
+/** Blob URLs for image thumbnails (authenticated fetch; avoids broken /img and HTML “downloads”). */
+const attachmentPreviewUrls = ref<Record<string, string>>({})
+
+function revokeAllAttachmentPreviewUrls() {
+  for (const url of Object.values(attachmentPreviewUrls.value)) {
+    try {
+      URL.revokeObjectURL(url)
+    } catch { /* ignore */ }
+  }
+  attachmentPreviewUrls.value = {}
+}
+
+function isImageFile(mimeType: string): boolean {
+  return mimeType.startsWith('image/')
+}
+
+async function hydrateAttachmentImagePreviews(items: StoryAttachment[]) {
+  revokeAllAttachmentPreviewUrls()
+  const imageAtts = items.filter(a => isImageFile(a.mimeType))
+  if (imageAtts.length === 0) return
+
+  if (!authStore.token) {
+    const next: Record<string, string> = {}
+    for (const att of imageAtts) next[att.id] = attachmentPublicUrl(att.filePath)
+    attachmentPreviewUrls.value = next
+    return
+  }
+
+  const pairs = await Promise.all(
+    imageAtts.map(async (att) => {
+      try {
+        const res = await fetch(`/api/stories/attachments/${att.id}/download`, {
+          headers: { Authorization: `Bearer ${authStore.token}` },
+        })
+        if (!res.ok) return null
+        const blob = await res.blob()
+        return [att.id, URL.createObjectURL(blob)] as const
+      } catch {
+        return null
+      }
+    }),
+  )
+  const next: Record<string, string> = {}
+  for (const p of pairs) {
+    if (p) next[p[0]] = p[1]
+  }
+  for (const att of imageAtts) {
+    if (!next[att.id]) next[att.id] = attachmentPublicUrl(att.filePath)
+  }
+  attachmentPreviewUrls.value = next
+}
 
 async function loadAttachments(storyId: string) {
   attachmentsLoading.value = true
   try {
     const res = await fetch(`/api/stories/${storyId}/attachments`)
-    if (res.ok) attachments.value = await res.json()
-  } catch { attachments.value = [] }
-  finally { attachmentsLoading.value = false }
+    if (res.ok) {
+      attachments.value = await res.json()
+      await hydrateAttachmentImagePreviews(attachments.value)
+    }
+  } catch {
+    attachments.value = []
+    revokeAllAttachmentPreviewUrls()
+  } finally { attachmentsLoading.value = false }
 }
 
 async function uploadFiles(files: FileList | File[]) {
@@ -184,6 +229,7 @@ async function uploadFiles(files: FileList | File[]) {
       if (res.ok) {
         const att = await res.json()
         attachments.value.unshift(att)
+        await hydrateAttachmentImagePreviews(attachments.value)
       }
     }
   } finally { uploadingFiles.value = false }
@@ -196,9 +242,57 @@ async function deleteAttachment(attachmentId: string) {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${authStore.token}` },
     })
-    if (res.ok) attachments.value = attachments.value.filter(a => a.id !== attachmentId)
+    if (res.ok) {
+      const url = attachmentPreviewUrls.value[attachmentId]
+      if (url) {
+        try { URL.revokeObjectURL(url) } catch { /* ignore */ }
+        const { [attachmentId]: _removed, ...rest } = attachmentPreviewUrls.value
+        attachmentPreviewUrls.value = rest
+      }
+      attachments.value = attachments.value.filter(a => a.id !== attachmentId)
+    }
   } finally { deletingAttachmentId.value = null }
 }
+
+async function downloadStoryAttachment(att: StoryAttachment) {
+  if (!authStore.token) return
+  downloadingAttachmentId.value = att.id
+  try {
+    const res = await fetch(`/api/stories/attachments/${att.id}/download`, {
+      headers: { Authorization: `Bearer ${authStore.token}` },
+    })
+    if (!res.ok) return
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = att.fileName || 'attachment'
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } finally {
+    downloadingAttachmentId.value = null
+  }
+}
+
+// Reset state when story changes (after attachment helpers so revoke is defined)
+watch(() => props.story?.id, async (id) => {
+  revokeAllAttachmentPreviewUrls()
+  attachments.value = []
+  if (!id) return
+  editingField.value = null
+  closeAllDropdowns()
+  activeTab.value = 'description'
+  commentTaskId.value = null
+  commentFilter.value = 'all'
+  newComment.value = ''
+}, { immediate: true })
+
+onBeforeUnmount(() => {
+  revokeAllAttachmentPreviewUrls()
+})
 
 function onDragOver(e: DragEvent) { e.preventDefault(); isDragging.value = true }
 function onDragLeave() { isDragging.value = false }
@@ -219,8 +313,7 @@ function formatFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
-function isImageFile(mimeType: string): boolean { return mimeType.startsWith('image/') }
-function fileIcon(mimeType: string) { return mimeType.startsWith('image/') ? ImageIcon : FileIcon }
+function fileIcon(mimeType: string) { return isImageFile(mimeType) ? ImageIcon : FileIcon }
 
 function formatRelativeTime(dateStr: string) {
   const d = new Date(dateStr)
@@ -1398,10 +1491,15 @@ async function deleteComment(comment: UnifiedComment) {
                       :class="isImageFile(att.mimeType) ? 'bg-gray-200' : 'bg-blue-50'"
                     >
                       <img
-                        v-if="isImageFile(att.mimeType)"
-                        :src="attachmentPublicUrl(att.filePath)"
+                        v-if="isImageFile(att.mimeType) && attachmentPreviewUrls[att.id]"
+                        :src="attachmentPreviewUrls[att.id]"
                         :alt="att.fileName"
                         class="w-10 h-10 object-cover rounded-lg"
+                      />
+                      <ImageIcon
+                        v-else-if="isImageFile(att.mimeType)"
+                        :size="18"
+                        class="text-gray-400"
                       />
                       <component v-else :is="fileIcon(att.mimeType)" :size="18" class="text-blue-500" />
                     </div>
@@ -1418,16 +1516,16 @@ async function deleteComment(comment: UnifiedComment) {
                     </div>
 
                     <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover/att:opacity-100 transition-opacity">
-                      <a
-                        :href="attachmentPublicUrl(att.filePath)"
-                        target="_blank"
-                        download
-                        class="p-1.5 rounded-md hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
+                      <button
+                        type="button"
+                        class="p-1.5 rounded-md hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer disabled:opacity-40"
                         title="Download"
-                        @click.stop
+                        :disabled="downloadingAttachmentId === att.id"
+                        @click.stop="downloadStoryAttachment(att)"
                       >
-                        <Download :size="13" />
-                      </a>
+                        <Loader2 v-if="downloadingAttachmentId === att.id" :size="13" class="animate-spin" />
+                        <Download v-else :size="13" />
+                      </button>
                       <button
                         class="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
                         title="Delete"

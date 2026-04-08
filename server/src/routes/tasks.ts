@@ -1,9 +1,9 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
-import { tasks, taskComments, taskAttachments, taskSubtasks, stories, users, deliveries, taskStatusHistory, products } from '../db/schema'
+import { tasks, taskComments, taskAttachments, taskSubtasks, stories, users, deliveries, taskStatusHistory, products, productMembers } from '../db/schema'
 import { randomUUID } from 'crypto'
 import path from 'path'
-import { eq, type InferSelectModel } from 'drizzle-orm'
+import { eq, and, type InferSelectModel } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
@@ -18,6 +18,29 @@ async function getUserFromHeader(jwtVerify: any, headers: Record<string, string 
   if (!payload?.userId) return null
   const user = await db.query.users.findFirst({ where: eq(users.id, payload.userId as string) })
   return user || null
+}
+
+/** Product membership via parent story (product_members.product is the story's product name). */
+async function userCanAccessTaskAttachment(
+  user: { id: string; role: string } | null,
+  taskId: string,
+): Promise<boolean> {
+  if (!user) return false
+  if (user.role === 'super_admin') return true
+  const task = await db.query.tasks.findFirst({
+    where: eq(tasks.id, taskId),
+    columns: { storyId: true },
+  })
+  if (!task) return false
+  const story = await db.query.stories.findFirst({
+    where: eq(stories.id, task.storyId),
+    columns: { product: true },
+  })
+  if (!story) return false
+  const member = await db.query.productMembers.findFirst({
+    where: and(eq(productMembers.product, story.product), eq(productMembers.userId, user.id)),
+  })
+  return !!member
 }
 
 const taskBody = t.Object({
@@ -741,6 +764,37 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
 
   // ============ ATTACHMENTS ============
 
+  // GET /api/tasks/attachments/:attachmentId/download — authenticated stream (avoids SPA host serving HTML for static paths)
+  .get('/attachments/:attachmentId/download', async ({ params: { attachmentId }, set, jwt: jwtInstance, headers }) => {
+    const user = await getUserFromHeader(jwtInstance.verify, headers)
+    if (!user) {
+      set.status = 401
+      return { error: 'Unauthorized' }
+    }
+
+    const att = await db.query.taskAttachments.findFirst({ where: eq(taskAttachments.id, attachmentId) })
+    if (!att || !(await userCanAccessTaskAttachment(user, att.taskId))) {
+      set.status = 404
+      return { error: 'Attachment not found' }
+    }
+
+    const rel = att.filePath.replace(/^\/+/, '')
+    const diskPath = path.join(process.cwd(), rel)
+    const file = Bun.file(diskPath)
+    if (!(await file.exists())) {
+      set.status = 404
+      return { error: 'File not found' }
+    }
+
+    const safeName = att.fileName.replace(/[\r\n"]/g, '_') || 'attachment'
+    const utfName = encodeURIComponent(att.fileName).replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+    set.headers['Content-Type'] = att.mimeType || 'application/octet-stream'
+    set.headers['Content-Disposition'] =
+      `attachment; filename="${safeName}"; filename*=UTF-8''${utfName}`
+
+    return file
+  })
+
   // GET /api/tasks/:id/attachments
   .get('/:id/attachments', async ({ params: { id } }) => {
     const results = await db.query.taskAttachments.findMany({
@@ -830,10 +884,9 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
       })
     }
 
-    // Try to remove file from disk
     try {
-      const fullPath = path.join(process.cwd(), deleted.filePath)
-      await Bun.write(fullPath, '') // Clear content
+      const rel = deleted.filePath.replace(/^\/+/, '')
+      const fullPath = path.join(process.cwd(), rel)
       const { unlink } = await import('fs/promises')
       await unlink(fullPath)
     } catch {}

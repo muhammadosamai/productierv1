@@ -1,7 +1,7 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
-import { stories, storyComments, storyAttachments, users } from '../db/schema'
-import { eq, sql } from 'drizzle-orm'
+import { stories, storyComments, storyAttachments, users, productMembers } from '../db/schema'
+import { eq, sql, and } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
@@ -55,6 +55,18 @@ async function getUserFromHeader(jwtVerify: any, headers: Record<string, string 
   if (!payload?.userId) return null
   const user = await db.query.users.findFirst({ where: eq(users.id, payload.userId as string) })
   return user || null
+}
+
+async function userCanAccessStoryProduct(
+  user: { id: string; role: string } | null,
+  storyProduct: string,
+): Promise<boolean> {
+  if (!user) return false
+  if (user.role === 'super_admin') return true
+  const member = await db.query.productMembers.findFirst({
+    where: and(eq(productMembers.product, storyProduct), eq(productMembers.userId, user.id)),
+  })
+  return !!member
 }
 
 export const storyRoutes = new Elysia({ prefix: '/api/stories' })
@@ -111,6 +123,46 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
     })
     return story
   }, { body: storyBody })
+
+  // GET /api/stories/attachments/:attachmentId/download — authenticated stream (avoids SPA host serving HTML for /api/uploads)
+  .get('/attachments/:attachmentId/download', async ({ params: { attachmentId }, set, jwt, headers }) => {
+    const user = await getUserFromHeader(jwt.verify, headers)
+    if (!user) {
+      set.status = 401
+      return { error: 'Unauthorized' }
+    }
+
+    const att = await db.query.storyAttachments.findFirst({ where: eq(storyAttachments.id, attachmentId) })
+    if (!att) {
+      set.status = 404
+      return { error: 'Attachment not found' }
+    }
+
+    const story = await db.query.stories.findFirst({
+      where: eq(stories.id, att.storyId),
+      columns: { product: true },
+    })
+    if (!story || !(await userCanAccessStoryProduct(user, story.product))) {
+      set.status = 404
+      return { error: 'Attachment not found' }
+    }
+
+    const rel = att.filePath.replace(/^\/+/, '')
+    const diskPath = path.join(process.cwd(), rel)
+    const file = Bun.file(diskPath)
+    if (!(await file.exists())) {
+      set.status = 404
+      return { error: 'File not found' }
+    }
+
+    const safeName = att.fileName.replace(/[\r\n"]/g, '_') || 'attachment'
+    const utfName = encodeURIComponent(att.fileName).replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+    set.headers['Content-Type'] = att.mimeType || 'application/octet-stream'
+    set.headers['Content-Disposition'] =
+      `attachment; filename="${safeName}"; filename*=UTF-8''${utfName}`
+
+    return file
+  })
 
   // GET /api/stories/:id
   .get('/:id', async ({ params: { id }, set }) => {
@@ -366,9 +418,10 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
       })
     }
 
-    // Remove file from disk
+    // Remove file from disk (filePath is like /uploads/attachments/...)
     try {
-      const fullPath = path.join(process.cwd(), deleted.filePath)
+      const rel = deleted.filePath.replace(/^\/+/, '')
+      const fullPath = path.join(process.cwd(), rel)
       const { unlink } = await import('fs/promises')
       await unlink(fullPath)
     } catch {}

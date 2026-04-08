@@ -64,6 +64,13 @@
       "when": 1775556405397,
       "tag": "0008_initiative_status_archived",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 2000000000000,
+      "tag": "0009_ensure_story_attachments",
+      "breakpoints": true
     }
   ]
 }

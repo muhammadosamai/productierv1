@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, nextTick } from 'vue'
+import { ref, watch, computed, nextTick, onBeforeUnmount } from 'vue'
 import {
   X, Maximize2, Copy, MoreHorizontal, ArrowLeft,
   Palette, Code2, TestTube2, Eye, FlaskConical, Wrench, Rocket,
@@ -188,8 +188,21 @@ const filteredReviewerMembers = computed(() => {
 
 // ============ DATA LOADING ============
 
+const attachmentPreviewUrls = ref<Record<string, string>>({})
+const downloadingAttachmentId = ref<string | null>(null)
+
+function revokeAllAttachmentPreviewUrls() {
+  for (const url of Object.values(attachmentPreviewUrls.value)) {
+    try {
+      URL.revokeObjectURL(url)
+    } catch { /* ignore */ }
+  }
+  attachmentPreviewUrls.value = {}
+}
+
 // Load comments when task changes
 watch(() => props.task?.id, async (id) => {
+  revokeAllAttachmentPreviewUrls()
   if (!id) return
   activeTab.value = 'comments'
   closeAllDropdowns()
@@ -509,6 +522,77 @@ function removeDependency(taskId: string) {
   updateTaskField('dependent', updated.length > 0 ? updated : null)
 }
 
+function isImageFile(mimeType: string): boolean {
+  return mimeType.startsWith('image/')
+}
+
+function fileIcon(mimeType: string) {
+  return isImageFile(mimeType) ? ImageIcon : FileIcon
+}
+
+async function hydrateAttachmentImagePreviews(items: TaskAttachment[]) {
+  revokeAllAttachmentPreviewUrls()
+  const imageAtts = items.filter(a => isImageFile(a.mimeType))
+  if (imageAtts.length === 0) return
+
+  if (!authStore.token) {
+    const next: Record<string, string> = {}
+    for (const att of imageAtts) next[att.id] = attachmentPublicUrl(att.filePath)
+    attachmentPreviewUrls.value = next
+    return
+  }
+
+  const pairs = await Promise.all(
+    imageAtts.map(async (att) => {
+      try {
+        const res = await fetch(`/api/tasks/attachments/${att.id}/download`, {
+          headers: { Authorization: `Bearer ${authStore.token}` },
+        })
+        if (!res.ok) return null
+        const blob = await res.blob()
+        return [att.id, URL.createObjectURL(blob)] as const
+      } catch {
+        return null
+      }
+    }),
+  )
+  const next: Record<string, string> = {}
+  for (const p of pairs) {
+    if (p) next[p[0]] = p[1]
+  }
+  for (const att of imageAtts) {
+    if (!next[att.id]) next[att.id] = attachmentPublicUrl(att.filePath)
+  }
+  attachmentPreviewUrls.value = next
+}
+
+async function downloadTaskAttachment(att: TaskAttachment) {
+  if (!authStore.token) return
+  downloadingAttachmentId.value = att.id
+  try {
+    const res = await fetch(`/api/tasks/attachments/${att.id}/download`, {
+      headers: { Authorization: `Bearer ${authStore.token}` },
+    })
+    if (!res.ok) return
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = att.fileName || 'attachment'
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } finally {
+    downloadingAttachmentId.value = null
+  }
+}
+
+onBeforeUnmount(() => {
+  revokeAllAttachmentPreviewUrls()
+})
+
 // ============ ATTACHMENTS ============
 const attachments = ref<TaskAttachment[]>([])
 const attachmentsLoading = ref(false)
@@ -519,13 +603,18 @@ const deletingAttachmentId = ref<string | null>(null)
 
 async function loadAttachments(taskId: string) {
   attachmentsLoading.value = true
+  attachments.value = []
+  revokeAllAttachmentPreviewUrls()
   try {
     const res = await fetch(`/api/tasks/${taskId}/attachments`)
     if (res.ok) {
       attachments.value = await res.json()
+      await hydrateAttachmentImagePreviews(attachments.value)
     }
-  } catch { attachments.value = [] }
-  finally { attachmentsLoading.value = false }
+  } catch {
+    attachments.value = []
+    revokeAllAttachmentPreviewUrls()
+  } finally { attachmentsLoading.value = false }
 }
 
 async function uploadFiles(files: FileList | File[]) {
@@ -593,15 +682,6 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-}
-
-function isImageFile(mimeType: string): boolean {
-  return mimeType.startsWith('image/')
-}
-
-function fileIcon(mimeType: string) {
-  if (mimeType.startsWith('image/')) return ImageIcon
-  return FileIcon
 }
 
 // ============ STYLING HELPERS ============
@@ -1900,10 +1980,15 @@ function onBackdropClick(e: MouseEvent) {
                       :class="isImageFile(att.mimeType) ? 'bg-gray-200' : 'bg-blue-50'"
                     >
                       <img
-                        v-if="isImageFile(att.mimeType)"
-                        :src="attachmentPublicUrl(att.filePath)"
+                        v-if="isImageFile(att.mimeType) && attachmentPreviewUrls[att.id]"
+                        :src="attachmentPreviewUrls[att.id]"
                         :alt="att.fileName"
                         class="w-10 h-10 object-cover rounded-lg"
+                      />
+                      <ImageIcon
+                        v-else-if="isImageFile(att.mimeType)"
+                        :size="18"
+                        class="text-gray-400"
                       />
                       <component v-else :is="fileIcon(att.mimeType)" :size="18" class="text-blue-500" />
                     </div>
@@ -1922,16 +2007,16 @@ function onBackdropClick(e: MouseEvent) {
 
                     <!-- Actions -->
                     <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover/att:opacity-100 transition-opacity">
-                      <a
-                        :href="attachmentPublicUrl(att.filePath)"
-                        target="_blank"
-                        download
-                        class="p-1.5 rounded-md hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
+                      <button
+                        type="button"
+                        class="p-1.5 rounded-md hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer disabled:opacity-40"
                         title="Download"
-                        @click.stop
+                        :disabled="downloadingAttachmentId === att.id"
+                        @click.stop="downloadTaskAttachment(att)"
                       >
-                        <Download :size="13" />
-                      </a>
+                        <Loader2 v-if="downloadingAttachmentId === att.id" :size="13" class="animate-spin" />
+                        <Download v-else :size="13" />
+                      </button>
                       <button
                         class="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
                         title="Delete"

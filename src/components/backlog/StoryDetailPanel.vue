@@ -175,17 +175,10 @@ async function hydrateAttachmentImagePreviews(items: StoryAttachment[]) {
   const imageAtts = items.filter(a => isImageFile(a.mimeType))
   if (imageAtts.length === 0) return
 
-  if (!authStore.token) {
-    attachmentPreviewUrls.value = {}
-    return
-  }
-
   const pairs = await Promise.all(
     imageAtts.map(async (att) => {
       try {
-        const res = await fetch(resolveApiPath(`/api/stories/attachments/${att.id}/download`), {
-          headers: { Authorization: `Bearer ${authStore.token}` },
-        })
+        const res = await fetch(resolveApiPath(`/api/stories/attachments/${att.id}/download`))
         if (!res.ok) return null
         const ct = (res.headers.get('content-type') || '').toLowerCase()
         if (ct.includes('application/json')) return null
@@ -273,12 +266,9 @@ async function deleteAttachment(attachmentId: string) {
 }
 
 async function downloadStoryAttachment(att: StoryAttachment) {
-  if (!authStore.token) return
   downloadingAttachmentId.value = att.id
   try {
-    const res = await fetch(resolveApiPath(`/api/stories/attachments/${att.id}/download`), {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
+    const res = await fetch(resolveApiPath(`/api/stories/attachments/${att.id}/download`))
     if (!res.ok) return
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)

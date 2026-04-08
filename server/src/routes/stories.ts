@@ -125,25 +125,10 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
     return story
   }, { body: storyBody })
 
-  // GET /api/stories/attachments/:attachmentId/download — authenticated stream (avoids SPA host serving HTML for /api/uploads)
-  .get('/attachments/:attachmentId/download', async ({ params: { attachmentId }, set, jwt, headers }) => {
-    const user = await getUserFromHeader(jwt.verify, headers)
-    if (!user) {
-      set.status = 401
-      return { error: 'Unauthorized' }
-    }
-
+  // GET /api/stories/attachments/:attachmentId/download
+  .get('/attachments/:attachmentId/download', async ({ params: { attachmentId }, set }) => {
     const att = await db.query.storyAttachments.findFirst({ where: eq(storyAttachments.id, attachmentId) })
     if (!att) {
-      set.status = 404
-      return { error: 'Attachment not found' }
-    }
-
-    const story = await db.query.stories.findFirst({
-      where: eq(stories.id, att.storyId),
-      columns: { product: true },
-    })
-    if (!story || !(await userCanAccessStoryProduct(user, story.product))) {
       set.status = 404
       return { error: 'Attachment not found' }
     }

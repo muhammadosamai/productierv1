@@ -17,7 +17,13 @@ import TaskStatusIcon from '@/components/shared/TaskStatusIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import type { Task, TaskSubtask, TaskStatus, TaskType, TaskPriority, TaskComment, TaskAttachment } from '@/types/backlog'
 import SubtaskDetailDialog from '@/components/delivery/SubtaskDetailDialog.vue'
-import { attachmentPublicUrl } from '@/utils/uploadAssetUrl'
+import { resolveApiPath } from '@/utils/uploadAssetUrl'
+import {
+  partitionAllowedAttachmentFiles,
+  ATTACHMENT_FILE_ACCEPT,
+  ALLOWED_ATTACHMENT_TYPES_HINT,
+} from '@/utils/allowedAttachments'
+import { toast } from 'vue-sonner'
 
 interface TeamUser {
   id: string
@@ -213,7 +219,7 @@ watch(() => props.task?.id, async (id) => {
 async function loadComments(taskId: string) {
   commentsLoading.value = true
   try {
-    const res = await fetch(`/api/tasks/${taskId}/comments`)
+    const res = await fetch(resolveApiPath(`/api/tasks/${taskId}/comments`))
     if (res.ok) {
       comments.value = await res.json()
     }
@@ -224,7 +230,7 @@ async function loadComments(taskId: string) {
 async function loadActivities(taskId: string) {
   activitiesLoading.value = true
   try {
-    const res = await fetch(`/api/activities?entityId=${taskId}&limit=30`)
+    const res = await fetch(resolveApiPath(`/api/activities?entityId=${taskId}&limit=30`))
     if (res.ok) {
       activities.value = await res.json()
     }
@@ -454,7 +460,7 @@ async function submitComment() {
   if (!newComment.value.trim() || !props.task) return
   sendingComment.value = true
   try {
-    const res = await fetch(`/api/tasks/${props.task.id}/comments`, {
+    const res = await fetch(resolveApiPath(`/api/tasks/${props.task.id}/comments`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -536,20 +542,21 @@ async function hydrateAttachmentImagePreviews(items: TaskAttachment[]) {
   if (imageAtts.length === 0) return
 
   if (!authStore.token) {
-    const next: Record<string, string> = {}
-    for (const att of imageAtts) next[att.id] = attachmentPublicUrl(att.filePath)
-    attachmentPreviewUrls.value = next
+    attachmentPreviewUrls.value = {}
     return
   }
 
   const pairs = await Promise.all(
     imageAtts.map(async (att) => {
       try {
-        const res = await fetch(`/api/tasks/attachments/${att.id}/download`, {
+        const res = await fetch(resolveApiPath(`/api/tasks/attachments/${att.id}/download`), {
           headers: { Authorization: `Bearer ${authStore.token}` },
         })
         if (!res.ok) return null
+        const ct = (res.headers.get('content-type') || '').toLowerCase()
+        if (ct.includes('application/json')) return null
         const blob = await res.blob()
+        if (blob.size === 0) return null
         return [att.id, URL.createObjectURL(blob)] as const
       } catch {
         return null
@@ -560,9 +567,6 @@ async function hydrateAttachmentImagePreviews(items: TaskAttachment[]) {
   for (const p of pairs) {
     if (p) next[p[0]] = p[1]
   }
-  for (const att of imageAtts) {
-    if (!next[att.id]) next[att.id] = attachmentPublicUrl(att.filePath)
-  }
   attachmentPreviewUrls.value = next
 }
 
@@ -570,7 +574,7 @@ async function downloadTaskAttachment(att: TaskAttachment) {
   if (!authStore.token) return
   downloadingAttachmentId.value = att.id
   try {
-    const res = await fetch(`/api/tasks/attachments/${att.id}/download`, {
+    const res = await fetch(resolveApiPath(`/api/tasks/attachments/${att.id}/download`), {
       headers: { Authorization: `Bearer ${authStore.token}` },
     })
     if (!res.ok) return
@@ -606,7 +610,9 @@ async function loadAttachments(taskId: string) {
   attachments.value = []
   revokeAllAttachmentPreviewUrls()
   try {
-    const res = await fetch(`/api/tasks/${taskId}/attachments`)
+    const headers: Record<string, string> = {}
+    if (authStore.token) headers.Authorization = `Bearer ${authStore.token}`
+    const res = await fetch(resolveApiPath(`/api/tasks/${taskId}/attachments`), { headers })
     if (res.ok) {
       attachments.value = await res.json()
       await hydrateAttachmentImagePreviews(attachments.value)
@@ -619,18 +625,31 @@ async function loadAttachments(taskId: string) {
 
 async function uploadFiles(files: FileList | File[]) {
   if (!props.task || files.length === 0) return
+  const { allowed, rejectedNames } = partitionAllowedAttachmentFiles(Array.from(files))
+  if (rejectedNames.length > 0) {
+    const preview = rejectedNames.slice(0, 3).join(', ')
+    const more = rejectedNames.length > 3 ? ` (+${rejectedNames.length - 3} more)` : ''
+    toast.error(`Skipped unsupported file(s): ${preview}${more}. ${ALLOWED_ATTACHMENT_TYPES_HINT}.`)
+  }
+  if (allowed.length === 0) return
   uploadingFiles.value = true
   try {
-    for (const file of Array.from(files)) {
+    for (const file of allowed) {
       const formData = new FormData()
       formData.append('file', file)
-      await fetch(`/api/tasks/${props.task.id}/attachments`, {
+      const res = await fetch(resolveApiPath(`/api/tasks/${props.task.id}/attachments`), {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${authStore.token}`,
         },
         body: formData,
       })
+      if (!res.ok) {
+        try {
+          const j = await res.json()
+          if (j?.error) toast.error(j.error)
+        } catch { /* ignore */ }
+      }
     }
     await loadAttachments(props.task.id)
   } catch {}
@@ -641,7 +660,7 @@ async function deleteAttachment(attachmentId: string) {
   if (!props.task) return
   deletingAttachmentId.value = attachmentId
   try {
-    await fetch(`/api/tasks/attachments/${attachmentId}`, {
+    await fetch(resolveApiPath(`/api/tasks/attachments/${attachmentId}`), {
       method: 'DELETE',
       headers: {
         Authorization: `Bearer ${authStore.token}`,
@@ -1944,6 +1963,7 @@ function onBackdropClick(e: MouseEvent) {
                     type="file"
                     multiple
                     class="hidden"
+                    :accept="ATTACHMENT_FILE_ACCEPT"
                     @change="onFileSelect"
                   />
                   <div v-if="uploadingFiles" class="flex flex-col items-center gap-2">

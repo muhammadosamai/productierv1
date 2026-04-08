@@ -4,6 +4,7 @@ import { issues, issueComments, issueAttachments, users, productMembers } from '
 import { eq, sql, and } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
+import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
@@ -43,6 +44,25 @@ async function issueRowForAccess(
   if (!row) return null
   if (row.archived && !(await canManageIssueArchive(user, row.product))) return null
   return row
+}
+
+/** Issue attachments: authenticated product member (or super_admin); archived needs archive manager. */
+async function userCanAccessIssueAttachments(
+  user: { id: string; role: string } | null,
+  issueId: string,
+): Promise<boolean> {
+  if (!user) return false
+  const row = await db.query.issues.findFirst({
+    where: eq(issues.id, issueId),
+    columns: { id: true, product: true, archived: true },
+  })
+  if (!row) return false
+  if (row.archived && !(await canManageIssueArchive(user, row.product))) return false
+  if (user.role === 'super_admin') return true
+  const member = await db.query.productMembers.findFirst({
+    where: and(eq(productMembers.product, row.product), eq(productMembers.userId, user.id)),
+  })
+  return !!member
 }
 
 async function ensureIssueSchema() {
@@ -567,7 +587,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     }
 
     const att = await db.query.issueAttachments.findFirst({ where: eq(issueAttachments.id, attachmentId) })
-    if (!att || !(await issueRowForAccess(att.issueId, user))) {
+    if (!att || !(await userCanAccessIssueAttachments(user, att.issueId))) {
       set.status = 404
       return { error: 'Attachment not found' }
     }
@@ -592,7 +612,11 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
   // GET /api/issues/:id/attachments
   .get('/:id/attachments', async ({ params: { id }, set, headers, jwt: jwtInstance }) => {
     const user = await getUserFromHeader(jwtInstance.verify, headers)
-    if (!(await issueRowForAccess(id, user))) {
+    if (!user) {
+      set.status = 401
+      return { error: 'Unauthorized' }
+    }
+    if (!(await userCanAccessIssueAttachments(user, id))) {
       set.status = 404
       return { error: 'Issue not found' }
     }
@@ -608,13 +632,16 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
-    if (!(await issueRowForAccess(id, user))) {
+    if (!(await userCanAccessIssueAttachments(user, id))) {
       set.status = 404
       return { error: 'Issue not found' }
     }
 
     const file = (body as any).file as File
     if (!file) { set.status = 400; return { error: 'No file provided' } }
+
+    const typeCheck = validateAttachmentFileName(file.name)
+    if (!typeCheck.ok) { set.status = 400; return { error: typeCheck.error } }
 
     const uploadsDir = path.join(process.cwd(), 'uploads', 'attachments')
 
@@ -623,6 +650,9 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const filePath = path.join(uploadsDir, uniqueName)
 
     const arrayBuffer = await file.arrayBuffer()
+    const contentCheck = await validateAttachmentContent(arrayBuffer, file.name)
+    if (!contentCheck.ok) { set.status = 400; return { error: contentCheck.error } }
+
     await Bun.write(filePath, arrayBuffer)
 
     const [attachment] = await db.insert(issueAttachments).values({
@@ -630,9 +660,24 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       userId: user.id,
       fileName: file.name,
       fileSize: file.size,
-      mimeType: file.type || 'application/octet-stream',
+      mimeType: contentCheck.mime,
       filePath: `/uploads/attachments/${uniqueName}`,
     }).returning()
+
+    const issueForLog = await db.query.issues.findFirst({ where: eq(issues.id, id) })
+    if (issueForLog) {
+      logActivity({
+        product: issueForLog.product,
+        userName: user.name,
+        userAvatar: user.avatar,
+        userId: user.id,
+        action: 'updated',
+        entityType: 'issue' as any,
+        entityId: issueForLog.id,
+        entityTitle: issueForLog.title,
+        changes: [{ field: 'attachment', from: null, to: file.name }],
+      })
+    }
 
     return db.query.issueAttachments.findFirst({
       where: eq(issueAttachments.id, attachment!.id),
@@ -646,7 +691,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
     const att = await db.query.issueAttachments.findFirst({ where: eq(issueAttachments.id, attachmentId) })
-    if (att && !(await issueRowForAccess(att.issueId, user))) {
+    if (!att || !(await userCanAccessIssueAttachments(user, att.issueId))) {
       set.status = 404
       return { error: 'Attachment not found' }
     }
@@ -655,6 +700,21 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       .where(eq(issueAttachments.id, attachmentId))
       .returning()
     if (!deleted) { set.status = 404; return { error: 'Attachment not found' } }
+
+    const issueForLog = await db.query.issues.findFirst({ where: eq(issues.id, deleted.issueId) })
+    if (issueForLog) {
+      logActivity({
+        product: issueForLog.product,
+        userName: user.name,
+        userAvatar: user.avatar,
+        userId: user.id,
+        action: 'updated',
+        entityType: 'issue' as any,
+        entityId: issueForLog.id,
+        entityTitle: issueForLog.title,
+        changes: [{ field: 'attachment', from: deleted.fileName, to: null }],
+      })
+    }
 
     try {
       const rel = deleted.filePath.replace(/^\/+/, '')

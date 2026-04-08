@@ -29,6 +29,8 @@ services:
     environment:
       DATABASE_URL: postgresql://sarimalavi@postgres:5432/productier
       RUN_DB_MIGRATIONS: "true"
+    volumes:
+      - productier_uploads:/app/uploads
     ports:
       - "3002:3001"
 
@@ -45,3 +47,4 @@ services:
 
 volumes:
   productier_pgdata:
+  productier_uploads:

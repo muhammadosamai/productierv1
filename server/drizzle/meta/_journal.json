@@ -71,6 +71,13 @@
       "when": 2000000000000,
       "tag": "0009_ensure_story_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 2000000000001,
+      "tag": "0010_initiative_attachments",
+      "breakpoints": true
     }
   ]
 }

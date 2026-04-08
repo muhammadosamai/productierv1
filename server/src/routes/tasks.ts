@@ -6,6 +6,7 @@ import path from 'path'
 import { eq, and, type InferSelectModel } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
+import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
@@ -796,13 +797,21 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
   })
 
   // GET /api/tasks/:id/attachments
-  .get('/:id/attachments', async ({ params: { id } }) => {
-    const results = await db.query.taskAttachments.findMany({
+  .get('/:id/attachments', async ({ params: { id }, set, jwt: jwtInstance, headers }) => {
+    const user = await getUserFromHeader(jwtInstance.verify, headers)
+    if (!user) {
+      set.status = 401
+      return { error: 'Unauthorized' }
+    }
+    if (!(await userCanAccessTaskAttachment(user, id))) {
+      set.status = 404
+      return { error: 'Task not found' }
+    }
+    return db.query.taskAttachments.findMany({
       where: eq(taskAttachments.taskId, id),
       with: { user: true },
       orderBy: (a, { desc }) => [desc(a.createdAt)],
     })
-    return results
   })
 
   // POST /api/tasks/:id/attachments (multipart file upload)
@@ -810,8 +819,16 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
+    if (!(await userCanAccessTaskAttachment(user, id))) {
+      set.status = 404
+      return { error: 'Task not found' }
+    }
+
     const file = (body as any).file as File
     if (!file) { set.status = 400; return { error: 'No file provided' } }
+
+    const typeCheck = validateAttachmentFileName(file.name)
+    if (!typeCheck.ok) { set.status = 400; return { error: typeCheck.error } }
 
     const uploadsDir = path.join(process.cwd(), 'uploads', 'attachments')
 
@@ -821,6 +838,9 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     const filePath = path.join(uploadsDir, uniqueName)
 
     const arrayBuffer = await file.arrayBuffer()
+    const contentCheck = await validateAttachmentContent(arrayBuffer, file.name)
+    if (!contentCheck.ok) { set.status = 400; return { error: contentCheck.error } }
+
     await Bun.write(filePath, arrayBuffer)
 
     // Insert DB record
@@ -829,7 +849,7 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
       userId: user.id,
       fileName: file.name,
       fileSize: file.size,
-      mimeType: file.type || 'application/octet-stream',
+      mimeType: contentCheck.mime,
       filePath: `/uploads/attachments/${uniqueName}`,
     }).returning()
 
@@ -862,6 +882,14 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
   .delete('/attachments/:attachmentId', async ({ params: { attachmentId }, set, jwt: jwtInstance, headers }) => {
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+
+    const existing = await db.query.taskAttachments.findFirst({
+      where: eq(taskAttachments.id, attachmentId),
+    })
+    if (!existing || !(await userCanAccessTaskAttachment(user, existing.taskId))) {
+      set.status = 404
+      return { error: 'Attachment not found' }
+    }
 
     const [deleted] = await db.delete(taskAttachments)
       .where(eq(taskAttachments.id, attachmentId))

@@ -58,6 +58,12 @@ const ownerSearchLoading = ref(false)
 const showOwnerDropdown = ref(false)
 let ownerSearchTimeout: ReturnType<typeof setTimeout> | null = null
 
+// Tag suggestions
+const tagSuggestions = ref<string[]>([])
+const tagsLoading = ref(false)
+const showTagSuggestions = ref(false)
+let tagSearchTimeout: ReturnType<typeof setTimeout> | null = null
+
 // Grouped asset types
 const typeGroups = computed(() => {
   const groups: Record<string, { label: string; types: typeof wikiStore.assetTypes }> = {}
@@ -118,10 +124,55 @@ function addTag() {
     tags.value.push(t)
   }
   tagInput.value = ''
+  tagSuggestions.value = []
+  showTagSuggestions.value = false
 }
 
 function removeTag(tag: string) {
   tags.value = tags.value.filter(t => t !== tag)
+}
+
+async function searchTags(query: string) {
+  const pname = productStore.activeProductName
+  if (!pname) {
+    tagSuggestions.value = []
+    return
+  }
+  tagsLoading.value = true
+  try {
+    const existing = await wikiStore.searchTags(pname, query)
+    tagSuggestions.value = existing.filter(t => !tags.value.includes(t))
+  } catch {
+    tagSuggestions.value = []
+  } finally {
+    tagsLoading.value = false
+  }
+}
+
+function onTagInput() {
+  showTagSuggestions.value = true
+  if (tagSearchTimeout) clearTimeout(tagSearchTimeout)
+  tagSearchTimeout = setTimeout(() => searchTags(tagInput.value.trim()), 200)
+}
+
+function onTagFocus() {
+  showTagSuggestions.value = true
+  if (tagSearchTimeout) clearTimeout(tagSearchTimeout)
+  tagSearchTimeout = setTimeout(() => searchTags(tagInput.value.trim()), 0)
+}
+
+function selectTagSuggestion(tag: string) {
+  if (!tags.value.includes(tag)) tags.value.push(tag)
+  tagInput.value = ''
+  tagSuggestions.value = []
+  showTagSuggestions.value = false
+}
+
+function onTagBlur() {
+  setTimeout(() => {
+    showTagSuggestions.value = false
+    addTag()
+  }, 150)
 }
 
 function onTagKeydown(e: KeyboardEvent) {
@@ -143,6 +194,8 @@ watch(open, (val) => {
     ownerName.value = ''
     tags.value = []
     tagInput.value = ''
+    tagSuggestions.value = []
+    showTagSuggestions.value = false
     } else {
       // Ensure types are loaded
       const pname = productStore.activeProductName
@@ -306,22 +359,45 @@ async function handleSubmit() {
         <!-- Tags -->
         <div class="space-y-1.5">
           <label class="text-sm font-medium text-gray-700">Tags</label>
-          <div class="flex items-center gap-1.5 flex-wrap border border-gray-200 rounded-lg px-2.5 py-2 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white">
-            <span
-              v-for="tag in tags"
-              :key="tag"
-              class="inline-flex items-center gap-1 text-[11px] text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full"
+          <div class="relative">
+            <div class="flex items-center gap-1.5 flex-wrap border border-gray-200 rounded-lg px-2.5 py-2 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white">
+              <span
+                v-for="tag in tags"
+                :key="tag"
+                class="inline-flex items-center gap-1 text-[11px] text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full"
+              >
+                {{ tag }}
+                <button type="button" class="text-gray-400 hover:text-gray-600" @click="removeTag(tag)"><X :size="10" /></button>
+              </span>
+              <input
+                v-model="tagInput"
+                class="flex-1 min-w-[80px] text-sm bg-transparent outline-none placeholder-gray-400"
+                placeholder="Add tag..."
+                @input="onTagInput"
+                @focus="onTagFocus"
+                @keydown="onTagKeydown"
+                @blur="onTagBlur"
+              />
+            </div>
+            <div
+              v-if="showTagSuggestions && (tagsLoading || tagSuggestions.length > 0)"
+              class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[200px] overflow-auto z-[100]"
             >
-              {{ tag }}
-              <button type="button" class="text-gray-400 hover:text-gray-600" @click="removeTag(tag)"><X :size="10" /></button>
-            </span>
-            <input
-              v-model="tagInput"
-              class="flex-1 min-w-[80px] text-sm bg-transparent outline-none placeholder-gray-400"
-              placeholder="Add tag..."
-              @keydown="onTagKeydown"
-              @blur="addTag"
-            />
+              <div v-if="tagsLoading" class="px-3 py-2 text-xs text-gray-400 flex items-center gap-1.5">
+                <Loader2 :size="12" class="animate-spin" />
+                Loading tags...
+              </div>
+              <button
+                v-for="suggestion in tagSuggestions"
+                :key="suggestion"
+                type="button"
+                class="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50"
+                @mousedown.prevent="selectTagSuggestion(suggestion)"
+              >
+                <Tag :size="12" class="text-gray-400" />
+                <span class="text-sm text-gray-900">{{ suggestion }}</span>
+              </button>
+            </div>
           </div>
         </div>
 

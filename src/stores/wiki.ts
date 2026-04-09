@@ -83,6 +83,19 @@ export const useWikiStore = defineStore('wiki', () => {
     }
   }
 
+  async function searchTags(product?: string, q?: string): Promise<string[]> {
+    try {
+      const params = new URLSearchParams()
+      if (product) params.set('product', product)
+      if (q) params.set('q', q)
+      const res = await fetch(`/api/wiki/tags?${params}`, { headers: authHeaders() })
+      if (res.ok) return await res.json()
+      return []
+    } catch {
+      return []
+    }
+  }
+
   async function createAsset(payload: CreateAssetPayload): Promise<Asset | null> {
     try {
       const res = await fetch('/api/wiki/assets', {
@@ -170,7 +183,7 @@ export const useWikiStore = defineStore('wiki', () => {
   return {
     assetTypes, assets, selectedAsset, loading,
     fetchAssetTypes, createAssetType,
-    fetchAssets, fetchAsset, createAsset, updateAsset, deleteAsset,
+    fetchAssets, fetchAsset, searchTags, createAsset, updateAsset, deleteAsset,
     addRelation, removeRelation,
   }
 })

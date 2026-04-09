@@ -131,6 +131,38 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
     }),
   })
 
+  // GET /api/wiki/tags?product=X&q=term
+  .get('/tags', async ({ query }) => {
+    const product = query.product
+    const q = (query.q || '').trim().toLowerCase()
+
+    const rows = await db.query.assets.findMany({
+      where: product ? eq(assets.productId, product) : undefined,
+      columns: { tags: true },
+    })
+
+    const seen = new Set<string>()
+    const suggestions: string[] = []
+    for (const row of rows) {
+      if (!row.tags || row.tags.length === 0) continue
+      for (const tag of row.tags) {
+        const normalized = tag.trim().toLowerCase()
+        if (!normalized) continue
+        if (q && !normalized.includes(q)) continue
+        if (seen.has(normalized)) continue
+        seen.add(normalized)
+        suggestions.push(normalized)
+      }
+    }
+
+    return suggestions.sort((a, b) => a.localeCompare(b)).slice(0, 20)
+  }, {
+    query: t.Object({
+      product: t.Optional(t.String()),
+      q: t.Optional(t.String()),
+    }),
+  })
+
   // GET /api/wiki/assets/:id
   .get('/assets/:id', async ({ params, set }) => {
     const asset = await db.query.assets.findFirst({

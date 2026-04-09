@@ -1420,7 +1420,7 @@ const groupedActivities = computed(() => {
                   </button>
                   <div
                     v-if="showReproducibilityDropdown"
-                    class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1 w-[200px]"
+                    class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[11] py-1 w-[200px]"
                   >
                     <button
                       v-for="opt in reproducibilityOptions"
@@ -1451,7 +1451,7 @@ const groupedActivities = computed(() => {
                   </button>
                   <div
                     v-if="showEnvironmentDropdown"
-                    class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1 w-[160px]"
+                    class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[11] py-1 w-[160px]"
                   >
                     <button
                       v-for="opt in environmentOptions"
@@ -1482,7 +1482,7 @@ const groupedActivities = computed(() => {
                   </button>
                   <div
                     v-if="showBrowserDropdown"
-                    class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1 w-[160px]"
+                    class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[11] py-1 w-[160px]"
                   >
                     <button
                       v-for="opt in browserOptions"
@@ -1513,7 +1513,7 @@ const groupedActivities = computed(() => {
                   </button>
                   <div
                     v-if="showOsDropdown"
-                    class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1 w-[160px]"
+                    class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[11] py-1 w-[160px]"
                   >
                     <button
                       v-for="opt in osOptions"

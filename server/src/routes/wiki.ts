@@ -20,6 +20,21 @@ function slugify(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
+const DEFAULT_ASSET_TYPES = [
+  { name: 'API Reference',        slug: 'api-reference',        category: 'engineering', icon: '🔌' },
+  { name: 'Architecture Doc',     slug: 'architecture-doc',     category: 'engineering', icon: '🏗️' },
+  { name: 'Runbook',              slug: 'runbook',              category: 'engineering', icon: '📋' },
+  { name: 'Tech Spec',            slug: 'tech-spec',            category: 'engineering', icon: '⚙️' },
+  { name: 'Design Doc',           slug: 'design-doc',           category: 'product',     icon: '🎨' },
+  { name: 'PRD',                  slug: 'prd',                  category: 'product',     icon: '📝' },
+  { name: 'User Research',        slug: 'user-research',        category: 'product',     icon: '🔍' },
+  { name: 'Meeting Notes',        slug: 'meeting-notes',        category: 'business',    icon: '📅' },
+  { name: 'Onboarding Guide',     slug: 'onboarding-guide',     category: 'business',    icon: '🚀' },
+  { name: 'Policy',               slug: 'policy',               category: 'business',    icon: '📜' },
+  { name: 'Integration Guide',    slug: 'integration-guide',    category: 'external',    icon: '🔗' },
+  { name: 'Vendor Evaluation',    slug: 'vendor-evaluation',    category: 'external',    icon: '📊' },
+]
+
 export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
   .use(jwt({ name: 'jwt', secret: JWT_SECRET }))
 
@@ -28,10 +43,18 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
   // GET /api/wiki/types?product=X
   .get('/types', async ({ query }) => {
     const product = query.product
-    return db.query.assetTypes.findMany({
+    const existing = await db.query.assetTypes.findMany({
       where: product ? eq(assetTypes.productId, product) : undefined,
       orderBy: (t, { asc }) => [asc(t.category), asc(t.name)],
     })
+    // Auto-seed defaults on first use for this product
+    if (product && existing.length === 0) {
+      const seeded = await db.insert(assetTypes).values(
+        DEFAULT_ASSET_TYPES.map(d => ({ ...d, productId: product }))
+      ).returning()
+      return seeded.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name))
+    }
+    return existing
   }, {
     query: t.Object({ product: t.Optional(t.String()) }),
   })

@@ -16,7 +16,9 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -206,13 +208,15 @@ async function handleSubmit() {
               </SelectTrigger>
               <SelectContent>
                 <template v-for="group in typeGroups" :key="group.label">
-                  <div class="px-2 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">{{ group.label }}</div>
-                  <SelectItem v-for="at in group.types" :key="at.id" :value="at.id">
-                    <span class="flex items-center gap-2">
-                      <span>{{ at.icon }}</span>
-                      {{ at.name }}
-                    </span>
-                  </SelectItem>
+                  <SelectGroup>
+                    <SelectLabel class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">{{ group.label }}</SelectLabel>
+                    <SelectItem v-for="at in group.types" :key="at.id" :value="at.id">
+                      <span class="flex items-center gap-2">
+                        <span>{{ at.icon }}</span>
+                        {{ at.name }}
+                      </span>
+                    </SelectItem>
+                  </SelectGroup>
                 </template>
               </SelectContent>
             </Select>

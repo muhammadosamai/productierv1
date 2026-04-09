@@ -20,7 +20,7 @@
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.38",
     "elysia": "^1.2",
-    "file-type": "19",
+    "file-type": "^22.0.0",
     "postgres": "^3.4"
   },
   "devDependencies": {

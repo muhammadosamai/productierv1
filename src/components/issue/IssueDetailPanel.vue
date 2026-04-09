@@ -28,8 +28,15 @@ import {
   ALLOWED_ATTACHMENT_TYPES_HINT,
 } from '@/utils/allowedAttachments'
 import { toast } from 'vue-sonner'
+import { useCopyLink } from '@/utils/useCopyLink'
 
 const router = useRouter()
+const { copied, copyLink } = useCopyLink()
+
+function copyIssueLink(issueId: string) {
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  copyLink(`${origin}/issues?issue=${issueId}`)
+}
 
 interface TeamUser {
   id: string
@@ -1001,10 +1008,13 @@ const groupedActivities = computed(() => {
               <Maximize2 :size="14" />
             </button>
             <button
-              class="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+              class="p-1 rounded-md hover:bg-gray-100 transition-colors"
+              :class="copied ? 'text-green-600 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'"
               title="Copy link"
+              @click="copyIssueLink(issue.id)"
             >
-              <Copy :size="14" />
+              <Check v-if="copied" :size="14" />
+              <Copy v-else :size="14" />
             </button>
             <button
               class="p-1.5 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
@@ -1023,9 +1033,7 @@ const groupedActivities = computed(() => {
           >
             <span class="font-semibold">Archived.</span>
             Hidden from the default issues list and search.
-            <template v-if="isProductIssueAdmin"> Use restore (↺) above to bring it back.</template>
           </div>
-          <!-- Sticky Title -->
           <div class="sticky top-0 z-20 bg-white border-b border-gray-100">
             <div class="px-6 py-3">
               <div v-if="editingField === 'title'">

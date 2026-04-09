@@ -15,6 +15,7 @@ import {
   ALLOWED_ATTACHMENT_TYPES_HINT,
 } from '@/utils/allowedAttachments'
 import { toast } from 'vue-sonner'
+import { useCopyLink } from '@/utils/useCopyLink'
 
 interface TeamUser {
   id: string
@@ -36,6 +37,7 @@ const emit = defineEmits<{
 
 const initiativesStore = useInitiativesStore()
 const authStore = useAuthStore()
+const { copied, copyLink } = useCopyLink()
 
 // Editing state
 const editingField = ref<string | null>(null)
@@ -474,8 +476,14 @@ function formatDate(dateStr: string | null) {
             <button class="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors" title="Expand">
               <Maximize2 :size="14" />
             </button>
-            <button class="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors" title="Copy link">
-              <Copy :size="14" />
+            <button
+              class="p-1 rounded-md hover:bg-gray-100 transition-colors"
+              :class="copied ? 'text-green-600 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'"
+              title="Copy link"
+              @click="copyLink(`${window.location.origin}/initiatives/${initiative.id}`)"
+            >
+              <Check v-if="copied" :size="14" />
+              <Copy v-else :size="14" />
             </button>
             <span class="text-[11px] font-mono text-gray-400 px-1.5 py-0.5 bg-gray-50 rounded">INI-{{ initiative.id.slice(-5).toUpperCase() }}</span>
             <div v-if="saving" class="flex items-center gap-1 text-xs text-gray-400">

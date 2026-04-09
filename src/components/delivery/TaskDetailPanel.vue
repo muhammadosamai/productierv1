@@ -24,6 +24,7 @@ import {
   ALLOWED_ATTACHMENT_TYPES_HINT,
 } from '@/utils/allowedAttachments'
 import { toast } from 'vue-sonner'
+import { useCopyLink } from '@/utils/useCopyLink'
 
 interface TeamUser {
   id: string
@@ -56,8 +57,14 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
+const { copied, copyLink } = useCopyLink()
 const backlogStore = useBacklogStore()
 const authStore = useAuthStore()
+
+function copyTaskLink(taskId: string) {
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  copyLink(`${origin}/tasks?task=${taskId}`)
+}
 
 function goBackToStory() {
   emit('close')
@@ -1014,10 +1021,13 @@ function onBackdropClick(e: MouseEvent) {
               <Maximize2 :size="14" />
             </button>
             <button
-              class="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+              class="p-1 rounded-md hover:bg-gray-100 transition-colors"
+              :class="copied ? 'text-green-600 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'"
               title="Copy link"
+              @click="copyTaskLink(task.id)"
             >
-              <Copy :size="14" />
+              <Check v-if="copied" :size="14" />
+              <Copy v-else :size="14" />
             </button>
             <button
               class="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-red-500 transition-colors"

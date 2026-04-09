@@ -4,7 +4,6 @@ import bcrypt from 'bcryptjs'
 import { db } from '../db'
 import { users, tasks, stories, initiatives, deliveries, activities, productInvites, productMembers, passwordResetTokens, emailPreferences } from '../db/schema'
 import { eq, ilike, or, sql, arrayContains, and } from 'drizzle-orm'
-import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { sendWelcomeEmail, sendPasswordResetEmail } from '../services/email'
@@ -689,9 +688,8 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
     const filename = `${payload.userId}-${Date.now()}.${ext}`
     const filepath = join(uploadsDir, filename)
 
-    // Write file
-    const arrayBuffer = await file.arrayBuffer()
-    await writeFile(filepath, Buffer.from(arrayBuffer))
+    // Write file — use Bun.write to avoid ReadableStreamBYOBReader issues with multipart uploads
+    await Bun.write(filepath, file)
 
     // URL path that will be served by the static plugin
     const avatarUrl = `/uploads/avatars/${filename}`

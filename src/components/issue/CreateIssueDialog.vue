@@ -35,7 +35,8 @@ import { resolveApiPath } from '@/utils/uploadAssetUrl'
 import { toast } from 'vue-sonner'
 
 const open = defineModel<boolean>('open', { default: false })
-const emit = defineEmits<{ created: [id: string] }>()
+const props = defineProps<{ storyId?: string | null }>()
+const emit = defineEmits<{ created: [id: string] }>()  
 
 const issuesStore = useIssuesStore()
 const productStore = useProductStore()
@@ -170,9 +171,25 @@ function clearForm() {
   appVersion.value = ''; environment.value = ''; browser.value = ''; operatingSystem.value = ''
   pendingFiles.value = []; error.value = ''
   linkSearch.value = ''; linkResults.value = []
-  linkedStoryId.value = null; linkedStoryTitle.value = ''
+  // Preserve storyId if provided as prop
+  linkedStoryId.value = props.storyId || null
+  linkedStoryTitle.value = props.storyId ? linkedStoryTitle.value : ''
   linkedTaskId.value = null; linkedTaskTitle.value = ''
 }
+
+// Sync prop storyId on open
+watch(() => props.storyId, async (id) => {
+  if (!id) return
+  linkedStoryId.value = id
+  // Try to find title from stories API
+  try {
+    const res = await fetch(`/api/stories/${id}`)
+    if (res.ok) {
+      const story = await res.json()
+      linkedStoryTitle.value = story.title || ''
+    }
+  } catch { linkedStoryTitle.value = '' }
+}, { immediate: true })
 
 watch(open, (val) => { if (!val) clearForm() })
 
@@ -514,7 +531,8 @@ async function handleSubmit() {
                   <span class="text-[10px] font-bold text-blue-600 bg-blue-100 rounded px-1.5 py-0.5">STORY</span>
                   <span class="text-sm text-blue-800 truncate">{{ linkedStoryTitle }}</span>
                 </div>
-                <button type="button" class="text-blue-400 hover:text-blue-600 shrink-0" @click="removeStoryLink">
+                <!-- Only allow removing link if not pre-set from parent context -->
+                <button v-if="!props.storyId" type="button" class="text-blue-400 hover:text-blue-600 shrink-0" @click="removeStoryLink">
                   <X :size="14" />
                 </button>
               </div>
@@ -529,8 +547,8 @@ async function handleSubmit() {
               </div>
             </div>
 
-            <!-- Search -->
-            <div class="relative">
+            <!-- Search: only shown when no prop storyId is pre-set -->
+            <div v-if="!props.storyId" class="relative">
               <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white">
                 <Search :size="14" class="text-gray-400 shrink-0" />
                 <input

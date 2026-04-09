@@ -37,6 +37,7 @@ export interface Issue {
   reportedBy?: { id: string; name: string; email: string; avatar: string | null }
   assignedTo?: { id: string; name: string; email: string; avatar: string | null } | null
   testCycle?: { id: string; name: string } | null
+  story?: { id: string; title: string; status: string } | null
   comments?: IssueComment[]
   attachments?: IssueAttachment[]
 }

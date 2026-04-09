@@ -1,3 +1,5 @@
+import type { Issue } from './issue'
+
 export type StoryType = 'feature' | 'bug' | 'improvement' | 'technical_debt' | 'research' | 'infrastructure' | 'testing' | 'documentation'
 export type StoryPriority = 'low' | 'medium' | 'high'
 export type StoryStatus = 'backlog' | 'drafted' | 'initialized' | 'in_progress' | 'completed' | 'archived'
@@ -22,6 +24,7 @@ export interface Story {
   createdAt: string
   updatedAt: string
   tasks: Task[]
+  issues?: Issue[]
   comments?: StoryComment[]
   attachments?: StoryAttachment[]
 }

@@ -12,8 +12,11 @@ import {
 import { useRouter } from 'vue-router'
 import { useBacklogStore } from '@/stores/backlog'
 import { useAuthStore } from '@/stores/auth'
+import { useIssuesStore } from '@/stores/issues'
 import type { Story, StoryType, StoryStatus, StoryPriority, StoryAttachment } from '@/types/backlog'
+import type { Issue } from '@/types/issue'
 import AddTaskInline from '@/components/backlog/AddTaskInline.vue'
+import CreateIssueDialog from '@/components/issue/CreateIssueDialog.vue'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import {
   CalendarCell,
@@ -73,7 +76,7 @@ const backlogStore = useBacklogStore()
 const authStore = useAuthStore()
 
 // Active tab
-const activeTab = ref<'description' | 'tasks' | 'comments' | 'activities' | 'attachments'>('description')
+const activeTab = ref<'description' | 'tasks' | 'issues' | 'comments' | 'activities' | 'attachments'>('description')
 
 // Editing state
 const editingField = ref<string | null>(null)
@@ -103,6 +106,15 @@ const totalEstimatedHours = computed(() => {
 // Activities
 const activities = ref<Activity[]>([])
 const activitiesLoading = ref(false)
+
+// Issues tab
+const issuesStore = useIssuesStore()
+const storyIssues = ref<Issue[]>([])
+const issuesLoading = ref(false)
+const showCreateIssueDialog = ref(false)
+const issueSearchQuery = ref('')
+const issueSearchResults = ref<Issue[]>([])
+let issueSearchTimeout: ReturnType<typeof setTimeout> | null = null
 
 // Comments
 const newComment = ref('')
@@ -346,6 +358,9 @@ watch(activeTab, (tab) => {
   }
   if (tab === 'attachments' && props.story) {
     loadAttachments(props.story.id)
+  }
+  if (tab === 'issues' && props.story) {
+    loadStoryIssues(props.story.id)
   }
 })
 
@@ -740,7 +755,89 @@ function taskPriorityStyle(priority: string) {
   }
 }
 
-// ──── Comments tab helpers ────
+// ──── Issues tab helpers ────
+function issueSeverityDot(severity: string) {
+  switch (severity) {
+    case 'blocker': return 'bg-red-600'
+    case 'critical': return 'bg-red-500'
+    case 'major': return 'bg-orange-400'
+    case 'minor': return 'bg-yellow-400'
+    case 'trivial': return 'bg-gray-300'
+    default: return 'bg-gray-300'
+  }
+}
+
+function issueTypeLabel(type: string) {
+  return type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+}
+
+function issueStatusLabel(status: string) {
+  return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+}
+
+function issueStatusStyle(status: string) {
+  switch (status) {
+    case 'open': return 'text-blue-600 bg-blue-50'
+    case 'in_progress': return 'text-orange-600 bg-orange-50'
+    case 'resolved': return 'text-green-600 bg-green-50'
+    case 'closed': return 'text-gray-600 bg-gray-100'
+    case 'deferred': return 'text-purple-600 bg-purple-50'
+    default: return 'text-gray-600 bg-gray-50'
+  }
+}
+
+async function loadStoryIssues(storyId: string) {
+  issuesLoading.value = true
+  storyIssues.value = []
+  try {
+    storyIssues.value = await issuesStore.fetchIssuesByStory(storyId)
+  } finally {
+    issuesLoading.value = false
+  }
+}
+
+async function onIssueCreated() {
+  if (props.story) await loadStoryIssues(props.story.id)
+  emit('updated')
+}
+
+async function unlinkIssue(issueId: string) {
+  await issuesStore.updateIssue(issueId, { storyId: null })
+  storyIssues.value = storyIssues.value.filter(i => i.id !== issueId)
+  emit('updated')
+}
+
+async function linkExistingIssue(issue: Issue) {
+  if (!props.story) return
+  issueSearchQuery.value = ''
+  issueSearchResults.value = []
+  await issuesStore.updateIssue(issue.id, { storyId: props.story.id })
+  if (props.story) await loadStoryIssues(props.story.id)
+  emit('updated')
+}
+
+async function searchLinkedIssues(q: string) {
+  if (!q.trim()) { issueSearchResults.value = []; return }
+  const all = issuesStore.issues.filter(i =>
+    !i.storyId &&
+    i.title.toLowerCase().includes(q.toLowerCase())
+  ).slice(0, 6)
+  // If issues store is empty, fetch
+  if (issuesStore.issues.length === 0) {
+    const product = props.story?.product
+    if (product) await issuesStore.fetchIssues(product)
+    issueSearchResults.value = issuesStore.issues.filter(i =>
+      !i.storyId && i.title.toLowerCase().includes(q.toLowerCase())
+    ).slice(0, 6)
+  } else {
+    issueSearchResults.value = all
+  }
+}
+
+function onIssueSearchInput() {
+  if (issueSearchTimeout) clearTimeout(issueSearchTimeout)
+  issueSearchTimeout = setTimeout(() => searchLinkedIssues(issueSearchQuery.value), 250)
+}
 interface UnifiedComment {
   id: string
   content: string
@@ -1243,6 +1340,7 @@ async function deleteComment(comment: UnifiedComment) {
                 v-for="tab in ([
                   { key: 'description', label: 'Description', icon: FileText, count: 0 },
                   { key: 'tasks', label: 'Tasks', icon: ListChecks, count: story.tasks.length },
+                  { key: 'issues', label: 'Issues', icon: Bug, count: story.issues?.length ?? 0 },
                   { key: 'comments', label: 'Comments', icon: MessageSquare, count: allComments.length },
                   { key: 'attachments', label: 'Attachments', icon: Paperclip, count: attachments.length },
                   { key: 'activities', label: 'Activities', icon: History, count: 0 },
@@ -1375,6 +1473,94 @@ async function deleteComment(comment: UnifiedComment) {
               <div class="mt-2 pt-2 border-t border-gray-100">
                 <AddTaskInline :storyId="story.id" @created="emit('updated')" />
               </div>
+            </template>
+
+            <!-- ═══ Issues Tab ═══ -->
+            <template v-if="activeTab === 'issues'">
+              <div v-if="issuesLoading" class="flex items-center justify-center py-8">
+                <Loader2 :size="18" class="animate-spin text-gray-400" />
+              </div>
+              <div v-else>
+                <div v-if="storyIssues.length === 0" class="text-center py-8">
+                  <Bug :size="28" class="mx-auto text-gray-300 mb-2" />
+                  <p class="text-sm text-gray-400">No linked issues yet</p>
+                  <p class="text-xs text-gray-300 mt-1">Create or link an issue below</p>
+                </div>
+                <div v-else class="space-y-0">
+                  <div
+                    v-for="issue in storyIssues"
+                    :key="issue.id"
+                    class="py-2.5 px-2 -mx-2 rounded-lg hover:bg-gray-50/70 transition-colors group/issue cursor-pointer"
+                    @click="emit('close'); router.push({ path: '/issues', query: { issue: issue.id, fromStory: story.id } })"
+                  >
+                    <div class="flex items-center gap-2.5">
+                      <!-- Severity dot -->
+                      <span class="w-2 h-2 rounded-full shrink-0" :class="issueSeverityDot(issue.severity)"></span>
+                      <!-- Title -->
+                      <span class="text-sm text-gray-800 font-medium truncate flex-1 min-w-0">{{ issue.title }}</span>
+                      <!-- Type badge -->
+                      <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0 bg-red-50 text-red-500">{{ issueTypeLabel(issue.type) }}</span>
+                      <!-- Status -->
+                      <span
+                        class="text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0"
+                        :class="issueStatusStyle(issue.status)"
+                      >{{ issueStatusLabel(issue.status) }}</span>
+                      <!-- Unlink button -->
+                      <button
+                        class="opacity-0 group-hover/issue:opacity-100 p-1 rounded hover:bg-red-50 hover:text-red-500 transition-all cursor-pointer text-gray-400"
+                        title="Unlink from this story"
+                        @click.stop="unlinkIssue(issue.id)"
+                      >
+                        <X :size="12" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Link existing + create new -->
+                <div class="mt-2 pt-2 border-t border-gray-100">
+                  <!-- Search to link existing issue -->
+                  <div class="mb-2 relative">
+                    <div class="relative">
+                      <input
+                        v-model="issueSearchQuery"
+                        type="text"
+                        placeholder="Search issues to link..."
+                        class="w-full text-xs border border-gray-200 rounded-lg px-3 py-2 pl-7 outline-none focus:border-[#4857FE] focus:ring-1 focus:ring-[#4857FE]/20 transition-colors"
+                        @input="onIssueSearchInput"
+                      />
+                      <Search :size="12" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                    </div>
+                    <div v-if="issueSearchResults.length > 0" class="mt-1 border border-gray-200 rounded-lg overflow-hidden shadow-sm">
+                      <button
+                        v-for="result in issueSearchResults"
+                        :key="result.id"
+                        class="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 transition-colors flex items-center gap-2 cursor-pointer"
+                        @click="linkExistingIssue(result)"
+                      >
+                        <Bug :size="11" class="text-red-400 shrink-0" />
+                        <span class="truncate text-gray-700">{{ result.title }}</span>
+                        <span class="ml-auto shrink-0 text-[10px] text-gray-400">{{ issueStatusLabel(result.status) }}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <!-- Create new -->
+                  <button
+                    class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-[#4857FE] transition-colors cursor-pointer py-1"
+                    @click="showCreateIssueDialog = true"
+                  >
+                    <Plus :size="13" />
+                    Create new issue
+                  </button>
+                </div>
+              </div>
+
+              <!-- Create issue dialog (pre-linked to this story) -->
+              <CreateIssueDialog
+                v-model:open="showCreateIssueDialog"
+                :story-id="story.id"
+                @created="onIssueCreated"
+              />
             </template>
 
             <!-- ═══ Comments Tab ═══ -->

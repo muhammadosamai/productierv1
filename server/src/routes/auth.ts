@@ -6,6 +6,7 @@ import { users, tasks, stories, initiatives, deliveries, activities, productInvi
 import { eq, ilike, or, sql, arrayContains, and } from 'drizzle-orm'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { writeFile } from 'node:fs/promises'
 import { sendWelcomeEmail, sendPasswordResetEmail } from '../services/email'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
@@ -688,8 +689,9 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
     const filename = `${payload.userId}-${Date.now()}.${ext}`
     const filepath = join(uploadsDir, filename)
 
-    // Write file — use Bun.write to avoid ReadableStreamBYOBReader issues with multipart uploads
-    await Bun.write(filepath, file)
+    // Use node:fs writeFile + Buffer.from to avoid Bun ReadableStreamBYOBReader issues
+    const arrayBuffer = await file.arrayBuffer()
+    await writeFile(filepath, Buffer.from(arrayBuffer))
 
     // URL path that will be served by the static plugin
     const avatarUrl = `/uploads/avatars/${filename}`

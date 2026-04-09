@@ -1,6 +1,7 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { tasks, taskComments, taskAttachments, taskSubtasks, stories, users, deliveries, taskStatusHistory, products, productMembers } from '../db/schema'
+import { recomputeStoryStatus } from '../lib/storyStatus'
 import { randomUUID } from 'crypto'
 import path from 'path'
 import { eq, and, type InferSelectModel } from 'drizzle-orm'
@@ -238,53 +239,7 @@ async function autoUpdateStoryFromTasks(storyId: string) {
     .where(eq(stories.id, storyId))
 }
 
-// Auto-compute story status based on child task states
-// backlog → no tasks
-// drafted → tasks exist but none assigned
-// initialized → at least one task assigned to a user
-// in_progress → at least one task in_progress/in_review
-// completed → all tasks done
-// (archived is manual only)
-async function recomputeStoryStatus(storyId: string) {
-  const story = await db.query.stories.findFirst({
-    where: eq(stories.id, storyId),
-    columns: { status: true },
-  })
-  if (!story || story.status === 'archived') return // don't override archive
-
-  const taskList = await db.query.tasks.findMany({
-    where: eq(tasks.storyId, storyId),
-    columns: { status: true, ownerUserId: true, assigneeUserIds: true },
-  })
-
-  let newStatus: string
-
-  if (taskList.length === 0) {
-    newStatus = 'backlog'
-  } else {
-    const allDone = taskList.every(t => t.status === 'done' || t.status === 'archived')
-    const anyInProgress = taskList.some(t => t.status === 'in_progress' || t.status === 'in_review')
-    const anyAssigned = taskList.some(t =>
-      t.ownerUserId || (t.assigneeUserIds && t.assigneeUserIds.length > 0)
-    )
-
-    if (allDone) {
-      newStatus = 'completed'
-    } else if (anyInProgress) {
-      newStatus = 'in_progress'
-    } else if (anyAssigned) {
-      newStatus = 'initialized'
-    } else {
-      newStatus = 'drafted'
-    }
-  }
-
-  if (newStatus !== story.status) {
-    await db.update(stories)
-      .set({ status: newStatus as any, updatedAt: new Date() })
-      .where(eq(stories.id, storyId))
-  }
-}
+// recomputeStoryStatus is imported from ../lib/storyStatus (issue-aware)
 
 export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
   .use(jwt({ name: 'jwt', secret: JWT_SECRET }))

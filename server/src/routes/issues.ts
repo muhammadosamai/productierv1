@@ -6,6 +6,7 @@ import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
+import { recomputeStoryStatus } from '../lib/storyStatus'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
@@ -285,6 +286,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
         reportedBy: { columns: { id: true, name: true, email: true, avatar: true } },
         assignedTo: { columns: { id: true, name: true, email: true, avatar: true } },
         testCycle: { columns: { id: true, name: true } },
+        story: { columns: { id: true, title: true, status: true } },
       },
       orderBy: (items, { desc }) => [desc(items.createdAt)],
     })
@@ -352,10 +354,27 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       with: {
         reportedBy: { columns: { id: true, name: true, email: true, avatar: true } },
         assignedTo: { columns: { id: true, name: true, email: true, avatar: true } },
+        story: { columns: { id: true, title: true, status: true } },
       },
     })
+
+    // Trigger story status recompute if linked to a story
+    if (storyId) recomputeStoryStatus(storyId).catch(() => {})
+
     return full
   }, { body: issueCreateBody })
+
+  // GET /api/issues/by-story/:storyId
+  .get('/by-story/:storyId', async ({ params: { storyId } }) => {
+    return db.query.issues.findMany({
+      where: and(eq(issues.storyId, storyId), eq(issues.archived, false)),
+      with: {
+        reportedBy: { columns: { id: true, name: true, email: true, avatar: true } },
+        assignedTo: { columns: { id: true, name: true, email: true, avatar: true } },
+      },
+      orderBy: (items, { desc }) => [desc(items.createdAt)],
+    })
+  })
 
   // GET /api/issues/:id
   .get('/:id', async ({ params: { id }, set, headers, jwt: jwtInstance }) => {
@@ -365,6 +384,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
         reportedBy: { columns: { id: true, name: true, email: true, avatar: true } },
         assignedTo: { columns: { id: true, name: true, email: true, avatar: true } },
         testCycle: { columns: { id: true, name: true } },
+        story: { columns: { id: true, title: true, status: true } },
         comments: { with: { user: true }, orderBy: (c, { desc }) => [desc(c.createdAt)] },
       },
     })
@@ -464,8 +484,18 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       with: {
         reportedBy: { columns: { id: true, name: true, email: true, avatar: true } },
         assignedTo: { columns: { id: true, name: true, email: true, avatar: true } },
+        story: { columns: { id: true, title: true, status: true } },
       },
     })
+
+    // Trigger story status recompute
+    const affectedStoryId = updatePayload.storyId ?? existing.storyId
+    if (affectedStoryId) recomputeStoryStatus(affectedStoryId).catch(() => {})
+    // If storyId was cleared, recompute the old story too
+    if ('storyId' in updatePayload && updatePayload.storyId !== existing.storyId && existing.storyId) {
+      recomputeStoryStatus(existing.storyId).catch(() => {})
+    }
+
     return full
   }, { body: issueUpdateBody })
 
@@ -495,6 +525,9 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       entityTitle: deleted.title,
       changes: null,
     })
+
+    // Recompute story status if this issue was linked to a story
+    if (deleted.storyId) recomputeStoryStatus(deleted.storyId).catch(() => {})
 
     return { success: true }
   })

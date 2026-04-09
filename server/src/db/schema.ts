@@ -560,6 +560,7 @@ export const assetRelationsRelations = relations(assetRelations_table, ({ one })
 
 export const storiesRelations = relations(stories, ({ many }) => ({
   tasks: many(tasks),
+  issues: many(issues),
   comments: many(storyComments),
   attachments: many(storyAttachments),
 }))

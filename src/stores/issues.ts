@@ -89,5 +89,18 @@ export const useIssuesStore = defineStore('issues', () => {
     }
   }
 
-  return { issues, loading, error, issueCount, fetchIssues, createIssue, updateIssue, deleteIssue }
+  async function fetchIssuesByStory(storyId: string): Promise<Issue[]> {
+    const authStore = useAuthStore()
+    try {
+      const headers: Record<string, string> = {}
+      if (authStore.token) headers.Authorization = `Bearer ${authStore.token}`
+      const res = await fetch(`/api/issues/by-story/${storyId}`, { headers })
+      if (!res.ok) return []
+      return await res.json()
+    } catch {
+      return []
+    }
+  }
+
+  return { issues, loading, error, issueCount, fetchIssues, fetchIssuesByStory, createIssue, updateIssue, deleteIssue }
 })

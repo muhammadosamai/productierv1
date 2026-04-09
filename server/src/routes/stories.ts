@@ -92,6 +92,17 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
             },
           },
         },
+        issues: {
+          where: (i, { eq }) => eq(i.archived, false),
+          columns: {
+            id: true, title: true, type: true, severity: true,
+            priority: true, status: true, createdAt: true, updatedAt: true,
+          },
+          with: {
+            reportedBy: { columns: { id: true, name: true, avatar: true } },
+            assignedTo: { columns: { id: true, name: true, avatar: true } },
+          },
+        },
         comments: { with: { user: true } },
       },
     })
@@ -168,6 +179,17 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
                 delivery: { columns: { id: true, title: true } },
               },
             },
+          },
+        },
+        issues: {
+          where: (i, { eq }) => eq(i.archived, false),
+          columns: {
+            id: true, title: true, type: true, severity: true,
+            priority: true, status: true, createdAt: true, updatedAt: true,
+          },
+          with: {
+            reportedBy: { columns: { id: true, name: true, avatar: true } },
+            assignedTo: { columns: { id: true, name: true, avatar: true } },
           },
         },
         comments: { with: { user: true } },

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, nextTick, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   X, Maximize2, Copy, Loader2, ChevronDown, Check,
   Clock, CalendarDays, FileText, Shield,
@@ -9,9 +10,10 @@ import {
   MessageSquare, Send, Trash2,
   Upload, Download, ImageIcon, FileIcon, Paperclip,
   AlertTriangle, Eye, Monitor, Smartphone, Globe, Zap, Database, LayoutDashboard, Lock,
-  Archive, RotateCcw,
+  Archive, RotateCcw, ExternalLink,
 } from 'lucide-vue-next'
 import { useIssuesStore } from '@/stores/issues'
+import { useBacklogStore } from '@/stores/backlog'
 import { useAuthStore } from '@/stores/auth'
 import { useProductMembersStore } from '@/stores/productMembers'
 import type {
@@ -26,6 +28,8 @@ import {
   ALLOWED_ATTACHMENT_TYPES_HINT,
 } from '@/utils/allowedAttachments'
 import { toast } from 'vue-sonner'
+
+const router = useRouter()
 
 interface TeamUser {
   id: string
@@ -57,6 +61,7 @@ const emit = defineEmits<{
 }>()
 
 const issuesStore = useIssuesStore()
+const backlogStore = useBacklogStore()
 const authStore = useAuthStore()
 const productMembersStore = useProductMembersStore()
 
@@ -108,7 +113,9 @@ const showReproducibilityDropdown = ref(false)
 const showEnvironmentDropdown = ref(false)
 const showBrowserDropdown = ref(false)
 const showOsDropdown = ref(false)
+const showStoryDropdown = ref(false)
 const assigneeSearchQuery = ref('')
+const storySearchQuery = ref('')
 
 // Edit fields
 const editDescription = ref('')
@@ -485,7 +492,37 @@ function closeAllDropdowns() {
   showEnvironmentDropdown.value = false
   showBrowserDropdown.value = false
   showOsDropdown.value = false
+  showStoryDropdown.value = false
   assigneeSearchQuery.value = ''
+  storySearchQuery.value = ''
+}
+
+// ──── Linked Story ────
+
+const filteredStories = computed(() => {
+  const q = storySearchQuery.value.toLowerCase().trim()
+  return backlogStore.stories.filter(s => !q || s.title.toLowerCase().includes(q))
+})
+
+async function startStoryEdit() {
+  if (!props.issue) return
+  storySearchQuery.value = ''
+  showStoryDropdown.value = true
+  if (backlogStore.stories.length === 0 && props.issue.product) {
+    await backlogStore.fetchStories(props.issue.product)
+  }
+}
+
+async function selectStory(story: { id: string; title: string }) {
+  showStoryDropdown.value = false
+  storySearchQuery.value = ''
+  await updateField('storyId', story.id)
+}
+
+async function clearStory() {
+  showStoryDropdown.value = false
+  storySearchQuery.value = ''
+  await updateField('storyId', null)
 }
 
 // ──── Update field ────
@@ -1149,6 +1186,76 @@ const groupedActivities = computed(() => {
                 </div>
               </div>
 
+              <!-- Linked Story -->
+              <div class="flex items-center gap-3">
+                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
+                  <FileText :size="13" class="text-gray-400" /> Story
+                </span>
+                <div class="relative" @click.stop>
+                  <button
+                    class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer hover:opacity-80 transition-opacity"
+                    :class="issue.storyId ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-400'"
+                    @click="startStoryEdit"
+                  >
+                    <FileText :size="12" />
+                    <span class="max-w-[140px] truncate">{{ issue.story?.title || (issue.storyId ? 'STY-' + issue.storyId.slice(-5).toUpperCase() : 'Not linked') }}</span>
+                    <ChevronDown :size="12" />
+                  </button>
+                  <div
+                    v-if="showStoryDropdown"
+                    class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1 w-[240px]"
+                  >
+                    <!-- Search -->
+                    <div class="px-2 pt-1.5 pb-1 border-b border-gray-100">
+                      <div class="flex items-center gap-1.5 bg-gray-50 rounded-md px-2 py-1.5">
+                        <Search :size="11" class="text-gray-400 shrink-0" />
+                        <input
+                          v-model="storySearchQuery"
+                          class="text-xs bg-transparent outline-none w-full placeholder-gray-400"
+                          placeholder="Search stories..."
+                          autofocus
+                          @keydown.escape="showStoryDropdown = false; storySearchQuery = ''"
+                        />
+                      </div>
+                    </div>
+                    <div class="max-h-[200px] overflow-auto py-1">
+                      <!-- Navigate to current story -->
+                      <button
+                        v-if="issue.storyId"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-xs text-[#4857FE] hover:bg-indigo-50 transition-colors border-b border-gray-100"
+                        @click="showStoryDropdown = false; emit('close'); router.push({ path: '/stories', query: { story: issue.storyId } })"
+                      >
+                        <ExternalLink :size="12" />
+                        Open story
+                      </button>
+                      <!-- Story options -->
+                      <button
+                        v-for="story in filteredStories"
+                        :key="story.id"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
+                        :class="issue.storyId === story.id ? 'text-[#4857FE] font-medium' : 'text-gray-600'"
+                        @click="selectStory(story)"
+                      >
+                        <FileText :size="14" class="shrink-0" />
+                        <span class="truncate flex-1 text-left">{{ story.title }}</span>
+                        <Check v-if="issue.storyId === story.id" :size="14" class="ml-auto text-[#4857FE] shrink-0" />
+                      </button>
+                      <p v-if="filteredStories.length === 0" class="text-xs text-gray-400 text-center py-3">No stories found</p>
+                    </div>
+                    <!-- Remove link -->
+                    <div v-if="issue.storyId" class="border-t border-gray-100 pt-1">
+                      <button
+                        class="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-500 hover:bg-red-50 transition-colors"
+                        @click="clearStory"
+                      >
+                        <X :size="12" />
+                        Remove story link
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <!-- Assigned To (searchable user dropdown) -->
               <div class="flex items-start gap-3">
                 <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5 pt-1">
@@ -1595,20 +1702,12 @@ const groupedActivities = computed(() => {
                 </p>
               </div>
 
-              <!-- Linked Story / Task -->
-              <div v-if="issue.storyId || issue.taskId" class="py-3 border-t border-gray-100">
-                <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Linked Items</span>
-                <div class="space-y-1.5">
-                  <div v-if="issue.storyId" class="flex items-center gap-2 text-sm text-gray-600">
-                    <FileText :size="13" class="text-gray-400" />
-                    <span class="text-xs text-gray-400">Story:</span>
-                    <span class="text-xs font-mono text-gray-500 bg-gray-50 px-1.5 py-0.5 rounded">STY-{{ issue.storyId.slice(-5).toUpperCase() }}</span>
-                  </div>
-                  <div v-if="issue.taskId" class="flex items-center gap-2 text-sm text-gray-600">
-                    <FileText :size="13" class="text-gray-400" />
-                    <span class="text-xs text-gray-400">Task:</span>
-                    <span class="text-xs font-mono text-gray-500 bg-gray-50 px-1.5 py-0.5 rounded">{{ issue.taskId.slice(-5).toUpperCase() }}</span>
-                  </div>
+              <!-- Task row (read-only, still shown in reproduction tab if linked) -->
+              <div v-if="issue.taskId" class="py-3 border-t border-gray-100">
+                <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Linked Task</span>
+                <div class="flex items-center gap-2 text-sm text-gray-600">
+                  <FileText :size="13" class="text-gray-400" />
+                  <span class="text-xs font-mono text-gray-500 bg-gray-50 px-1.5 py-0.5 rounded">{{ issue.taskId.slice(-5).toUpperCase() }}</span>
                 </div>
               </div>
             </template>

@@ -12,12 +12,14 @@ import { useBacklogStore } from '@/stores/backlog'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
+import { DateRangePicker } from '@/components/ui/date-range-picker'
 import type { Delivery, DeliveryStatus } from '@/types/delivery'
 import type { Task, TaskStatus, TaskPriority } from '@/types/backlog'
 import draggable from 'vuedraggable'
 import DeliveryTimeline from '@/components/delivery/DeliveryTimeline.vue'
 import DeliveryList from '@/components/delivery/DeliveryList.vue'
 import TaskDetailPanel from '@/components/delivery/TaskDetailPanel.vue'
+import { toast } from 'vue-sonner'
 
 const route = useRoute()
 const router = useRouter()
@@ -346,6 +348,31 @@ function updateStatus(status: DeliveryStatus) {
   updateField('status', status)
 }
 
+// Delivery date range
+const deliveryDateRange = computed(() => ({
+  start: delivery.value?.startDate || null,
+  end: delivery.value?.endDate || null,
+}))
+
+async function onDeliveryDateChange(range: { start: string | null; end: string | null } | undefined) {
+  if (!delivery.value) return
+  const start = range?.start || null
+  const end = range?.end || null
+
+  // Block inverted ranges — start can't be after end when both are set
+  if (start && end && new Date(start) > new Date(end)) {
+    toast.error('Start date cannot be after end date.')
+    return
+  }
+
+  try {
+    await deliveriesStore.updateDelivery(delivery.value.id, { startDate: start, endDate: end })
+    delivery.value = await deliveriesStore.fetchDelivery(delivery.value.id)
+  } catch {
+    toast.error('Failed to update delivery dates.')
+  }
+}
+
 // Delivery status styling
 const deliveryStatuses: { value: DeliveryStatus; label: string; color: string }[] = [
   { value: 'initialized', label: 'Initialized', color: 'bg-[#ff69b4]' },
@@ -553,11 +580,30 @@ function taskShortId(task: Task) {
 
           <!-- Right: Date + Tasks + Progress -->
           <div class="flex items-center gap-4 shrink-0 ml-6">
-            <!-- Date Range -->
-            <div class="flex items-center gap-1.5 text-sm text-gray-500 shrink-0">
-              <CalendarDays :size="14" class="text-gray-400" />
-              <span>{{ formatDateRange(delivery.startDate, delivery.endDate) }}</span>
-            </div>
+            <!-- Date Range (editable) -->
+            <DateRangePicker
+              :model-value="deliveryDateRange"
+              @update:model-value="onDeliveryDateChange"
+            >
+              <template #trigger>
+                <button
+                  type="button"
+                  class="group flex items-center gap-2 text-sm hover:text-[#4857FE] transition-colors"
+                >
+                  <CalendarDays :size="14" class="text-gray-400 shrink-0 group-hover:text-[#4857FE] transition-colors" />
+                  <span
+                    v-if="!deliveryDateRange.start && !deliveryDateRange.end"
+                    class="text-gray-400 italic"
+                  >Set dates</span>
+                  <template v-else>
+                    <span class="text-gray-700 font-medium">{{ formatDateShort(deliveryDateRange.start) }}</span>
+                    <span class="text-gray-400 mx-0.5">→</span>
+                    <span class="text-gray-700 font-medium">{{ formatDateShort(deliveryDateRange.end) }}</span>
+                  </template>
+                  <Pencil :size="11" class="text-gray-400 opacity-0 group-hover:opacity-70 transition-opacity" />
+                </button>
+              </template>
+            </DateRangePicker>
 
             <div class="w-px h-5 bg-gray-200 shrink-0"></div>
 

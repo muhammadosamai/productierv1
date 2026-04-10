@@ -132,14 +132,16 @@ function applyPreset(preset: string) {
 <template>
   <Popover v-model:open="open">
     <PopoverTrigger as-child>
-      <button
-        type="button"
-        class="inline-flex items-center gap-2 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors text-left"
-        :class="hasValue ? 'text-gray-900' : 'text-gray-400'"
-      >
-        <CalendarRange :size="16" class="text-gray-400 shrink-0" />
-        <span class="flex-1 truncate">{{ displayText }}</span>
-      </button>
+      <slot name="trigger" :has-value="hasValue" :display-text="displayText">
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors text-left"
+          :class="hasValue ? 'text-gray-900' : 'text-gray-400'"
+        >
+          <CalendarRange :size="16" class="text-gray-400 shrink-0" />
+          <span class="flex-1 truncate">{{ displayText }}</span>
+        </button>
+      </slot>
     </PopoverTrigger>
 
     <PopoverContent align="start" :side-offset="8" class="w-auto p-0">

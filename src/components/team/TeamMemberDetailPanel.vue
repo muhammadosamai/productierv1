@@ -2,10 +2,11 @@
 import { ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import {
-  X, Maximize2, Copy, Loader2,
+  X, Maximize2, Copy, Loader2, Check,
   Mail, Shield, CalendarDays,
   Lightbulb, BookOpen, CheckSquare, Package,
 } from 'lucide-vue-next'
+import { useCopyLink } from '@/utils/useCopyLink'
 
 interface TeamUser {
   id: string
@@ -33,6 +34,7 @@ const emit = defineEmits<{
 }>()
 
 const authStore = useAuthStore()
+const { copied, copyLink } = useCopyLink()
 const activeTab = ref<'initiatives' | 'stories' | 'tasks' | 'deliveries'>('tasks')
 const workData = ref<WorkData | null>(null)
 const loadingWork = ref(false)
@@ -150,8 +152,14 @@ function tabCount(key: string): number {
             <button class="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors" title="Expand">
               <Maximize2 :size="14" />
             </button>
-            <button class="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors" title="Copy link">
-              <Copy :size="14" />
+            <button
+              class="p-1 rounded-md hover:bg-gray-100 transition-colors"
+              :class="copied ? 'text-green-600 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'"
+              title="Copy link"
+              @click="copyLink(`${window.location.origin}/team?member=${member.id}`)"
+            >
+              <Check v-if="copied" :size="14" />
+              <Copy v-else :size="14" />
             </button>
             <span class="text-[11px] font-mono text-gray-400 px-1.5 py-0.5 bg-gray-50 rounded">USR-{{ member.id.slice(-5).toUpperCase() }}</span>
           </div>

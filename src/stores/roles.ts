@@ -12,7 +12,7 @@ export interface PagePermission {
 
 const CONTROLLABLE_PAGES = [
   'home', 'overview', 'wiki', 'team', 'initiatives', 'stories', 'tasks',
-  'deliveries', 'releases', 'test-cycles', 'issues', 'feedbacks',
+  'deliveries', 'releases', 'test-cycles', 'performance-cycles', 'issues', 'feedbacks',
   'feature-requests', 'users', 'integrations', 'settings',
 ]
 
@@ -29,6 +29,7 @@ const ROUTE_TO_PAGE: Record<string, string> = {
   '/deliveries': 'deliveries',
   '/releases': 'releases',
   '/test-cycles': 'test-cycles',
+  '/performance-cycles': 'performance-cycles',
   '/issues': 'issues',
   '/feedbacks': 'feedbacks',
   '/feature-requests': 'feature-requests',

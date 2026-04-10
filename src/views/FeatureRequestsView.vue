@@ -7,12 +7,15 @@ import {
 } from 'lucide-vue-next'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
+import { useRoute, useRouter } from 'vue-router'
 import { useFeatureRequestsStore } from '@/stores/featureRequests'
 import FavoriteStar from '@/components/shared/FavoriteStar.vue'
 import type { FeatureRequestStatus, FeatureRequestCategory } from '@/types/featureRequest'
 
 const productStore = useProductStore()
 const authStore = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 const store = useFeatureRequestsStore()
 
 const searchQuery = ref('')
@@ -34,11 +37,32 @@ watch(viewMode, (v) => localStorage.setItem('fr-view-mode', v))
 
 onMounted(() => {
   store.fetchAll(productStore.activeProductName, 'votes')
+  syncCreateDialogWithRoute()
 })
 
 watch(() => productStore.activeProductName, (p) => {
   store.fetchAll(p, 'votes')
 })
+
+watch(() => route.query.create, () => {
+  syncCreateDialogWithRoute()
+})
+
+function syncCreateDialogWithRoute() {
+  showCreateDialog.value = route.query.create === '1'
+}
+
+function openCreateDialog() {
+  showCreateDialog.value = true
+  router.replace({ path: route.path, query: { ...route.query, create: '1' } })
+}
+
+function closeCreateDialog() {
+  showCreateDialog.value = false
+  const { create, ...restQuery } = route.query
+  void create
+  router.replace({ path: route.path, query: restQuery })
+}
 
 const filteredItems = computed(() => {
   let list = store.items
@@ -116,7 +140,7 @@ async function handleCreate() {
     tags: newTags.value.length > 0 ? newTags.value : null,
   })
   submitting.value = false
-  showCreateDialog.value = false
+  closeCreateDialog()
   newTitle.value = ''
   newDescription.value = ''
   newCategory.value = 'enhancement'
@@ -178,7 +202,7 @@ function timeAgo(dateStr: string) {
         </div>
         <button
           class="flex items-center gap-1.5 bg-[#4857FE] hover:bg-[#3E4BDE] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer"
-          @click="showCreateDialog = true"
+          @click="openCreateDialog"
         >
           <Plus :size="15" />
           New Request
@@ -236,7 +260,7 @@ function timeAgo(dateStr: string) {
         </div>
         <p class="text-gray-500 text-sm font-medium mb-1">No feature requests yet</p>
         <p class="text-gray-400 text-xs mb-4">Submit a request to get started</p>
-        <button class="flex items-center gap-1.5 px-4 py-2 bg-[#4857FE] text-white text-sm font-medium rounded-lg hover:bg-[#3E4BDE] transition-colors cursor-pointer" @click="showCreateDialog = true">
+        <button class="flex items-center gap-1.5 px-4 py-2 bg-[#4857FE] text-white text-sm font-medium rounded-lg hover:bg-[#3E4BDE] transition-colors cursor-pointer" @click="openCreateDialog">
           <Plus :size="15" />
           New Request
         </button>
@@ -401,11 +425,11 @@ function timeAgo(dateStr: string) {
     <!-- Create Dialog -->
     <Teleport to="body">
       <div v-if="showCreateDialog" class="fixed inset-0 z-50 flex items-center justify-center">
-        <div class="absolute inset-0 bg-black/40" @click="showCreateDialog = false"></div>
+        <div class="absolute inset-0 bg-black/40" @click="closeCreateDialog"></div>
         <div class="relative bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6" @click.stop>
           <div class="flex items-center justify-between mb-5">
             <h2 class="text-lg font-semibold text-gray-900">New Feature Request</h2>
-            <button class="text-gray-400 hover:text-gray-600 cursor-pointer" @click="showCreateDialog = false"><X :size="20" /></button>
+            <button class="text-gray-400 hover:text-gray-600 cursor-pointer" @click="closeCreateDialog"><X :size="20" /></button>
           </div>
 
           <form @submit.prevent="handleCreate" class="space-y-4">
@@ -443,7 +467,7 @@ function timeAgo(dateStr: string) {
             </div>
 
             <div class="flex justify-end gap-2 pt-2">
-              <button type="button" class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer" @click="showCreateDialog = false">Cancel</button>
+              <button type="button" class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer" @click="closeCreateDialog">Cancel</button>
               <button type="submit" :disabled="!newTitle.trim() || submitting" class="px-4 py-2 text-sm font-medium bg-[#4857FE] hover:bg-[#3E4BDE] text-white rounded-lg transition-colors cursor-pointer disabled:opacity-50">
                 {{ submitting ? 'Submitting...' : 'Submit Request' }}
               </button>

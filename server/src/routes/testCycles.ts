@@ -6,6 +6,12 @@ import { jwt } from '@elysiajs/jwt'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
+function parseCycleTitle(title: string) {
+  const match = title.match(/^(#\d+)\s+(.*)$/)
+  if (match) return { prefix: match[1], rest: match[2] }
+  return { prefix: '', rest: title }
+}
+
 async function getUserFromHeader(jwtVerify: any, headers: Record<string, string | undefined>) {
   const authHeader = headers.authorization
   if (!authHeader?.startsWith('Bearer ')) return null
@@ -100,8 +106,19 @@ export const testCycleRoutes = new Elysia({ prefix: '/api/test-cycles' })
     const existing = await db.query.testCycles.findFirst({ where: eq(testCycles.id, id) })
     if (!existing) { set.status = 404; return { error: 'Test cycle not found' } }
 
+    const updateData: Record<string, unknown> = { ...body }
+    if (body.title !== undefined) {
+      const existingPrefix = parseCycleTitle(existing.title).prefix
+      const nextRest = parseCycleTitle(body.title).rest.trim()
+      if (!nextRest) {
+        set.status = 400
+        return { error: 'Title is required' }
+      }
+      updateData.title = existingPrefix ? `${existingPrefix} ${nextRest}` : nextRest
+    }
+
     const [updated] = await db.update(testCycles)
-      .set({ ...body, updatedAt: new Date() })
+      .set({ ...updateData, updatedAt: new Date() })
       .where(eq(testCycles.id, id))
       .returning()
 

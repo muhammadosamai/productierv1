@@ -6,6 +6,7 @@ import {
 } from 'lucide-vue-next'
 import { useDeliveriesStore } from '@/stores/deliveries'
 import type { Delivery, DeliveryStatus } from '@/types/delivery'
+import { useCopyLink } from '@/utils/useCopyLink'
 
 const props = defineProps<{
   delivery: Delivery | null
@@ -19,6 +20,7 @@ const emit = defineEmits<{
 }>()
 
 const deliveriesStore = useDeliveriesStore()
+const { copied, copyLink } = useCopyLink()
 
 // Editing state
 const editingField = ref<string | null>(null)
@@ -208,8 +210,14 @@ function progressPercent() {
             >
               <Maximize2 :size="14" />
             </button>
-            <button class="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors" title="Copy link">
-              <Copy :size="14" />
+            <button
+              class="p-1 rounded-md hover:bg-gray-100 transition-colors"
+              :class="copied ? 'text-green-600 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'"
+              title="Copy link"
+              @click="copyLink(`${window.location.origin}/deliveries?delivery=${delivery.id}`)"
+            >
+              <Check v-if="copied" :size="14" />
+              <Copy v-else :size="14" />
             </button>
             <span class="text-[11px] font-mono text-gray-400 px-1.5 py-0.5 bg-gray-50 rounded">DLV-{{ delivery.id.slice(-5).toUpperCase() }}</span>
             <div v-if="saving" class="flex items-center gap-1 text-xs text-gray-400">

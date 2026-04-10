@@ -18,7 +18,7 @@ async function getUserFromHeader(jwtVerify: any, headers: Record<string, string 
 
 const CONTROLLABLE_PAGES = [
   'home', 'overview', 'wiki', 'team', 'initiatives', 'stories', 'tasks',
-  'deliveries', 'releases', 'test-cycles', 'issues', 'feedbacks',
+  'deliveries', 'releases', 'test-cycles', 'performance-cycles', 'issues', 'feedbacks',
   'feature-requests', 'users', 'integrations', 'settings',
 ]
 
@@ -90,6 +90,7 @@ export const rolesRoutes = new Elysia({ prefix: '/api/roles' })
           visible: perms.visible,
           canCreate: perms.canCreate,
           canEdit: perms.canEdit,
+          selfViewOnly: perms.selfViewOnly,
         })
       }
     }

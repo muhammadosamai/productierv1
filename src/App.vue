@@ -15,7 +15,7 @@ const productStore = useProductStore()
 const productRoutes = new Set([
   'stories', 'tasks-list', 'initiatives', 'initiative',
   'deliveries', 'delivery', 'team', 'metrics', 'wiki',
-  'releases', 'release', 'test-cycles', 'test-cycle', 'issues', 'feedbacks', 'feature-requests', 'settings',
+  'releases', 'release', 'test-cycles', 'test-cycle', 'performance-cycles', 'issues', 'feedbacks', 'feature-requests', 'settings',
 ])
 
 const showProductSidebars = computed(() => {

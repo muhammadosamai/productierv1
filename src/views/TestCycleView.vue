@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft, Loader2, Plus, FlaskConical,
-  CalendarDays, Link2, Trash2, X, MoreHorizontal,
+  CalendarDays, Link2, Trash2, X, MoreHorizontal, Pencil, Check,
   LayoutList, Search,
 } from 'lucide-vue-next'
 import { useTestCyclesStore } from '@/stores/testCycles'
@@ -14,6 +14,7 @@ import { useIssuesStore } from '@/stores/issues'
 import draggable from 'vuedraggable'
 import type { TestCycle, IssueSeverity, IssueStatus } from '@/types/testCycle'
 import type { Issue } from '@/types/issue'
+import { toast } from 'vue-sonner'
 
 const route = useRoute()
 const router = useRouter()
@@ -27,6 +28,10 @@ const cycle = ref<TestCycle | null>(null)
 const loading = ref(true)
 const activeView = ref<'kanban' | 'list'>('kanban')
 const cycleIssues = ref<Issue[]>([])
+const editingField = ref<string | null>(null)
+const editTitle = ref('')
+const savingTitle = ref(false)
+const titleInputRef = ref<HTMLInputElement | null>(null)
 
 // Add issue form
 const showAddIssue = ref(false)
@@ -139,6 +144,44 @@ function parsePrefix(title: string) {
   return { prefix: '', rest: title }
 }
 
+function startEditTitle() {
+  if (!cycle.value) return
+  editTitle.value = parsePrefix(cycle.value.title).rest
+  editingField.value = 'title'
+  nextTick(() => titleInputRef.value?.focus())
+}
+
+function cancelEditTitle() {
+  editingField.value = null
+}
+
+async function saveTitle() {
+  if (!cycle.value || savingTitle.value) return
+
+  const trimmed = editTitle.value.trim()
+  const { prefix, rest } = parsePrefix(cycle.value.title)
+  if (!trimmed || trimmed === rest.trim()) {
+    editingField.value = null
+    return
+  }
+
+  const nextTitle = prefix ? `${prefix} ${trimmed}` : trimmed
+  savingTitle.value = true
+  try {
+    const updated = await store.updateCycle(cycle.value.id, { title: nextTitle })
+    if (updated) {
+      cycle.value = updated
+      editingField.value = null
+    } else {
+      toast.error('Failed to update test cycle name.')
+    }
+  } catch {
+    toast.error('Failed to update test cycle name.')
+  } finally {
+    savingTitle.value = false
+  }
+}
+
 function severityStyle(s: string) {
   switch (s) {
     case 'blocker': return 'bg-rose-950 text-white border border-rose-900'
@@ -193,9 +236,44 @@ const resolvedIssues = computed(() => cycleIssues.value?.filter(i => i.status ==
             <FlaskConical :size="16" class="text-[#4857FE]" />
           </div>
           <div class="min-w-0">
-            <h1 class="text-lg font-semibold text-gray-900 truncate">
+            <div v-if="editingField === 'title'" class="flex items-center gap-2 min-w-0">
+              <span
+                v-if="parsePrefix(cycle.title).prefix"
+                class="text-lg font-semibold text-[#4857FE] shrink-0"
+              >
+                {{ parsePrefix(cycle.title).prefix }} -
+              </span>
+              <input
+                ref="titleInputRef"
+                v-model="editTitle"
+                class="text-lg font-semibold text-gray-900 bg-transparent border-b-2 border-[#4857FE] outline-none py-0.5 min-w-[200px]"
+                :disabled="savingTitle"
+                @keydown.enter="saveTitle"
+                @keydown.escape="cancelEditTitle"
+              />
+              <button
+                class="text-green-500 hover:text-green-600 disabled:opacity-50"
+                :disabled="savingTitle"
+                @click="saveTitle"
+              >
+                <Check :size="16" />
+              </button>
+              <button
+                class="text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                :disabled="savingTitle"
+                @click="cancelEditTitle"
+              >
+                <X :size="16" />
+              </button>
+            </div>
+            <h1
+              v-else
+              class="text-lg font-semibold text-gray-900 truncate cursor-pointer hover:text-[#4857FE] transition-colors group/title"
+              @click="startEditTitle"
+            >
               <span v-if="parsePrefix(cycle.title).prefix" class="text-[#4857FE]">{{ parsePrefix(cycle.title).prefix }}</span>
               <span v-if="parsePrefix(cycle.title).prefix"> - </span>{{ parsePrefix(cycle.title).rest }}
+              <Pencil :size="12" class="inline ml-1 opacity-0 group-hover/title:opacity-40 transition-opacity" />
             </h1>
             <div class="flex items-center gap-2 mt-0.5">
               <span class="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full" :class="issueStatusStyle(cycle.status)">{{ statusLabel(cycle.status) }}</span>

@@ -135,6 +135,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/performance-cycles',
+      name: 'performance-cycles',
+      component: () => import('../views/PerformanceCyclesView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/test-cycles/:id',
       name: 'test-cycle',
       component: () => import('../views/TestCycleView.vue'),

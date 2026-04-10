@@ -472,6 +472,7 @@ function getActiveItemFromRoute(): string {
   if (path === '/metrics' || path.startsWith('/metrics/')) return 'Overview'
   if (path === '/releases' || path.startsWith('/releases/')) return 'Releases'
   if (path === '/test-cycles' || path.startsWith('/test-cycles/')) return 'Testing Cycles'
+  if (path === '/performance-cycles' || path.startsWith('/performance-cycles/')) return 'Performance Cycles'
   if (path === '/issues' || path.startsWith('/issues/')) return 'Issues'
   if (path === '/feedbacks' || path.startsWith('/feedbacks/')) return 'Consumer Feedback'
   if (path === '/feature-requests' || path.startsWith('/feature-requests/')) return 'Feature Requests'
@@ -534,7 +535,7 @@ const labelToRoute: Record<string, string> = {
   'Wiki': '/wiki',
   'Releases': '/releases',
   'Testing Cycles': '/test-cycles',
-  'Performance Cycles': '/issues',
+  'Performance Cycles': '/performance-cycles',
   'Consumer Feedback': '/feedbacks',
   'Feature Requests': '/feature-requests',
 }
@@ -551,7 +552,7 @@ const labelToPageKey: Record<string, string> = {
   'Deliveries': 'deliveries',
   'Releases': 'releases',
   'Testing Cycles': 'test-cycles',
-  'Performance Cycles': 'issues',
+  'Performance Cycles': 'performance-cycles',
   'Consumer Feedback': 'feedbacks',
   'Feature Requests': 'feature-requests',
 }
@@ -594,6 +595,9 @@ function handleAddClick(item: NavItem, event: Event) {
     showInviteMemberDialog.value = true
   } else if (item.label === 'Issues') {
     showCreateIssueDialog.value = true
+  } else if (item.label === 'Performance Cycles') {
+    activeItem.value = 'Performance Cycles'
+    router.push('/performance-cycles')
   } else if (item.label === 'Consumer Feedback') {
     activeItem.value = 'Consumer Feedback'
     router.push({ path: '/feedbacks', query: { create: '1' } })

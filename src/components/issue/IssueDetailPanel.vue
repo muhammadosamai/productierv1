@@ -1007,15 +1007,22 @@ const groupedActivities = computed(() => {
             >
               <Maximize2 :size="14" />
             </button>
-            <button
-              class="p-1 rounded-md hover:bg-gray-100 transition-colors"
-              :class="copied ? 'text-green-600 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'"
-              title="Copy link"
-              @click="copyIssueLink(issue.id)"
-            >
-              <Check v-if="copied" :size="14" />
-              <Copy v-else :size="14" />
-            </button>
+            <div class="relative group/copy" @click.stop>
+              <button
+                class="p-1 rounded-md hover:bg-gray-100 transition-colors"
+                :class="copied ? 'text-green-600 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'"
+                :aria-label="copied ? 'Copied link' : 'Copy link'"
+                @click="copyIssueLink(issue.id)"
+              >
+                <Check v-if="copied" :size="14" />
+                <Copy v-else :size="14" />
+              </button>
+              <div
+                class="pointer-events-none absolute top-full right-0 z-[21] mt-1 rounded-md bg-gray-900 px-2 py-1 text-[11px] font-medium text-white opacity-0 translate-y-0.5 transition-all duration-150 whitespace-nowrap group-hover/copy:opacity-100 group-hover/copy:translate-y-0"
+              >
+                {{ copied ? 'Copied!' : 'Copy link' }}
+              </div>
+            </div>
             <button
               class="p-1.5 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
               @click="emit('close')"

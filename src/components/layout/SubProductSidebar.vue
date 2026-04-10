@@ -594,6 +594,12 @@ function handleAddClick(item: NavItem, event: Event) {
     showInviteMemberDialog.value = true
   } else if (item.label === 'Issues') {
     showCreateIssueDialog.value = true
+  } else if (item.label === 'Consumer Feedback') {
+    activeItem.value = 'Consumer Feedback'
+    router.push({ path: '/feedbacks', query: { create: '1' } })
+  } else if (item.label === 'Feature Requests') {
+    activeItem.value = 'Feature Requests'
+    router.push({ path: '/feature-requests', query: { create: '1' } })
   }
 }
 
@@ -950,7 +956,7 @@ function onIssueCreated() {
                 v-if="item.hasAdd"
                 :size="16"
                 class="text-gray-300 hover:text-[#4857FE] transition-colors shrink-0"
-                @click.stop
+                @click.stop="handleAddClick(item, $event)"
               />
             </button>
 

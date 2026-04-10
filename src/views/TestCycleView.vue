@@ -138,9 +138,9 @@ async function deleteIssue(issue: Issue) {
   await fetchCycleIssues(cycle.value.id)
 }
 
-function parsePrefix(title: string) {
+function parsePrefix(title: string): { prefix: string; rest: string } {
   const match = title.match(/^(#\d+)\s+(.*)$/)
-  if (match) return { prefix: match[1], rest: match[2] }
+  if (match) return { prefix: match[1] || '', rest: match[2] || '' }
   return { prefix: '', rest: title }
 }
 

@@ -76,6 +76,7 @@ const router = useRouter()
 const { copied, copyLink } = useCopyLink()
 const backlogStore = useBacklogStore()
 const authStore = useAuthStore()
+const origin = typeof window !== 'undefined' ? window.location.origin : ''
 
 // Active tab
 const activeTab = ref<'description' | 'tasks' | 'issues' | 'comments' | 'activities' | 'attachments'>('description')
@@ -995,7 +996,7 @@ async function deleteComment(comment: UnifiedComment) {
               class="p-1 rounded-md hover:bg-gray-100 transition-colors"
               :class="copied ? 'text-green-600 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'"
               title="Copy link"
-              @click="copyLink(`${window.location.origin}/stories?story=${story.id}`)"
+              @click="copyLink(`${origin}/stories?story=${story.id}`)"
             >
               <Check v-if="copied" :size="14" />
               <Copy v-else :size="14" />

@@ -21,6 +21,7 @@ const emit = defineEmits<{
 
 const deliveriesStore = useDeliveriesStore()
 const { copied, copyLink } = useCopyLink()
+const origin = typeof window !== 'undefined' ? window.location.origin : ''
 
 // Editing state
 const editingField = ref<string | null>(null)
@@ -214,7 +215,7 @@ function progressPercent() {
               class="p-1 rounded-md hover:bg-gray-100 transition-colors"
               :class="copied ? 'text-green-600 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'"
               title="Copy link"
-              @click="copyLink(`${window.location.origin}/deliveries?delivery=${delivery.id}`)"
+              @click="copyLink(`${origin}/deliveries?delivery=${delivery.id}`)"
             >
               <Check v-if="copied" :size="14" />
               <Copy v-else :size="14" />

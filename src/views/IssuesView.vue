@@ -7,7 +7,7 @@ import {
   ArrowUp, ArrowDown, SlidersHorizontal, Clock,
   GripVertical, Check, RotateCcw,
   Signal, FileText, Type, Tag, CalendarClock, Link,
-  Users, User, UserCheck, Hourglass, Archive, RotateCw, X,
+  Users, User, UserCheck, Hourglass, Archive, RotateCw, Trash2, X,
   Shield, AlertTriangle, Zap, Database, Eye, Monitor,
   PencilLine, Wrench, Server, TestTube2,
   Columns3Cog,
@@ -574,6 +574,15 @@ function toggleClosedTab() {
 
 async function reopenIssue(issueId: string) {
   await issuesStore.updateIssue(issueId, { status: 'open' })
+}
+
+async function deleteIssue(issueId: string) {
+  if (!confirm('Delete this issue? This cannot be undone.')) return
+  const ok = await issuesStore.deleteIssue(issueId)
+  if (ok && selectedIssue.value?.id === issueId) {
+    showIssuePanel.value = false
+    selectedIssue.value = null
+  }
 }
 
 // ===== Activity Timeline =====
@@ -1381,6 +1390,13 @@ function formatDate(dateStr: string | null) {
                 @click.stop="reopenIssue(issue.id)"
               >
                 <RotateCw :size="14" />
+              </button>
+              <button
+                class="p-1 rounded-md hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                title="Delete issue"
+                @click.stop="deleteIssue(issue.id)"
+              >
+                <Trash2 :size="14" />
               </button>
             </div>
           </div>

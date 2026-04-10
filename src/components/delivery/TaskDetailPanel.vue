@@ -90,6 +90,7 @@ const editingField = ref<string | null>(null)
 const editTitle = ref('')
 const titleInputRef = ref<HTMLInputElement | null>(null)
 const saving = ref(false)
+const deletingTask = ref(false)
 
 // Dropdown states
 const showStatusDropdown = ref(false)
@@ -337,6 +338,19 @@ async function archiveTask() {
   if (!props.task) return
   await updateTaskField('status', 'archived')
   emit('close')
+}
+
+async function deleteTask() {
+  if (!props.task || deletingTask.value) return
+  if (!confirm('Delete this task? This cannot be undone.')) return
+  deletingTask.value = true
+  try {
+    await backlogStore.deleteTask(props.task.id)
+    emit('updated')
+    emit('close')
+  } finally {
+    deletingTask.value = false
+  }
 }
 
 // Title editing
@@ -1035,6 +1049,15 @@ function onBackdropClick(e: MouseEvent) {
               @click="archiveTask"
             >
               <Archive :size="14" />
+            </button>
+            <button
+              type="button"
+              class="p-1 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors disabled:opacity-40"
+              title="Delete task"
+              :disabled="deletingTask || saving"
+              @click="deleteTask"
+            >
+              <Trash2 :size="14" />
             </button>
             <button
               class="p-1.5 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"

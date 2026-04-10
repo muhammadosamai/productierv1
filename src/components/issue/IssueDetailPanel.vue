@@ -73,6 +73,7 @@ const authStore = useAuthStore()
 const productMembersStore = useProductMembersStore()
 
 const archiving = ref(false)
+const deletingIssue = ref(false)
 
 const isProductIssueAdmin = computed(() => {
   const u = authStore.user
@@ -98,6 +99,21 @@ async function setIssueArchived(archived: boolean) {
     emit('updated')
   } finally {
     archiving.value = false
+  }
+}
+
+async function deleteIssue() {
+  if (!props.issue || deletingIssue.value) return
+  if (!confirm('Delete this issue? This cannot be undone.')) return
+  deletingIssue.value = true
+  try {
+    const ok = await issuesStore.deleteIssue(props.issue.id)
+    if (ok) {
+      emit('updated')
+      emit('close')
+    }
+  } finally {
+    deletingIssue.value = false
   }
 }
 
@@ -1000,6 +1016,16 @@ const groupedActivities = computed(() => {
               @click="setIssueArchived(false)"
             >
               <RotateCcw :size="14" />
+            </button>
+            <button
+              v-if="isProductIssueAdmin"
+              type="button"
+              class="p-1 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-700 transition-colors disabled:opacity-40"
+              title="Delete issue"
+              :disabled="deletingIssue || archiving || saving"
+              @click="deleteIssue"
+            >
+              <Trash2 :size="14" />
             </button>
             <button
               class="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"

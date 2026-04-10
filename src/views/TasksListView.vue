@@ -7,7 +7,7 @@ import {
   ArrowUp, ArrowDown, SlidersHorizontal, Clock,
   GripVertical, Check, RotateCcw,
   Signal, FileText, Type, Tag, CalendarClock, Link,
-  Users, User, UserCheck, ShieldAlert, Hourglass, Archive, RotateCw, X, MessageSquare, Paperclip, ListTree,
+  Users, User, UserCheck, ShieldAlert, Hourglass, Archive, RotateCw, Trash2, X, MessageSquare, Paperclip, ListTree,
   PencilLine, FolderOpen, Palette, Code2, TestTube2, Eye, FlaskConical, Wrench, Rocket,
   Columns3Cog,
 } from 'lucide-vue-next'
@@ -648,6 +648,15 @@ function toggleArchivedTab() {
 
 async function restoreTask(taskId: string) {
   await backlogStore.updateTask(taskId, { status: 'created' })
+}
+
+async function deleteTask(taskId: string) {
+  if (!confirm('Delete this task? This cannot be undone.')) return
+  await backlogStore.deleteTask(taskId)
+  if (selectedTask.value?.id === taskId) {
+    showTaskPanel.value = false
+    selectedTask.value = null
+  }
 }
 
 // ===== Activity Timeline =====
@@ -1885,6 +1894,13 @@ function renderUserAvatar(userId: string | null) {
                 @click.stop="restoreTask(task.id)"
               >
                 <RotateCw :size="14" />
+              </button>
+              <button
+                class="p-1 rounded-md hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                title="Delete task"
+                @click.stop="deleteTask(task.id)"
+              >
+                <Trash2 :size="14" />
               </button>
             </div>
           </div>

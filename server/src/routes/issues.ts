@@ -7,6 +7,13 @@ import { logActivity, computeChanges } from '../lib/logActivity'
 import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
 import { recomputeStoryStatus } from '../lib/storyStatus'
+import {
+  getAllowedIssueStatusStoredValues,
+  mergeIssueFormConfigForProduct,
+  normalizeIssueStatusToCanonicalId,
+  pickDefaultIssueStatus,
+} from '../lib/issueFormConfig'
+import { ensureFormConfigsSchema } from '../lib/ensureFormConfigsSchema'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
@@ -80,10 +87,6 @@ BEGIN
     CREATE TYPE issue_severity AS ENUM ('blocker', 'critical', 'major', 'minor', 'trivial');
   END IF;
 
-  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_status') THEN
-    CREATE TYPE issue_status AS ENUM ('open', 'in_progress', 'resolved', 'closed', 'deferred');
-  END IF;
-
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_priority') THEN
     CREATE TYPE issue_priority AS ENUM ('high', 'medium', 'low');
   END IF;
@@ -118,7 +121,7 @@ CREATE TABLE IF NOT EXISTS issues (
   reproducibility issue_reproducibility,
   severity issue_severity NOT NULL DEFAULT 'minor',
   priority issue_priority NOT NULL DEFAULT 'medium',
-  status issue_status NOT NULL DEFAULT 'open',
+  status varchar(64) NOT NULL DEFAULT 'a64cad55-e8d5-5903-9096-31b2ee5f5b5c',
   assigned_to_user_id uuid,
   reported_by_user_id uuid NOT NULL,
   app_version varchar(50),
@@ -187,6 +190,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS issues_public_id_unique
 
   await db.execute(sql`ALTER TABLE issues ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false;`)
 
+  // Legacy: issues.status was issue_status enum; migrate to varchar for custom statuses.
+  await db.execute(sql`
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'issues' AND column_name = 'status'
+      AND udt_name = 'issue_status'
+  ) THEN
+    ALTER TABLE issues ALTER COLUMN status DROP DEFAULT;
+    ALTER TABLE issues ALTER COLUMN status TYPE varchar(64) USING (status::text);
+    ALTER TABLE issues ALTER COLUMN status SET DEFAULT 'a64cad55-e8d5-5903-9096-31b2ee5f5b5c';
+  END IF;
+END $$;
+`)
+
   issueSchemaBootstrapped = true
 }
 
@@ -210,10 +229,7 @@ const issueBodyShared = {
   priority: t.Optional(t.Union([
     t.Literal('high'), t.Literal('medium'), t.Literal('low'),
   ])),
-  status: t.Optional(t.Union([
-    t.Literal('open'), t.Literal('in_progress'), t.Literal('resolved'),
-    t.Literal('closed'), t.Literal('deferred'),
-  ])),
+  status: t.Optional(t.Nullable(t.String({ maxLength: 64 }))),
   assignedToUserId: t.Optional(t.Nullable(t.String())),
   appVersion: t.Optional(t.Nullable(t.String())),
   environment: t.Optional(t.Nullable(t.Union([
@@ -258,6 +274,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
   .use(jwt({ name: 'jwt', secret: JWT_SECRET }))
   .onBeforeHandle(async () => {
     await ensureIssueSchema()
+    await ensureFormConfigsSchema()
   })
 
   // GET /api/issues?product=X&testCycleId=X&includeArchived=true (admins only, requires product when not super_admin)
@@ -299,6 +316,22 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
     const product = body.product || 'Product'
+    const merged = await mergeIssueFormConfigForProduct(product)
+    const allowedList = getAllowedIssueStatusStoredValues(merged)
+    const allowedSet = new Set(allowedList)
+
+    let statusVal: string
+    if (body.status != null && body.status !== '') {
+      const raw = String(body.status).trim()
+      if (!allowedSet.has(raw)) {
+        set.status = 400
+        return { error: `Invalid status for this product. Allowed: ${allowedList.join(', ')}` }
+      }
+      statusVal = normalizeIssueStatusToCanonicalId(merged, raw) ?? raw
+    } else {
+      statusVal = pickDefaultIssueStatus(merged)
+    }
+
     const assignedToUserId = optionalUuid(body.assignedToUserId)
     const storyId = optionalUuid(body.storyId)
     const taskId = optionalUuid(body.taskId)
@@ -317,7 +350,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       reproducibility: body.reproducibility,
       severity: body.severity || 'minor',
       priority: body.priority || 'medium',
-      status: body.status || 'open',
+      status: statusVal,
       assignedToUserId,
       reportedByUserId: user.id,
       appVersion: body.appVersion,
@@ -419,7 +452,22 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       return { error: 'Only product admins can change archive status' }
     }
 
+    const merged = await mergeIssueFormConfigForProduct(existing.product)
+    const allowedList = getAllowedIssueStatusStoredValues(merged)
+
+    if (body.status !== undefined && body.status !== null) {
+      const raw = String(body.status).trim()
+      if (!allowedList.includes(raw)) {
+        set.status = 400
+        return { error: `Invalid status for this product. Allowed: ${allowedList.join(', ')}` }
+      }
+    }
+
     const updatePayload: Record<string, any> = { ...body }
+    if (body.status !== undefined && body.status !== null) {
+      const raw = String(body.status).trim()
+      updatePayload.status = normalizeIssueStatusToCanonicalId(merged, raw) ?? raw
+    }
     if ('assignedToUserId' in updatePayload) updatePayload.assignedToUserId = optionalUuid(updatePayload.assignedToUserId)
     if ('storyId' in updatePayload) updatePayload.storyId = optionalUuid(updatePayload.storyId)
     if ('taskId' in updatePayload) updatePayload.taskId = optionalUuid(updatePayload.taskId)

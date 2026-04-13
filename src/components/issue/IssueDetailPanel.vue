@@ -29,6 +29,14 @@ import {
 } from '@/utils/allowedAttachments'
 import { toast } from 'vue-sonner'
 import { useCopyLink } from '@/utils/useCopyLink'
+import {
+  mergeIssueFormConfig,
+  getIssueStatusCatalogFromMerged,
+  resolveIssueStatusDisplayLabel,
+  issueStoredStatusMatchesTabId,
+  issueStatusCustomPillStyle,
+} from '@/lib/issueFormConfig'
+import { issueStatusSemanticTone } from '@/lib/issueStatusId'
 
 const router = useRouter()
 const { copied, copyLink } = useCopyLink()
@@ -60,6 +68,8 @@ const props = defineProps<{
   issue: Issue | null
   open: boolean
   teamMembers: TeamUser[]
+  /** Issue form config JSON for this product (for status labels / options). */
+  statusFormConfig?: import('@/types/formConfig').FormConfigJson | null
 }>()
 
 const emit = defineEmits<{
@@ -231,13 +241,20 @@ const typeOptions: { value: IssueType; label: string; icon: any }[] = [
   { value: 'other', label: 'Other', icon: Circle },
 ]
 
-const statusOptions: { value: IssueStatus; label: string }[] = [
-  { value: 'open', label: 'Open' },
-  { value: 'in_progress', label: 'In Progress' },
-  { value: 'resolved', label: 'Resolved' },
-  { value: 'closed', label: 'Closed' },
-  { value: 'deferred', label: 'Deferred' },
-]
+const statusMerged = computed(() => mergeIssueFormConfig(props.statusFormConfig ?? undefined))
+
+const statusCatalog = computed(() => getIssueStatusCatalogFromMerged(statusMerged.value))
+
+const statusOptions = computed(() => {
+  return statusCatalog.value.map(e => ({
+    value: e.id as IssueStatus,
+    label: e.name,
+  }))
+})
+
+function statusOptionLabel(s: string) {
+  return resolveIssueStatusDisplayLabel(statusMerged.value, s)
+}
 
 const severityOptions: { value: IssueSeverity; label: string }[] = [
   { value: 'blocker', label: 'Blocker' },
@@ -817,14 +834,23 @@ function onBackdropClick() {
 // ──── Styling ────
 
 function statusStyle(status: string) {
-  switch (status) {
+  switch (issueStatusSemanticTone(status)) {
     case 'open': return 'bg-[#579bfc] text-white'
     case 'in_progress': return 'bg-[#fdab3d] text-white'
     case 'resolved': return 'bg-[#00c875] text-white'
     case 'closed': return 'bg-gray-400 text-white'
     case 'deferred': return 'bg-[#a25ddc] text-white'
-    default: return 'bg-gray-400 text-white'
+    default: return 'bg-slate-200 text-slate-700 border border-slate-300'
   }
+}
+
+function statusPillToneClass(stored: string) {
+  if (issueStatusCustomPillStyle(statusMerged.value, stored)) return ''
+  return statusStyle(stored)
+}
+
+function statusPillStyleFor(stored: string) {
+  return issueStatusCustomPillStyle(statusMerged.value, stored)
 }
 
 function severityStyle(severity: string) {
@@ -1105,10 +1131,11 @@ const groupedActivities = computed(() => {
                 <div class="relative" @click.stop>
                   <button
                     class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold cursor-pointer hover:opacity-80 transition-opacity"
-                    :class="statusStyle(issue.status)"
+                    :class="statusPillToneClass(issue.status)"
+                    :style="statusPillStyleFor(issue.status)"
                     @click="showStatusDropdown = !showStatusDropdown; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
                   >
-                    {{ label(issue.status) }}
+                    {{ statusOptionLabel(issue.status) }}
                     <ChevronDown :size="12" />
                   </button>
                   <div
@@ -1119,11 +1146,15 @@ const groupedActivities = computed(() => {
                       v-for="opt in statusOptions"
                       :key="opt.value"
                       class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
-                      :class="issue.status === opt.value ? 'text-[#4857FE] font-medium' : 'text-gray-600'"
+                      :class="issueStoredStatusMatchesTabId(issue.status, opt.value, statusCatalog) ? 'text-[#4857FE] font-medium' : 'text-gray-600'"
                       @click="selectStatus(opt.value)"
                     >
-                      <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold" :class="statusStyle(opt.value)">{{ opt.label }}</span>
-                      <Check v-if="issue.status === opt.value" :size="14" class="ml-auto text-[#4857FE]" />
+                      <span
+                        class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
+                        :class="statusPillToneClass(opt.value)"
+                        :style="statusPillStyleFor(opt.value)"
+                      >{{ opt.label }}</span>
+                      <Check v-if="issueStoredStatusMatchesTabId(issue.status, opt.value, statusCatalog)" :size="14" class="ml-auto text-[#4857FE]" />
                     </button>
                   </div>
                 </div>
@@ -1993,14 +2024,16 @@ const groupedActivities = computed(() => {
                                       <span
                                         v-if="change.from"
                                         class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ml-1 align-middle"
-                                        :class="statusStyle(change.from)"
-                                      >{{ activityFormatField(change.from) }}</span>
+                                        :class="statusPillToneClass(change.from)"
+                                        :style="statusPillStyleFor(change.from)"
+                                      >{{ statusOptionLabel(change.from) }}</span>
                                       <span v-if="change.from && change.to" class="text-gray-300 mx-0.5 align-middle">&rarr;</span>
                                       <span
                                         v-if="change.to"
                                         class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold align-middle"
-                                        :class="statusStyle(change.to)"
-                                      >{{ activityFormatField(change.to) }}</span>
+                                        :class="statusPillToneClass(change.to)"
+                                        :style="statusPillStyleFor(change.to)"
+                                      >{{ statusOptionLabel(change.to) }}</span>
                                     </template>
 
                                     <!-- All other fields: from -> to as text badges (skip long text fields) -->

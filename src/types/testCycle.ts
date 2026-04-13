@@ -1,6 +1,6 @@
 export type TestCycleStatus = 'planned' | 'in_progress' | 'completed' | 'archived'
 export type IssueSeverity = 'blocker' | 'critical' | 'major' | 'minor' | 'trivial'
-export type IssueStatus = 'open' | 'in_progress' | 'resolved' | 'closed' | 'deferred'
+export type IssueStatus = string
 
 export interface TestCycleIssue {
   id: string

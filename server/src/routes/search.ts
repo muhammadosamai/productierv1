@@ -1,6 +1,7 @@
 import { Elysia, t } from 'elysia'
 import { jwt } from '@elysiajs/jwt'
 import { and, arrayContains, eq, ilike, inArray, or, sql } from 'drizzle-orm'
+import { issueStatusSearchDbValues } from '../lib/issueStatusId'
 import { db } from '../db'
 import { assets, initiatives, issues, productMembers, products, stories, tasks, users } from '../db/schema'
 
@@ -156,7 +157,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
     // returning all results.
     const storyStatuses      = ['backlog', 'drafted', 'initialized', 'in_progress', 'completed', 'archived']
     const taskStatuses       = ['created', 'assigned', 'in_progress', 'in_review', 'done', 'overdue', 'blocked', 'archived']
-    const issueStatuses      = ['open', 'in_progress', 'resolved', 'closed', 'deferred']
+    // Issue statuses are per-product (form config); issue query uses eq(status) and may return [].
     const initiativeStatuses = ['planning', 'active', 'paused', 'completed']
 
     // Valid type values per entity
@@ -169,7 +170,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
     // that value should return no results — the user explicitly asked for that status.
     const statusAppliesToStory      = !filters.status || storyStatuses.includes(filters.status)
     const statusAppliesToTask       = !filters.status || taskStatuses.includes(filters.status)
-    const statusAppliesToIssue      = !filters.status || issueStatuses.includes(filters.status)
+    const statusAppliesToIssue      = true
     const statusAppliesToInitiative = !filters.status || initiativeStatuses.includes(filters.status)
     // Wiki assets have no meaningful status filter — hide if status token was provided
     const statusAppliesToWiki       = !filters.status
@@ -231,7 +232,10 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
         )
       )
     }
-    if (filters.status) issueConditions.push(eq(issues.status, filters.status as any))
+    if (filters.status) {
+      const variants = issueStatusSearchDbValues(filters.status)
+      if (variants.length > 0) issueConditions.push(inArray(issues.status, variants))
+    }
     if (filters.type) issueConditions.push(eq(issues.type, filters.type as any))
     if (filters.assigneeMe) issueConditions.push(eq(issues.assignedToUserId, user.id))
 

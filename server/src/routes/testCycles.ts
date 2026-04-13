@@ -2,6 +2,13 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { testCycles, testCycleIssues, users } from '../db/schema'
 import { eq, count } from 'drizzle-orm'
+import {
+  getAllowedIssueStatusStoredValues,
+  mergeIssueFormConfigForProduct,
+  normalizeIssueStatusToCanonicalId,
+  pickDefaultIssueStatus,
+} from '../lib/issueFormConfig'
+import { ensureFormConfigsSchema } from '../lib/ensureFormConfigsSchema'
 import { jwt } from '@elysiajs/jwt'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
@@ -24,6 +31,9 @@ async function getUserFromHeader(jwtVerify: any, headers: Record<string, string 
 
 export const testCycleRoutes = new Elysia({ prefix: '/api/test-cycles' })
   .use(jwt({ name: 'jwt', secret: JWT_SECRET }))
+  .onBeforeHandle(async () => {
+    await ensureFormConfigsSchema()
+  })
 
   // GET /api/test-cycles?product=X
   .get('/', async ({ query }) => {
@@ -155,12 +165,33 @@ export const testCycleRoutes = new Elysia({ prefix: '/api/test-cycles' })
     const user = await getUserFromHeader(jwt.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
+    const cycle = await db.query.testCycles.findFirst({
+      where: eq(testCycles.id, id),
+      columns: { id: true, productId: true },
+    })
+    if (!cycle) { set.status = 404; return { error: 'Test cycle not found' } }
+
+    const merged = await mergeIssueFormConfigForProduct(cycle.productId)
+    const allowedList = getAllowedIssueStatusStoredValues(merged)
+    const allowedSet = new Set(allowedList)
+    let statusVal: string
+    if (body.status != null && body.status !== '') {
+      const raw = String(body.status).trim()
+      if (!allowedSet.has(raw)) {
+        set.status = 400
+        return { error: `Invalid status for this product. Allowed: ${allowedList.join(', ')}` }
+      }
+      statusVal = normalizeIssueStatusToCanonicalId(merged, raw) ?? raw
+    } else {
+      statusVal = pickDefaultIssueStatus(merged)
+    }
+
     const [issue] = await db.insert(testCycleIssues).values({
       testCycleId: id,
       title: body.title,
       description: body.description || null,
       severity: body.severity || 'minor',
-      status: body.status || 'open',
+      status: statusVal,
       storyId: body.storyId || null,
       reportedByUserId: user.id,
       assignedToUserId: body.assignedToUserId || null,
@@ -178,9 +209,7 @@ export const testCycleRoutes = new Elysia({ prefix: '/api/test-cycles' })
       severity: t.Optional(t.Union([
         t.Literal('blocker'), t.Literal('critical'), t.Literal('major'), t.Literal('minor'), t.Literal('trivial'),
       ])),
-      status: t.Optional(t.Union([
-        t.Literal('open'), t.Literal('in_progress'), t.Literal('resolved'), t.Literal('closed'), t.Literal('deferred'),
-      ])),
+      status: t.Optional(t.Nullable(t.String({ maxLength: 64 }))),
       storyId: t.Optional(t.Nullable(t.String())),
       assignedToUserId: t.Optional(t.Nullable(t.String())),
     }),
@@ -191,8 +220,31 @@ export const testCycleRoutes = new Elysia({ prefix: '/api/test-cycles' })
     const existing = await db.query.testCycleIssues.findFirst({ where: eq(testCycleIssues.id, params.issueId) })
     if (!existing) { set.status = 404; return { error: 'Issue not found' } }
 
+    const cycle = await db.query.testCycles.findFirst({
+      where: eq(testCycles.id, existing.testCycleId),
+      columns: { productId: true },
+    })
+    const productId = cycle?.productId ?? ''
+
+    const merged = await mergeIssueFormConfigForProduct(productId)
+    const allowedList = getAllowedIssueStatusStoredValues(merged)
+
+    if (body.status !== undefined && body.status !== null) {
+      const raw = String(body.status).trim()
+      if (!allowedList.includes(raw)) {
+        set.status = 400
+        return { error: `Invalid status for this product. Allowed: ${allowedList.join(', ')}` }
+      }
+    }
+
+    const bodyNorm = { ...body } as Record<string, unknown>
+    if (body.status !== undefined && body.status !== null) {
+      const raw = String(body.status).trim()
+      bodyNorm.status = normalizeIssueStatusToCanonicalId(merged, raw) ?? raw
+    }
+
     const [updated] = await db.update(testCycleIssues)
-      .set({ ...body, updatedAt: new Date() })
+      .set({ ...bodyNorm, updatedAt: new Date() })
       .where(eq(testCycleIssues.id, params.issueId))
       .returning()
 
@@ -208,9 +260,7 @@ export const testCycleRoutes = new Elysia({ prefix: '/api/test-cycles' })
       severity: t.Union([
         t.Literal('blocker'), t.Literal('critical'), t.Literal('major'), t.Literal('minor'), t.Literal('trivial'),
       ]),
-      status: t.Union([
-        t.Literal('open'), t.Literal('in_progress'), t.Literal('resolved'), t.Literal('closed'), t.Literal('deferred'),
-      ]),
+      status: t.String({ maxLength: 64 }),
       storyId: t.Nullable(t.String()),
       assignedToUserId: t.Nullable(t.String()),
     })),

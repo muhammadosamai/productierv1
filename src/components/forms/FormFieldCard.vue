@@ -8,10 +8,11 @@ import {
   Pencil,
   Trash2,
 } from 'lucide-vue-next'
-import type { FormFieldConfig, FieldType } from '@/types/formConfig'
+import type { FormFieldConfig, FieldType, EntityType } from '@/types/formConfig'
 
 const props = defineProps<{
   field: FormFieldConfig
+  entityType?: EntityType
 }>()
 
 const emit = defineEmits<{
@@ -24,6 +25,13 @@ const emit = defineEmits<{
 
 const isEditingLabel = ref(false)
 const editLabelValue = ref('')
+
+const showEditBuiltInStatus = computed(
+  () =>
+    props.field.isBuiltIn &&
+    props.field.key === 'status' &&
+    props.entityType === 'issue',
+)
 
 const typeBadge = computed(() => {
   const map: Record<FieldType, { label: string; classes: string }> = {
@@ -139,9 +147,9 @@ function cancelEditLabel() {
         <Asterisk :size="16" />
       </button>
 
-      <!-- Edit button (custom fields only) -->
+      <!-- Edit button (custom fields, or built-in issue status options) -->
       <button
-        v-if="!field.isBuiltIn"
+        v-if="!field.isBuiltIn || showEditBuiltInStatus"
         class="p-1.5 rounded-lg text-gray-400 hover:text-[#7C5CFC] hover:bg-[#7C5CFC]/10 transition-colors"
         title="Edit field"
         @click="emit('edit')"

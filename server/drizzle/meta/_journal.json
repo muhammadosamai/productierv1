@@ -78,6 +78,20 @@
       "when": 2000000000001,
       "tag": "0010_initiative_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 2000000000002,
+      "tag": "0011_issue_status_varchar",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 2000000000003,
+      "tag": "0012_issue_status_canonical_ids",
+      "breakpoints": true
     }
   ]
 }

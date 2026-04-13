@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft, Loader2, Plus, FlaskConical,
-  CalendarDays, Link2, Trash2, X, MoreHorizontal, Pencil, Check,
-  LayoutList, Search,
+  CalendarDays, Link2, Trash2, X, Pencil, Check,
+  LayoutList, ChevronDown, User,
 } from 'lucide-vue-next'
 import { useTestCyclesStore } from '@/stores/testCycles'
 import { useBacklogStore } from '@/stores/backlog'
@@ -27,8 +27,9 @@ import {
 } from '@/lib/issueStatusId'
 import draggable from 'vuedraggable'
 import type { TestCycle, IssueSeverity, IssueStatus } from '@/types/testCycle'
-import type { Issue } from '@/types/issue'
+import type { Issue, CreateIssuePayload } from '@/types/issue'
 import { toast } from 'vue-sonner'
+import IssueDetailPanel from '@/components/issue/IssueDetailPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,6 +44,17 @@ const cycle = ref<TestCycle | null>(null)
 const loading = ref(true)
 const activeView = ref<'kanban' | 'list'>('kanban')
 const cycleIssues = ref<Issue[]>([])
+
+const selectedIssue = ref<Issue | null>(null)
+const showIssuePanel = ref(false)
+/** After a kanban drag ends, ignore card clicks briefly so drops do not open the detail panel. */
+const suppressIssueCardClickUntil = ref(0)
+
+const issueStatusFormConfigRaw = computed(() => {
+  const pid = cycle.value?.productId
+  if (!pid) return null
+  return formConfigsStore.getConfig(pid, 'issue')
+})
 const editingField = ref<string | null>(null)
 const editTitle = ref('')
 const savingTitle = ref(false)
@@ -53,6 +65,78 @@ const showAddIssue = ref(false)
 const issueTitle = ref('')
 const issueSeverity = ref<IssueSeverity>('minor')
 const addingIssue = ref(false)
+
+interface TeamUser {
+  id: string
+  name: string
+  email: string
+  avatar: string | null
+}
+
+const teamMembers = ref<TeamUser[]>([])
+/** Selected assignee for “Report issue” (same pattern as Issues table inline assignee). */
+const reportIssueAssignee = ref<TeamUser | null>(null)
+const reportAssigneeMenuOpen = ref(false)
+const reportAssigneeSearch = ref('')
+
+const filteredReportAssignees = computed(() => {
+  const q = reportAssigneeSearch.value.toLowerCase().trim()
+  if (!q) return teamMembers.value
+  return teamMembers.value.filter(
+    m => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q),
+  )
+})
+
+function onReportAssigneeClickOutside(event: MouseEvent) {
+  const target = event.target as HTMLElement
+  if (!target.closest('.report-assignee-picker')) {
+    reportAssigneeMenuOpen.value = false
+  }
+}
+
+watch(reportAssigneeMenuOpen, (open) => {
+  if (open) {
+    setTimeout(() => document.addEventListener('click', onReportAssigneeClickOutside), 0)
+  } else {
+    document.removeEventListener('click', onReportAssigneeClickOutside)
+    reportAssigneeSearch.value = ''
+  }
+})
+
+function selectReportAssignee(member: TeamUser) {
+  reportIssueAssignee.value = member
+  reportAssigneeMenuOpen.value = false
+}
+
+function clearReportAssignee() {
+  reportIssueAssignee.value = null
+  reportAssigneeMenuOpen.value = false
+}
+
+async function fetchTeamMembersForIssueForm() {
+  if (!authStore.token) return
+  try {
+    const res = await fetch('/api/auth/users?q=', {
+      headers: { Authorization: `Bearer ${authStore.token}` },
+    })
+    if (res.ok) teamMembers.value = await res.json()
+    else teamMembers.value = []
+  } catch {
+    teamMembers.value = []
+  }
+}
+
+watch(showAddIssue, (open) => {
+  if (open) {
+    fetchTeamMembersForIssueForm()
+    reportAssigneeMenuOpen.value = false
+    reportAssigneeSearch.value = ''
+  }
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onReportAssigneeClickOutside)
+})
 
 // Kanban columns
 interface ColumnMeta {
@@ -136,46 +220,133 @@ async function onColumnChange(colKey: string, evt: any) {
   if (issueStoredStatusMatchesTabId(issue.status, newStatus, issueStatusCatalog.value)) return
   await issuesStore.updateIssue(issue.id, { status: newStatus })
   await fetchCycleIssues(cycle.value.id)
+  if (selectedIssue.value?.id === issue.id) {
+    const fresh = cycleIssues.value.find(i => i.id === issue.id)
+    if (fresh) selectedIssue.value = fresh
+  }
+}
+
+/** Load or reload the current test cycle when the route id changes (same component instance is reused between cycles). */
+async function loadCyclePage(cycleId: string) {
+  if (!cycleId) return
+  loading.value = true
+  closeIssueDetailPanel()
+  closeAddIssueForm()
+  try {
+    if (productStore.activeProduct) {
+      await backlogStore.fetchStories(productStore.activeProduct.name)
+    }
+    const data = await store.fetchCycle(cycleId)
+    cycle.value = data
+    if (data?.productId) await formConfigsStore.fetchConfig(data.productId, 'issue')
+    await fetchCycleIssues(cycleId)
+    await fetchTeamMembersForIssueForm()
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(async () => {
-  if (productStore.activeProduct) {
-    backlogStore.fetchStories(productStore.activeProduct.name)
-  }
-  const id = route.params.id as string
-  const data = await store.fetchCycle(id)
-  cycle.value = data
-  if (data?.productId) await formConfigsStore.fetchConfig(data.productId, 'issue')
-  await fetchCycleIssues(id)
-  loading.value = false
+  await loadCyclePage(route.params.id as string)
 })
+
+watch(
+  () => route.params.id as string | undefined,
+  async (newId, oldId) => {
+    if (!newId || newId === oldId) return
+    await loadCyclePage(newId)
+  },
+)
 
 async function addIssue() {
   if (!issueTitle.value.trim() || !cycle.value) return
   addingIssue.value = true
-  await issuesStore.createIssue({
-    title: issueTitle.value.trim(),
-    severity: issueSeverity.value || 'minor',
-    product: productStore.activeProduct?.name || '',
-    testCycleId: cycle.value.id,
-  })
-  await fetchCycleIssues(cycle.value.id)
-  issueTitle.value = ''
-  issueSeverity.value = 'minor'
+  try {
+    const payload: CreateIssuePayload = {
+      title: issueTitle.value.trim(),
+      severity: issueSeverity.value || 'minor',
+      product: cycle.value.productId || productStore.activeProduct?.name || '',
+      testCycleId: cycle.value.id,
+    }
+    const assigneeId = reportIssueAssignee.value?.id
+    if (assigneeId) payload.assignedToUserId = assigneeId
+    const created = await issuesStore.createIssue(payload)
+    if (!created) {
+      toast.error('Could not create the issue. Please try again.')
+      return
+    }
+    await fetchCycleIssues(cycle.value.id)
+    issueTitle.value = ''
+    issueSeverity.value = 'minor'
+    reportIssueAssignee.value = null
+    reportAssigneeMenuOpen.value = false
+    reportAssigneeSearch.value = ''
+    showAddIssue.value = false
+  } finally {
+    addingIssue.value = false
+  }
+}
+
+function closeAddIssueForm() {
   showAddIssue.value = false
-  addingIssue.value = false
+  reportIssueAssignee.value = null
+  reportAssigneeMenuOpen.value = false
+  reportAssigneeSearch.value = ''
 }
 
 async function updateIssueStatus(issue: Issue, status: IssueStatus) {
   if (!cycle.value) return
   await issuesStore.updateIssue(issue.id, { status })
   await fetchCycleIssues(cycle.value.id)
+  if (selectedIssue.value?.id === issue.id) {
+    const fresh = cycleIssues.value.find(i => i.id === issue.id)
+    if (fresh) selectedIssue.value = fresh
+  }
 }
 
 async function deleteIssue(issue: Issue) {
   if (!cycle.value) return
   await issuesStore.deleteIssue(issue.id)
   await fetchCycleIssues(cycle.value.id)
+  if (selectedIssue.value?.id === issue.id) closeIssueDetailPanel()
+}
+
+function closeIssueDetailPanel() {
+  showIssuePanel.value = false
+  selectedIssue.value = null
+}
+
+function onKanbanDragEnd() {
+  isDragging.value = false
+  suppressIssueCardClickUntil.value = Date.now() + 200
+}
+
+async function openIssueDetailFromCycle(issue: Issue) {
+  if (Date.now() < suppressIssueCardClickUntil.value) return
+  selectedIssue.value = issue
+  showIssuePanel.value = true
+  try {
+    if (!authStore.token) return
+    const res = await fetch(`/api/issues/${issue.id}`, {
+      headers: { Authorization: `Bearer ${authStore.token}` },
+    })
+    if (res.ok) {
+      const full = await res.json() as Issue
+      if (selectedIssue.value?.id === full.id) selectedIssue.value = full
+    }
+  } catch {
+    /* keep list payload */
+  }
+}
+
+async function onIssueDetailUpdated() {
+  if (!cycle.value) return
+  await fetchCycleIssues(cycle.value.id)
+  if (selectedIssue.value) {
+    const fresh = cycleIssues.value.find(i => i.id === selectedIssue.value!.id)
+    if (fresh) selectedIssue.value = fresh
+    else closeIssueDetailPanel()
+  }
 }
 
 function parsePrefix(title: string): { prefix: string; rest: string } {
@@ -398,23 +569,89 @@ const resolvedIssues = computed(
       <div v-if="showAddIssue" class="px-8 py-4 bg-white border-b border-gray-100">
         <div class="flex items-center justify-between mb-3">
           <h3 class="text-sm font-semibold text-gray-900">Report Issue</h3>
-          <button class="text-gray-400 hover:text-gray-600 cursor-pointer" @click="showAddIssue = false"><X :size="16" /></button>
+          <button type="button" class="text-gray-400 hover:text-gray-600 cursor-pointer" @click="closeAddIssueForm"><X :size="16" /></button>
         </div>
-        <form @submit.prevent="addIssue" class="flex items-center gap-3">
+        <form @submit.prevent="addIssue" class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           <input
             v-model="issueTitle"
             placeholder="Issue title..."
             autofocus
-            class="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#4857FE] placeholder-gray-400"
+            class="flex-1 min-w-[200px] text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#4857FE] placeholder-gray-400"
           />
-          <select v-model="issueSeverity" class="text-xs border border-gray-200 rounded-lg px-2 py-2 outline-none focus:border-[#4857FE] bg-white">
+          <select v-model="issueSeverity" class="text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#4857FE] bg-white shrink-0 w-full sm:w-auto">
             <option value="trivial">Trivial</option>
             <option value="minor">Minor</option>
             <option value="major">Major</option>
             <option value="critical">Critical</option>
             <option value="blocker">Blocker</option>
           </select>
-          <button type="submit" :disabled="!issueTitle.trim() || addingIssue" class="text-sm font-medium text-white bg-[#4857FE] hover:bg-[#3E4BDE] px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50">
+          <div class="relative report-assignee-picker w-full sm:w-auto sm:min-w-[240px] shrink-0">
+            <button
+              type="button"
+              class="flex w-full items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-sm outline-none transition-colors hover:border-gray-300 focus:border-[#4857FE] focus:ring-1 focus:ring-[#4857FE]/20"
+              @click.stop="reportAssigneeMenuOpen = !reportAssigneeMenuOpen"
+            >
+              <template v-if="reportIssueAssignee">
+                <div class="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#7C5CFC] text-[10px] font-bold text-white">
+                  <UploadAssetImg
+                    v-if="reportIssueAssignee.avatar"
+                    :src="reportIssueAssignee.avatar"
+                    class="h-7 w-7 rounded-full object-cover"
+                  />
+                  <span v-else>{{ reportIssueAssignee.name[0] }}</span>
+                </div>
+                <span class="min-w-0 flex-1 truncate text-gray-800">{{ reportIssueAssignee.name }}</span>
+              </template>
+              <template v-else>
+                <User :size="16" class="shrink-0 text-gray-400" />
+                <span class="flex-1 text-gray-500">Assign to…</span>
+              </template>
+              <ChevronDown :size="14" class="shrink-0 text-gray-400" />
+            </button>
+            <div
+              v-if="reportAssigneeMenuOpen"
+              class="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl sm:right-auto sm:w-[260px]"
+              @click.stop
+            >
+              <div class="border-b border-gray-100 p-2">
+                <input
+                  v-model="reportAssigneeSearch"
+                  type="text"
+                  class="inline-edit-input w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-[#4857FE] focus:ring-1 focus:ring-[#4857FE]/20"
+                  placeholder="Search members..."
+                  @click.stop
+                />
+              </div>
+              <div class="max-h-[220px] overflow-y-auto py-1">
+                <button
+                  type="button"
+                  class="w-full cursor-pointer px-3 py-2 text-left text-sm text-gray-400 hover:bg-gray-50"
+                  @click.stop="clearReportAssignee"
+                >
+                  Unassign
+                </button>
+                <button
+                  v-for="member in filteredReportAssignees"
+                  :key="member.id"
+                  type="button"
+                  class="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50"
+                  :class="reportIssueAssignee?.id === member.id ? 'bg-[#4857FE]/5' : ''"
+                  @click.stop="selectReportAssignee(member)"
+                >
+                  <div class="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#7C5CFC] text-[9px] font-bold text-white">
+                    <UploadAssetImg
+                      v-if="member.avatar"
+                      :src="member.avatar"
+                      class="h-6 w-6 rounded-full object-cover"
+                    />
+                    <span v-else>{{ member.name[0] }}</span>
+                  </div>
+                  <span class="min-w-0 flex-1 truncate text-gray-800">{{ member.name }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <button type="submit" :disabled="!issueTitle.trim() || addingIssue" class="text-sm font-medium text-white bg-[#4857FE] hover:bg-[#3E4BDE] px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50 shrink-0 w-full sm:w-auto">
             {{ addingIssue ? 'Adding...' : 'Add Issue' }}
           </button>
         </form>
@@ -461,11 +698,14 @@ const resolvedIssues = computed(
                 drag-class="kanban-drag"
                 class="space-y-3 h-full min-h-[200px]"
                 @start="isDragging = true"
-                @end="isDragging = false"
+                @end="onKanbanDragEnd"
                 @change="(evt: any) => onColumnChange(col.key, evt)"
               >
                 <template #item="{ element: issue }">
-                  <div class="bg-white rounded-xl border border-gray-200/80 hover:shadow-md hover:border-gray-300 transition-all duration-200 group/card relative cursor-grab active:cursor-grabbing p-3.5">
+                  <div
+                    class="bg-white rounded-xl border border-gray-200/80 hover:shadow-md hover:border-gray-300 transition-all duration-200 group/card relative cursor-grab active:cursor-grabbing p-3.5"
+                    @click="openIssueDetailFromCycle(issue)"
+                  >
                     <!-- Severity badge -->
                     <div class="flex items-center justify-between mb-2">
                       <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold" :class="severityStyle(issue.severity)">
@@ -487,14 +727,22 @@ const resolvedIssues = computed(
                       <span class="text-[10px] text-[#4857FE] bg-[#4857FE]/8 px-1.5 py-0.5 rounded truncate inline-block max-w-full">{{ issue.storyId }}</span>
                     </div>
 
-                    <!-- Footer: reporter + date -->
-                    <div class="flex items-center justify-between pt-2 border-t border-gray-100">
-                      <div v-if="issue.reportedBy" class="flex items-center gap-1.5">
-                        <UploadAssetImg v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-5 h-5 rounded-full object-cover" />
-                        <div v-else class="w-5 h-5 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[8px] font-semibold text-[#4857FE]">{{ issue.reportedBy.name[0] }}</div>
-                        <span class="text-[10px] text-gray-500">{{ issue.reportedBy.name.split(' ')[0] }}</span>
+                    <!-- Footer: assignee + reporter + date -->
+                    <div class="flex items-center justify-between gap-2 pt-2 border-t border-gray-100 min-w-0">
+                      <div class="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
+                        <div v-if="issue.assignedTo" class="flex items-center gap-1 min-w-0" title="Assignee">
+                          <UploadAssetImg v-if="issue.assignedTo.avatar" :src="issue.assignedTo.avatar" class="w-5 h-5 rounded-full object-cover shrink-0" />
+                          <div v-else class="w-5 h-5 rounded-full bg-emerald-500/15 flex items-center justify-center text-[8px] font-semibold text-emerald-700 shrink-0">{{ issue.assignedTo.name[0] }}</div>
+                          <span class="text-[10px] text-gray-600 truncate">{{ issue.assignedTo.name.split(' ')[0] }}</span>
+                        </div>
+                        <div v-if="issue.reportedBy" class="flex items-center gap-1.5 min-w-0">
+                          <UploadAssetImg v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-5 h-5 rounded-full object-cover shrink-0" />
+                          <div v-else class="w-5 h-5 rounded-full bg-[#4857FE]/10 flex items-center justify-center text-[8px] font-semibold text-[#4857FE] shrink-0">{{ issue.reportedBy.name[0] }}</div>
+                          <span class="text-[10px] text-gray-500 truncate">{{ issue.reportedBy.name.split(' ')[0] }}</span>
+                        </div>
+                        <span v-if="!issue.assignedTo && !issue.reportedBy" class="text-[10px] text-gray-400">—</span>
                       </div>
-                      <span class="text-[10px] text-gray-400">{{ formatDate(issue.createdAt) }}</span>
+                      <span class="text-[10px] text-gray-400 shrink-0">{{ formatDate(issue.createdAt) }}</span>
                     </div>
                   </div>
                 </template>
@@ -521,6 +769,7 @@ const resolvedIssues = computed(
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Issue</th>
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Severity</th>
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned</th>
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Reported By</th>
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Story</th>
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
@@ -531,7 +780,8 @@ const resolvedIssues = computed(
               <tr
                 v-for="issue in cycleIssues"
                 :key="issue.id"
-                class="border-b border-gray-50 hover:bg-gray-50/50 transition-colors group"
+                class="border-b border-gray-50 hover:bg-gray-50/50 transition-colors group cursor-pointer"
+                @click="openIssueDetailFromCycle(issue)"
               >
                 <td class="px-5 py-3.5">
                   <span class="text-sm font-medium text-gray-900">{{ issue.title }}</span>
@@ -541,7 +791,7 @@ const resolvedIssues = computed(
                     {{ issue.severity.charAt(0).toUpperCase() + issue.severity.slice(1) }}
                   </span>
                 </td>
-                <td class="px-5 py-3.5">
+                <td class="px-5 py-3.5" @click.stop>
                   <select
                     :value="issue.status"
                     class="text-xs font-medium rounded-full px-2.5 py-1 outline-none cursor-pointer border-0 appearance-none"
@@ -551,6 +801,14 @@ const resolvedIssues = computed(
                   >
                     <option v-for="s in issueStatuses" :key="s" :value="s">{{ statusLabel(s) }}</option>
                   </select>
+                </td>
+                <td class="px-5 py-3.5">
+                  <div v-if="issue.assignedTo" class="flex items-center gap-2 min-w-0">
+                    <UploadAssetImg v-if="issue.assignedTo.avatar" :src="issue.assignedTo.avatar" class="w-5 h-5 rounded-full object-cover shrink-0" />
+                    <div v-else class="w-5 h-5 rounded-full bg-emerald-500/15 flex items-center justify-center text-[8px] font-semibold text-emerald-700 shrink-0">{{ issue.assignedTo.name[0] }}</div>
+                    <span class="text-sm text-gray-600 truncate">{{ issue.assignedTo.name }}</span>
+                  </div>
+                  <span v-else class="text-sm text-gray-400">—</span>
                 </td>
                 <td class="px-5 py-3.5">
                   <div v-if="issue.reportedBy" class="flex items-center gap-2">
@@ -566,8 +824,9 @@ const resolvedIssues = computed(
                 <td class="px-5 py-3.5">
                   <span class="text-sm text-gray-500">{{ formatDate(issue.createdAt) }}</span>
                 </td>
-                <td class="px-5 py-3.5">
+                <td class="px-5 py-3.5" @click.stop>
                   <button
+                    type="button"
                     class="p-1 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
                     @click="deleteIssue(issue)"
                   >
@@ -580,6 +839,15 @@ const resolvedIssues = computed(
         </div>
       </div>
     </template>
+
+    <IssueDetailPanel
+      :issue="selectedIssue"
+      :open="showIssuePanel"
+      :team-members="teamMembers"
+      :status-form-config="issueStatusFormConfigRaw"
+      @close="closeIssueDetailPanel"
+      @updated="onIssueDetailUpdated"
+    />
   </div>
 </template>
 

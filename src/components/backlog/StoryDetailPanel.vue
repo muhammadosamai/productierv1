@@ -42,6 +42,9 @@ import {
 } from '@/utils/allowedAttachments'
 import { toast } from 'vue-sonner'
 import { useCopyLink } from '@/utils/useCopyLink'
+import { useFormConfigsStore } from '@/stores/formConfigs'
+import { mergeIssueFormConfig, resolveIssueStatusDisplayLabel, issueStatusCustomPillStyle } from '@/lib/issueFormConfig'
+import { issueStatusSemanticTone } from '@/lib/issueStatusId'
 
 interface TeamUser {
   id: string
@@ -76,6 +79,22 @@ const router = useRouter()
 const { copied, copyLink } = useCopyLink()
 const backlogStore = useBacklogStore()
 const authStore = useAuthStore()
+const formConfigsStore = useFormConfigsStore()
+
+const issueStatusMerged = computed(() => {
+  const p = props.story?.product
+  if (!p) return mergeIssueFormConfig(undefined)
+  return mergeIssueFormConfig(formConfigsStore.getConfig(p, 'issue') ?? undefined)
+})
+
+watch(
+  () => [props.open, props.story?.product] as const,
+  async ([open, product]) => {
+    if (open && product) await formConfigsStore.fetchConfig(product, 'issue')
+  },
+  { immediate: true },
+)
+
 const origin = typeof window !== 'undefined' ? window.location.origin : ''
 
 // Active tab
@@ -775,11 +794,11 @@ function issueTypeLabel(type: string) {
 }
 
 function issueStatusLabel(status: string) {
-  return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return resolveIssueStatusDisplayLabel(issueStatusMerged.value, status)
 }
 
 function issueStatusStyle(status: string) {
-  switch (status) {
+  switch (issueStatusSemanticTone(status)) {
     case 'open': return 'text-blue-600 bg-blue-50'
     case 'in_progress': return 'text-orange-600 bg-orange-50'
     case 'resolved': return 'text-green-600 bg-green-50'
@@ -787,6 +806,17 @@ function issueStatusStyle(status: string) {
     case 'deferred': return 'text-purple-600 bg-purple-50'
     default: return 'text-gray-600 bg-gray-50'
   }
+}
+
+function linkedIssueStatusClass(status: string) {
+  if (issueStatusCustomPillStyle(issueStatusMerged.value, status)) {
+    return 'text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0'
+  }
+  return `text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0 ${issueStatusStyle(status)}`
+}
+
+function linkedIssueStatusStyle(status: string) {
+  return issueStatusCustomPillStyle(issueStatusMerged.value, status)
 }
 
 async function loadStoryIssues(storyId: string) {
@@ -1508,8 +1538,9 @@ async function deleteComment(comment: UnifiedComment) {
                       <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0 bg-red-50 text-red-500">{{ issueTypeLabel(issue.type) }}</span>
                       <!-- Status -->
                       <span
-                        class="text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0"
-                        :class="issueStatusStyle(issue.status)"
+                        class="shrink-0"
+                        :class="linkedIssueStatusClass(issue.status)"
+                        :style="linkedIssueStatusStyle(issue.status)"
                       >{{ issueStatusLabel(issue.status) }}</span>
                       <!-- Unlink button -->
                       <button

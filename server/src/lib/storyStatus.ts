@@ -1,6 +1,26 @@
 import { db } from '../db'
 import { stories, tasks, issues } from '../db/schema'
 import { eq } from 'drizzle-orm'
+import {
+  ISSUE_STATUS_ID_CLOSED,
+  ISSUE_STATUS_ID_IN_PROGRESS,
+  ISSUE_STATUS_ID_RESOLVED,
+} from './issueStatusId'
+
+function issueStatusMeansDone(status: string) {
+  const s = status.trim()
+  return (
+    s === ISSUE_STATUS_ID_RESOLVED ||
+    s === ISSUE_STATUS_ID_CLOSED ||
+    s === 'resolved' ||
+    s === 'closed'
+  )
+}
+
+function issueStatusMeansInProgress(status: string) {
+  const s = status.trim()
+  return s === ISSUE_STATUS_ID_IN_PROGRESS || s === 'in_progress'
+}
 
 /**
  * Auto-recomputes a story's status based on its child tasks AND linked issues.
@@ -37,13 +57,14 @@ export async function recomputeStoryStatus(storyId: string) {
     newStatus = 'backlog'
   } else {
     const allTasksDone = taskList.length === 0 || taskList.every(t => t.status === 'done' || t.status === 'archived')
-    const allIssuesDone = issueList.length === 0 || issueList.every(i => i.status === 'resolved' || i.status === 'closed')
+    const allIssuesDone =
+      issueList.length === 0 || issueList.every(i => issueStatusMeansDone(i.status))
 
     const anyTaskInProgress = taskList.some(t => t.status === 'in_progress' || t.status === 'in_review')
-    const anyIssueInProgress = issueList.some(i => i.status === 'in_progress')
+    const anyIssueInProgress = issueList.some(i => issueStatusMeansInProgress(i.status))
 
     const anyTaskAssigned = taskList.some(t =>
-      t.ownerUserId || (t.assigneeUserIds && t.assigneeUserIds.length > 0)
+      t.ownerUserId || (t.assigneeUserIds && t.assigneeUserIds.length > 0),
     )
 
     if (allTasksDone && allIssuesDone) {

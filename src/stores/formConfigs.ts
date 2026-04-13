@@ -26,7 +26,11 @@ export const useFormConfigsStore = defineStore('formConfigs', () => {
     return null
   }
 
-  async function saveConfig(product: string, entityType: string, config: FormConfigJson): Promise<boolean> {
+  async function saveConfig(
+    product: string,
+    entityType: string,
+    config: FormConfigJson,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
     const authStore = useAuthStore()
     try {
       const res = await fetch(`/api/form-configs/${encodeURIComponent(product)}/${entityType}`, {
@@ -39,10 +43,19 @@ export const useFormConfigsStore = defineStore('formConfigs', () => {
       })
       if (res.ok) {
         configs.value[cacheKey(product, entityType)] = config
-        return true
+        return { ok: true }
       }
-    } catch {}
-    return false
+      const body = (await res.json().catch(() => ({}))) as { error?: string }
+      return {
+        ok: false,
+        error: body.error || `Save failed (${res.status})`,
+      }
+    } catch (e) {
+      return {
+        ok: false,
+        error: e instanceof Error ? e.message : 'Network error',
+      }
+    }
   }
 
   function getConfig(product: string, entityType: string): FormConfigJson | null {

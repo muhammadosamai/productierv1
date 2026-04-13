@@ -11,6 +11,20 @@ import { useBacklogStore } from '@/stores/backlog'
 import { useAuthStore } from '@/stores/auth'
 import { useProductStore } from '@/stores/products'
 import { useIssuesStore } from '@/stores/issues'
+import { useFormConfigsStore } from '@/stores/formConfigs'
+import {
+  mergeIssueFormConfig,
+  getIssueStatusCatalogFromMerged,
+  resolveIssueStatusDisplayLabel,
+  issueStoredStatusMatchesTabId,
+  issueStatusCustomPillStyle,
+} from '@/lib/issueFormConfig'
+import { normalizeIssueStatusHexColor } from '@/lib/issueStatusColors'
+import {
+  ISSUE_STATUS_ID_OPEN,
+  ISSUE_STATUS_ID_IN_PROGRESS,
+  issueStatusSemanticTone,
+} from '@/lib/issueStatusId'
 import draggable from 'vuedraggable'
 import type { TestCycle, IssueSeverity, IssueStatus } from '@/types/testCycle'
 import type { Issue } from '@/types/issue'
@@ -23,6 +37,7 @@ const backlogStore = useBacklogStore()
 const authStore = useAuthStore()
 const productStore = useProductStore()
 const issuesStore = useIssuesStore()
+const formConfigsStore = useFormConfigsStore()
 
 const cycle = ref<TestCycle | null>(null)
 const loading = ref(true)
@@ -48,34 +63,57 @@ interface ColumnMeta {
   hasAdd?: boolean
 }
 
-const columnDefs: ColumnMeta[] = [
-  { key: 'open', label: 'Open', color: '#e2445c', statuses: ['open'], hasAdd: true },
-  { key: 'in_progress', label: 'In Progress', color: '#fdab3d', statuses: ['in_progress'], hasAdd: true },
-  { key: 'resolved', label: 'Resolved', color: '#00c875', statuses: ['resolved'] },
-  { key: 'closed', label: 'Closed', color: '#c4c4c4', statuses: ['closed'] },
-  { key: 'deferred', label: 'Deferred', color: '#a25ddc', statuses: ['deferred'] },
-]
-
-const columnIssues = ref<Record<string, Issue[]>>({
-  open: [],
-  in_progress: [],
-  resolved: [],
-  closed: [],
-  deferred: [],
+const issueStatusFormMerged = computed(() => {
+  const pid = cycle.value?.productId
+  const cfg = pid ? formConfigsStore.getConfig(pid, 'issue') : null
+  return mergeIssueFormConfig(cfg ?? undefined)
 })
+
+const issueStatusCatalog = computed(() => getIssueStatusCatalogFromMerged(issueStatusFormMerged.value))
+
+const issueStatusTabs = computed(() => issueStatusCatalog.value.map(e => e.id))
+
+function issueColumnColor(s: string): string {
+  const e = issueStatusCatalog.value.find(x => x.id === s)
+  const fromCatalog = e?.color ? normalizeIssueStatusHexColor(e.color) : undefined
+  if (fromCatalog) return fromCatalog
+  const map: Record<string, string> = {
+    open: '#e2445c',
+    in_progress: '#fdab3d',
+    resolved: '#00c875',
+    closed: '#c4c4c4',
+    deferred: '#a25ddc',
+  }
+  return map[issueStatusSemanticTone(s)] ?? '#94a3b8'
+}
+
+const columnDefs = computed<ColumnMeta[]>(() =>
+  issueStatusTabs.value.map(s => ({
+    key: s,
+    label: statusLabel(s),
+    color: issueColumnColor(s),
+    statuses: [s],
+    hasAdd: s === ISSUE_STATUS_ID_OPEN || s === ISSUE_STATUS_ID_IN_PROGRESS,
+  })),
+)
+
+const columnIssues = ref<Record<string, Issue[]>>({})
 
 const isDragging = ref(false)
 
-watch(() => cycleIssues.value, (issues) => {
-  const all = (issues || []) as Issue[]
-  columnIssues.value = {
-    open: all.filter(i => i.status === 'open'),
-    in_progress: all.filter(i => i.status === 'in_progress'),
-    resolved: all.filter(i => i.status === 'resolved'),
-    closed: all.filter(i => i.status === 'closed'),
-    deferred: all.filter(i => i.status === 'deferred'),
-  }
-}, { immediate: true, deep: true })
+watch(
+  () => [cycleIssues.value, issueStatusTabs.value] as const,
+  ([issues, tabs]) => {
+    const all = (issues || []) as Issue[]
+    const next: Record<string, Issue[]> = {}
+    const cat = issueStatusCatalog.value
+    for (const s of tabs) {
+      next[s] = all.filter(i => issueStoredStatusMatchesTabId(i.status, s, cat))
+    }
+    columnIssues.value = next
+  },
+  { immediate: true, deep: true },
+)
 
 async function fetchCycleIssues(cycleId: string) {
   try {
@@ -91,10 +129,11 @@ async function fetchCycleIssues(cycleId: string) {
 async function onColumnChange(colKey: string, evt: any) {
   if (!evt.added || !cycle.value) return
   const issue = evt.added.element as Issue
-  const col = columnDefs.find(c => c.key === colKey)
+  const col = columnDefs.value.find(c => c.key === colKey)
   if (!col) return
   const newStatus = col.statuses[0]
-  if (issue.status === newStatus) return
+  if (newStatus == null || newStatus === '') return
+  if (issueStoredStatusMatchesTabId(issue.status, newStatus, issueStatusCatalog.value)) return
   await issuesStore.updateIssue(issue.id, { status: newStatus })
   await fetchCycleIssues(cycle.value.id)
 }
@@ -106,6 +145,7 @@ onMounted(async () => {
   const id = route.params.id as string
   const data = await store.fetchCycle(id)
   cycle.value = data
+  if (data?.productId) await formConfigsStore.fetchConfig(data.productId, 'issue')
   await fetchCycleIssues(id)
   loading.value = false
 })
@@ -193,19 +233,28 @@ function severityStyle(s: string) {
   }
 }
 
-function issueStatusStyle(s: string) {
-  switch (s) {
+function issueStatusToneClass(s: string) {
+  switch (issueStatusSemanticTone(s)) {
     case 'open': return 'bg-[#e2445c] text-white'
     case 'in_progress': return 'bg-[#fdab3d] text-white'
     case 'resolved': return 'bg-[#00c875] text-white'
     case 'closed': return 'bg-gray-400 text-white'
     case 'deferred': return 'bg-[#a25ddc] text-white'
-    default: return 'bg-gray-400 text-white'
+    default: return 'bg-slate-200 text-slate-700 border border-slate-300'
   }
 }
 
+function issueRowSelectToneClass(s: string) {
+  if (issueStatusCustomPillStyle(issueStatusFormMerged.value, s)) return ''
+  return issueStatusToneClass(s)
+}
+
+function issueRowSelectStyle(s: string) {
+  return issueStatusCustomPillStyle(issueStatusFormMerged.value, s)
+}
+
 function statusLabel(s: string) {
-  return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return resolveIssueStatusDisplayLabel(issueStatusFormMerged.value, s)
 }
 
 function formatDate(d: string | null) {
@@ -213,11 +262,22 @@ function formatDate(d: string | null) {
   return new Date(d).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-const issueStatuses: IssueStatus[] = ['open', 'in_progress', 'resolved', 'closed', 'deferred']
+const issueStatuses = computed(() => issueStatusTabs.value)
 
 const totalIssues = computed(() => cycleIssues.value?.length || 0)
-const openIssues = computed(() => cycleIssues.value?.filter(i => i.status === 'open').length || 0)
-const resolvedIssues = computed(() => cycleIssues.value?.filter(i => i.status === 'resolved' || i.status === 'closed').length || 0)
+const openIssues = computed(
+  () =>
+    cycleIssues.value?.filter(i =>
+      issueStoredStatusMatchesTabId(i.status, ISSUE_STATUS_ID_OPEN, issueStatusCatalog.value),
+    ).length || 0,
+)
+const resolvedIssues = computed(
+  () =>
+    cycleIssues.value?.filter(i => {
+      const t = issueStatusSemanticTone(i.status)
+      return t === 'resolved' || t === 'closed'
+    }).length || 0,
+)
 </script>
 
 <template>
@@ -276,7 +336,7 @@ const resolvedIssues = computed(() => cycleIssues.value?.filter(i => i.status ==
               <Pencil :size="12" class="inline ml-1 opacity-0 group-hover/title:opacity-40 transition-opacity" />
             </h1>
             <div class="flex items-center gap-2 mt-0.5">
-              <span class="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full" :class="issueStatusStyle(cycle.status)">{{ statusLabel(cycle.status) }}</span>
+              <span class="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full" :class="issueStatusToneClass(cycle.status)">{{ statusLabel(cycle.status) }}</span>
               <span v-if="cycle.delivery" class="text-xs text-gray-500">
                 <Link2 :size="10" class="inline mr-0.5" />{{ cycle.delivery.title }}
               </span>
@@ -485,7 +545,8 @@ const resolvedIssues = computed(() => cycleIssues.value?.filter(i => i.status ==
                   <select
                     :value="issue.status"
                     class="text-xs font-medium rounded-full px-2.5 py-1 outline-none cursor-pointer border-0 appearance-none"
-                    :class="issueStatusStyle(issue.status)"
+                    :class="issueRowSelectToneClass(issue.status)"
+                    :style="issueRowSelectStyle(issue.status)"
                     @change="updateIssueStatus(issue, ($event.target as HTMLSelectElement).value as IssueStatus)"
                   >
                     <option v-for="s in issueStatuses" :key="s" :value="s">{{ statusLabel(s) }}</option>

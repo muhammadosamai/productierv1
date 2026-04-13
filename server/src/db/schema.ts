@@ -62,10 +62,6 @@ export const issueSeverityEnum = pgEnum('issue_severity', [
   'blocker', 'critical', 'major', 'minor', 'trivial'
 ])
 
-export const issueStatusEnum = pgEnum('issue_status', [
-  'open', 'in_progress', 'resolved', 'closed', 'deferred'
-])
-
 export const issueTypeEnum = pgEnum('issue_type', [
   'bug', 'ui_issue', 'performance', 'crash', 'security', 'data_loss', 'other'
 ])
@@ -156,7 +152,7 @@ export const issues = pgTable('issues', {
   reproducibility: issueReproducibilityEnum('reproducibility'),
   severity: issueSeverityEnum('severity').notNull().default('minor'),
   priority: issuePriorityEnum('priority').notNull().default('medium'),
-  status: issueStatusEnum('status').notNull().default('open'),
+  status: varchar('status', { length: 64 }).notNull().default('a64cad55-e8d5-5903-9096-31b2ee5f5b5c'),
   assignedToUserId: uuid('assigned_to_user_id').references(() => users.id),
   reportedByUserId: uuid('reported_by_user_id').notNull().references(() => users.id),
   appVersion: varchar('app_version', { length: 50 }),
@@ -487,7 +483,7 @@ export const testCycleIssues = pgTable('test_cycle_issues', {
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description'),
   severity: issueSeverityEnum('severity').notNull().default('minor'),
-  status: issueStatusEnum('status').notNull().default('open'),
+  status: varchar('status', { length: 64 }).notNull().default('a64cad55-e8d5-5903-9096-31b2ee5f5b5c'),
   storyId: uuid('story_id').references(() => stories.id),
   reportedByUserId: uuid('reported_by_user_id').notNull().references(() => users.id),
   assignedToUserId: uuid('assigned_to_user_id').references(() => users.id),

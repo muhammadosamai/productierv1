@@ -7,6 +7,7 @@ import { logActivity, computeChanges } from '../lib/logActivity'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
+import { ensureInitiativeStatusArchivedEnum } from '../lib/ensureInitiativeStatusEnum'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -58,6 +59,9 @@ async function userCanAccessInitiativeAttachment(
 
 export const initiativeRoutes = new Elysia({ prefix: '/api/initiatives' })
   .use(jwt({ name: 'jwt', secret: JWT_SECRET }))
+  .onBeforeHandle(async () => {
+    await ensureInitiativeStatusArchivedEnum()
+  })
 
   // GET /api/initiatives
   .get('/', async ({ query }) => {

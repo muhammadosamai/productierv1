@@ -11,6 +11,7 @@ import { useTestCyclesStore } from '@/stores/testCycles'
 import { useProductStore } from '@/stores/products'
 import CreateTestCycleDialog from '@/components/testCycle/CreateTestCycleDialog.vue'
 import type { TestCycle } from '@/types/testCycle'
+import { issueStatusSemanticTone } from '@/lib/issueStatusId'
 import FavoriteStar from '@/components/shared/FavoriteStar.vue'
 
 const router = useRouter()
@@ -139,7 +140,12 @@ function issueCount(cycle: TestCycle) {
 }
 
 function openCount(cycle: TestCycle) {
-  return cycle.issues?.filter(i => i.status === 'open' || i.status === 'in_progress').length || 0
+  return (
+    cycle.issues?.filter(i => {
+      const t = issueStatusSemanticTone(i.status)
+      return t === 'open' || t === 'in_progress'
+    }).length || 0
+  )
 }
 </script>
 

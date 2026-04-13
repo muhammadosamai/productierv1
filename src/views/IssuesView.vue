@@ -6,11 +6,12 @@ import {
   ChevronRight, Plus, LayoutList, LayoutGrid,
   ArrowUp, ArrowDown, SlidersHorizontal, Clock,
   GripVertical, Check, RotateCcw,
-  Signal, FileText, Type, Tag, CalendarClock, Link,
+  FileText, Type, Tag, CalendarClock, Link,
   Users, User, UserCheck, Hourglass, Archive, RotateCw, Trash2, X,
   Shield, AlertTriangle, Zap, Database, Eye, Monitor,
   PencilLine, Wrench, Server, TestTube2,
   Columns3Cog,
+  Filter,
 } from 'lucide-vue-next'
 import { useIssuesStore } from '@/stores/issues'
 import { useProductStore } from '@/stores/products'
@@ -22,6 +23,17 @@ import FavoriteStar from '@/components/shared/FavoriteStar.vue'
 import CreateIssueDialog from '@/components/issue/CreateIssueDialog.vue'
 import IssueDetailPanel from '@/components/issue/IssueDetailPanel.vue'
 import FormBuilderDialog from '@/components/forms/FormBuilderDialog.vue'
+import { useFormConfigsStore } from '@/stores/formConfigs'
+import {
+  mergeIssueFormConfig,
+  getIssueStatusCatalogFromMerged,
+  resolveIssueStatusDisplayLabel,
+  issueStoredStatusMatchesTabId,
+  issueStatusCustomPillStyle,
+  issueStatusTabBarStyleOverride,
+  issueStatusTabBadgeStyleOverride,
+} from '@/lib/issueFormConfig'
+import { ISSUE_STATUS_ID_CLOSED, ISSUE_STATUS_ID_OPEN, issueStatusSemanticTone } from '@/lib/issueStatusId'
 import type { Issue, IssueStatus } from '@/types/issue'
 
 interface TeamUser {
@@ -38,6 +50,7 @@ const productStore = useProductStore()
 const authStore = useAuthStore()
 const rolesStore = useRolesStore()
 const productMembersStore = useProductMembersStore()
+const formConfigsStore = useFormConfigsStore()
 
 const showArchived = ref(false)
 
@@ -58,11 +71,12 @@ function issueListFetchOpts() {
 async function loadIssuesForProduct() {
   const p = productStore.activeProduct?.name
   if (p && authStore.token) await productMembersStore.fetchMembers(p)
+  if (p) await formConfigsStore.fetchConfig(p, 'issue')
   await issuesStore.fetchIssues(p || '', undefined, issueListFetchOpts())
 }
 
 const searchQuery = ref('')
-const activeTab = ref<'all' | 'open' | 'in_progress' | 'resolved' | 'closed' | 'deferred'>('all')
+const activeTab = ref<string>('all')
 const viewMode = ref<'table' | 'card'>(localStorage.getItem('issues-view-mode') as 'table' | 'card' || 'table')
 const showCreateDialog = ref(false)
 const showFormBuilder = ref(false)
@@ -78,12 +92,24 @@ const editingCell = ref<{ id: string; field: string } | null>(null)
 const editValue = ref('')
 const inlineAssigneeSearch = ref('')
 
-const issueStatusOptions = ['open', 'in_progress', 'resolved', 'closed', 'deferred'] as const
+const issueStatusFormMerged = computed(() => {
+  const p = productStore.activeProduct?.name
+  const cfg = p ? formConfigsStore.getConfig(p, 'issue') : null
+  return mergeIssueFormConfig(cfg ?? undefined)
+})
+
+const issueStatusCatalog = computed(() => getIssueStatusCatalogFromMerged(issueStatusFormMerged.value))
+
+const issueStatusFormConfigRaw = computed(() => {
+  const p = productStore.activeProduct?.name
+  if (!p) return null
+  return formConfigsStore.getConfig(p, 'issue')
+})
 const issuePriorityOptions = ['high', 'medium', 'low'] as const
 const issueTypeOptions = ['bug', 'ui_issue', 'performance', 'crash', 'security', 'data_loss', 'other'] as const
 const issueSeverityOptions = ['blocker', 'critical', 'major', 'minor', 'trivial'] as const
 
-const editableFields = new Set(['title', 'priority', 'severity', 'type', 'module', 'assignedTo'])
+const editableFields = new Set(['title', 'priority', 'severity', 'type', 'module', 'assignedTo', 'status'])
 
 function isEditing(id: string, field: string) {
   return editingCell.value?.id === id && editingCell.value?.field === field
@@ -197,6 +223,8 @@ onMounted(async () => {
 
 watch(() => productStore.activeProduct?.name, () => {
   showArchived.value = false
+  activeTab.value = 'all'
+  resetAllColumnValueFilters()
   loadIssuesForProduct()
   fetchTeamMembers()
 })
@@ -213,26 +241,50 @@ watch(() => route.query.issue, (issueId) => {
   }
 })
 
-// Status-filtered issue groups
+const issueStatusTabs = computed(() => issueStatusCatalog.value.map(e => e.id))
+
+const statusTabsStrip = computed(() => issueStatusTabs.value.filter(id => id !== ISSUE_STATUS_ID_CLOSED))
+
+const hasClosedInIssueStatuses = computed(() =>
+  issueStatusCatalog.value.some(e => e.id === ISSUE_STATUS_ID_CLOSED),
+)
+
+// Status-filtered issue groups (keys: all, closed if configured, + each configured status)
 const issuesByStatus = computed(() => {
   let base = issuesStore.issues
-  // Self-view-only: show only issues where user is the assignee
   if (rolesStore.isSelfViewOnly('issues') && authStore.user) {
     base = base.filter(i => i.assignedTo?.name === authStore.user!.name)
   }
-  const all = base.filter(i => i.status !== 'closed')
-  return {
-    all,
-    open: all.filter(i => i.status === 'open'),
-    in_progress: all.filter(i => i.status === 'in_progress'),
-    resolved: all.filter(i => i.status === 'resolved'),
-    closed: base.filter(i => i.status === 'closed'),
-    deferred: all.filter(i => i.status === 'deferred'),
+  const statuses = issueStatusTabs.value
+  const cat = issueStatusCatalog.value
+  const excludeFromAll = hasClosedInIssueStatuses.value
+  const all = excludeFromAll
+    ? base.filter(i => !issueStoredStatusMatchesTabId(i.status, ISSUE_STATUS_ID_CLOSED, cat))
+    : [...base]
+  const out: Record<string, typeof base> = { all }
+  for (const s of statuses) {
+    if (s === ISSUE_STATUS_ID_CLOSED) {
+      out.closed = base.filter(i => issueStoredStatusMatchesTabId(i.status, ISSUE_STATUS_ID_CLOSED, cat))
+    } else {
+      out[s] = all.filter(i => issueStoredStatusMatchesTabId(i.status, s, cat))
+    }
+  }
+  if (!('closed' in out)) out.closed = []
+  return out
+})
+
+watch(issueStatusTabs, () => {
+  const tabs = issueStatusTabs.value
+  if (activeTab.value !== 'all' && activeTab.value !== 'closed' && !tabs.includes(activeTab.value)) {
+    activeTab.value = 'all'
+  }
+  if (activeTab.value === 'closed' && !hasClosedInIssueStatuses.value) {
+    activeTab.value = 'all'
   }
 })
 
 const filteredIssues = computed(() => {
-  const list = issuesByStatus.value[activeTab.value]
+  const list = issuesByStatus.value[activeTab.value] ?? issuesByStatus.value.all ?? []
   const q = searchQuery.value.toLowerCase().trim()
   if (!q) return list
   return list.filter(i =>
@@ -240,6 +292,190 @@ const filteredIssues = computed(() => {
     (i.description && i.description.toLowerCase().includes(q)) ||
     (i.module && i.module.toLowerCase().includes(q))
   )
+})
+
+const ISSUE_SEVERITY_FILTER_IDS = ['blocker', 'critical', 'major', 'minor', 'trivial'] as const
+const ISSUE_PRIORITY_FILTER_IDS = ['high', 'medium', 'low'] as const
+
+/** Normalize enum-ish column values for filter matching (API may vary in casing). */
+function normalizeIssueFilterToken(v: unknown): string {
+  return String(v ?? '')
+    .trim()
+    .toLowerCase()
+}
+
+/** Status column filter: canonical catalog ids to include in table/card lists. */
+const statusColumnIncludedIds = ref<Set<string>>(new Set())
+const showStatusColumnFilter = ref(false)
+
+watch(
+  () => issueStatusCatalog.value.map(e => e.id).sort().join(','),
+  () => {
+    // Always default to every catalog status selected (new product, new status row, or first load).
+    statusColumnIncludedIds.value = new Set(issueStatusCatalog.value.map(e => e.id))
+  },
+  { immediate: true },
+)
+
+const severityColumnIncludedIds = ref<Set<string>>(new Set([...ISSUE_SEVERITY_FILTER_IDS]))
+const showSeverityColumnFilter = ref(false)
+
+const priorityColumnIncludedIds = ref<Set<string>>(new Set([...ISSUE_PRIORITY_FILTER_IDS]))
+const showPriorityColumnFilter = ref(false)
+
+const statusColumnFilterActive = computed(() => {
+  const cat = issueStatusCatalog.value
+  const inc = statusColumnIncludedIds.value
+  return cat.length > 0 && inc.size > 0 && inc.size < cat.length
+})
+
+const severityColumnFilterActive = computed(() => {
+  const inc = severityColumnIncludedIds.value
+  return inc.size > 0 && inc.size < ISSUE_SEVERITY_FILTER_IDS.length
+})
+
+const priorityColumnFilterActive = computed(() => {
+  const inc = priorityColumnIncludedIds.value
+  return inc.size > 0 && inc.size < ISSUE_PRIORITY_FILTER_IDS.length
+})
+
+function isStatusIncludedForFilter(id: string) {
+  return statusColumnIncludedIds.value.has(id)
+}
+
+function toggleStatusColumnFilter(id: string) {
+  const next = new Set(statusColumnIncludedIds.value)
+  if (next.has(id)) {
+    if (next.size <= 1) return
+    next.delete(id)
+  } else {
+    next.add(id)
+  }
+  statusColumnIncludedIds.value = next
+}
+
+function selectAllStatusColumnFilters() {
+  statusColumnIncludedIds.value = new Set(issueStatusCatalog.value.map(e => e.id))
+}
+
+function isSeverityIncludedForFilter(id: string) {
+  return severityColumnIncludedIds.value.has(id)
+}
+
+function toggleSeverityColumnFilter(id: string, evt?: Event) {
+  const input = evt?.target as HTMLInputElement | undefined
+  const wantChecked =
+    input && input.type === 'checkbox' ? input.checked : !severityColumnIncludedIds.value.has(id)
+  const next = new Set(severityColumnIncludedIds.value)
+  if (wantChecked) {
+    next.add(id)
+  } else {
+    if (next.size <= 1) {
+      if (input) input.checked = true
+      return
+    }
+    next.delete(id)
+  }
+  severityColumnIncludedIds.value = next
+}
+
+function selectAllSeverityColumnFilters() {
+  severityColumnIncludedIds.value = new Set([...ISSUE_SEVERITY_FILTER_IDS])
+}
+
+function isPriorityIncludedForFilter(id: string) {
+  return priorityColumnIncludedIds.value.has(id)
+}
+
+function togglePriorityColumnFilter(id: string, evt?: Event) {
+  const input = evt?.target as HTMLInputElement | undefined
+  const wantChecked =
+    input && input.type === 'checkbox' ? input.checked : !priorityColumnIncludedIds.value.has(id)
+  const next = new Set(priorityColumnIncludedIds.value)
+  if (wantChecked) {
+    next.add(id)
+  } else {
+    if (next.size <= 1) {
+      if (input) input.checked = true
+      return
+    }
+    next.delete(id)
+  }
+  priorityColumnIncludedIds.value = next
+}
+
+function selectAllPriorityColumnFilters() {
+  priorityColumnIncludedIds.value = new Set([...ISSUE_PRIORITY_FILTER_IDS])
+}
+
+function closeAllColumnFilterMenus() {
+  showStatusColumnFilter.value = false
+  showSeverityColumnFilter.value = false
+  showPriorityColumnFilter.value = false
+}
+
+function resetAllColumnValueFilters() {
+  selectAllStatusColumnFilters()
+  selectAllSeverityColumnFilters()
+  selectAllPriorityColumnFilters()
+}
+
+function toggleStatusFilterPanel() {
+  if (showStatusColumnFilter.value) {
+    showStatusColumnFilter.value = false
+  } else {
+    closeAllColumnFilterMenus()
+    showStatusColumnFilter.value = true
+    showColumnCustomizer.value = false
+  }
+}
+
+function toggleSeverityFilterPanel() {
+  if (showSeverityColumnFilter.value) {
+    showSeverityColumnFilter.value = false
+  } else {
+    closeAllColumnFilterMenus()
+    showSeverityColumnFilter.value = true
+    showColumnCustomizer.value = false
+  }
+}
+
+function togglePriorityFilterPanel() {
+  if (showPriorityColumnFilter.value) {
+    showPriorityColumnFilter.value = false
+  } else {
+    closeAllColumnFilterMenus()
+    showPriorityColumnFilter.value = true
+    showColumnCustomizer.value = false
+  }
+}
+
+function toggleColumnCustomizerPanel() {
+  showColumnCustomizer.value = !showColumnCustomizer.value
+  if (showColumnCustomizer.value) closeAllColumnFilterMenus()
+}
+
+const columnFilteredIssues = computed(() => {
+  let list = filteredIssues.value
+  const cat = issueStatusCatalog.value
+  const st = statusColumnIncludedIds.value
+  if (st.size > 0 && cat.length > 0 && st.size < cat.length) {
+    list = list.filter((i) => {
+      for (const id of st) {
+        if (issueStoredStatusMatchesTabId(i.status, id, cat)) return true
+      }
+      return false
+    })
+  }
+  const includedSeverities = severityColumnIncludedIds.value
+  if (includedSeverities.size > 0 && includedSeverities.size < ISSUE_SEVERITY_FILTER_IDS.length) {
+    list = list.filter(issue => includedSeverities.has(normalizeIssueFilterToken(issue.severity)))
+  }
+  const includedPriorities = priorityColumnIncludedIds.value
+  if (includedPriorities.size > 0 && includedPriorities.size < ISSUE_PRIORITY_FILTER_IDS.length) {
+    list = list.filter(issue => includedPriorities.has(normalizeIssueFilterToken(issue.priority)))
+  }
+  return list
 })
 
 // Sorting
@@ -261,7 +497,14 @@ function toggleSort(field: SortField) {
   }
 }
 
-const statusOrder: Record<string, number> = { open: 0, in_progress: 1, resolved: 2, closed: 3, deferred: 4 }
+const statusOrder = computed(() => {
+  const m: Record<string, number> = {}
+  issueStatusCatalog.value.forEach((e, i) => {
+    m[e.id] = i
+    if (e.slugKey) m[e.slugKey] = i
+  })
+  return m
+})
 const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
 const severityOrder: Record<string, number> = { blocker: 0, critical: 1, major: 2, minor: 3, trivial: 4 }
 const typeOrder: Record<string, number> = { bug: 0, ui_issue: 1, performance: 2, crash: 3, security: 4, data_loss: 5, other: 6 }
@@ -276,7 +519,7 @@ function compareDate(a: string | null | undefined, b: string | null | undefined)
 }
 
 const sortedIssues = computed(() => {
-  const list = [...filteredIssues.value]
+  const list = [...columnFilteredIssues.value]
   if (!sortField.value) return list
 
   const field = sortField.value
@@ -289,7 +532,7 @@ const sortedIssues = computed(() => {
         cmp = a.title.localeCompare(b.title)
         break
       case 'status':
-        cmp = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99)
+        cmp = (statusOrder.value[a.status] ?? 99) - (statusOrder.value[b.status] ?? 99)
         break
       case 'severity':
         cmp = (severityOrder[a.severity] ?? 99) - (severityOrder[b.severity] ?? 99)
@@ -336,7 +579,7 @@ interface ColumnConfig {
 }
 
 const defaultColumns: ColumnConfig[] = [
-  { field: 'title', label: 'Title', width: '1fr', visible: true },
+  { field: 'title', label: 'Title', width: '320px', visible: true },
   { field: 'status', label: 'Status', width: '120px', visible: true },
   { field: 'severity', label: 'Severity', width: '110px', visible: true },
   { field: 'priority', label: 'Priority', width: '100px', visible: true },
@@ -355,6 +598,11 @@ function mergeWithDefaults(saved: ColumnConfig[]): ColumnConfig[] {
   const merged = [...saved]
   for (const def of defaultColumns) {
     if (!knownFields.has(def.field)) merged.push({ ...def })
+  }
+  for (const c of merged) {
+    if (c.field === 'title' && (c.width === '1fr' || c.width.endsWith('fr'))) {
+      c.width = '320px'
+    }
   }
   return merged
 }
@@ -417,6 +665,7 @@ async function loadUserSettings() {
       for (const [k, v] of Object.entries(serverWidths)) {
         if (typeof v === 'number' && v >= 60) columnWidths[k] = v
       }
+      if (columnWidths.title === 200) columnWidths.title = 320
       localStorage.setItem('issues-column-widths', JSON.stringify({ ...columnWidths }))
     }
   } catch { /* fall back to localStorage */ }
@@ -424,12 +673,29 @@ async function loadUserSettings() {
 
 const visibleColumns = computed(() => columns.value.filter(c => c.visible))
 
-const gridTemplateCols = computed(() =>
-  visibleColumns.value.map(c => (columnWidths[c.field] || parseDefaultWidth(c.width)) + 'px').join(' ')
+/** Column filter icons live in headers when that column is visible in table view. */
+const statusFilterInTableHeader = computed(
+  () => viewMode.value === 'table' && visibleColumns.value.some(c => c.field === 'status'),
+)
+const severityFilterInTableHeader = computed(
+  () => viewMode.value === 'table' && visibleColumns.value.some(c => c.field === 'severity'),
+)
+const priorityFilterInTableHeader = computed(
+  () => viewMode.value === 'table' && visibleColumns.value.some(c => c.field === 'priority'),
 )
 
+/** Fixed column for row actions (delete / reopen); must match grid cell count or buttons wrap to a new row. */
+const TABLE_ROW_ACTIONS_COL_PX = 80
+
+const gridTemplateCols = computed(() => {
+  const data = visibleColumns.value
+    .map(c => (columnWidths[c.field] || parseDefaultWidth(c.width)) + 'px')
+    .join(' ')
+  return `${data} ${TABLE_ROW_ACTIONS_COL_PX}px`
+})
+
 const minTableWidth = computed(() => {
-  let total = 48
+  let total = 48 + TABLE_ROW_ACTIONS_COL_PX
   for (const col of visibleColumns.value) {
     total += columnWidths[col.field] || parseDefaultWidth(col.width)
   }
@@ -473,6 +739,8 @@ function loadColumnWidths(): Record<string, number> {
       }
     }
   } catch { /* ignore */ }
+  // Legacy: title used `1fr`, which parsed as 200px — widen to match new default unless user chose otherwise.
+  if (widths.title === 200) widths.title = 320
   return widths
 }
 
@@ -567,13 +835,40 @@ watch(showColumnCustomizer, (v) => {
   }
 })
 
+function onColumnFilterClickOutside(event: MouseEvent) {
+  const target = event.target as HTMLElement
+  if (!target.closest('.issues-column-filter-container')) {
+    closeAllColumnFilterMenus()
+  }
+}
+
+const anyColumnFilterMenuOpen = computed(
+  () => showStatusColumnFilter.value || showSeverityColumnFilter.value || showPriorityColumnFilter.value,
+)
+
+watch(anyColumnFilterMenuOpen, (open) => {
+  if (open) {
+    setTimeout(() => document.addEventListener('click', onColumnFilterClickOutside), 0)
+  } else {
+    document.removeEventListener('click', onColumnFilterClickOutside)
+  }
+})
+
 // Closed tab (similar to archived in stories)
 function toggleClosedTab() {
+  if (!hasClosedInIssueStatuses.value) return
   activeTab.value = activeTab.value === 'closed' ? 'all' : 'closed'
 }
 
+function pickReopenTargetStatus(): IssueStatus {
+  const tabs = issueStatusTabs.value
+  if (tabs.includes(ISSUE_STATUS_ID_OPEN)) return ISSUE_STATUS_ID_OPEN
+  const nonClosed = tabs.filter(s => s !== ISSUE_STATUS_ID_CLOSED)
+  return nonClosed[0] ?? tabs[0] ?? ISSUE_STATUS_ID_OPEN
+}
+
 async function reopenIssue(issueId: string) {
-  await issuesStore.updateIssue(issueId, { status: 'open' })
+  await issuesStore.updateIssue(issueId, { status: pickReopenTargetStatus() })
 }
 
 async function deleteIssue(issueId: string) {
@@ -690,7 +985,7 @@ const groupedIssueActivities = computed(() => {
 
 // ===== Styling =====
 function statusStyle(status: string) {
-  switch (status) {
+  switch (issueStatusSemanticTone(status)) {
     case 'open': return 'bg-red-500 text-white'
     case 'in_progress': return 'bg-[#fdab3d] text-white'
     case 'resolved': return 'bg-[#00c875] text-white'
@@ -701,7 +996,7 @@ function statusStyle(status: string) {
 }
 
 function statusTabColor(status: string) {
-  switch (status) {
+  switch (issueStatusSemanticTone(status)) {
     case 'open': return { active: 'text-red-600 border-red-500', badge: 'bg-red-100 text-red-600' }
     case 'in_progress': return { active: 'text-[#fdab3d] border-[#fdab3d]', badge: 'bg-[#fdab3d]/15 text-[#d48806]' }
     case 'resolved': return { active: 'text-[#00c875] border-[#00c875]', badge: 'bg-[#00c875]/15 text-[#00a65a]' }
@@ -709,6 +1004,42 @@ function statusTabColor(status: string) {
     case 'deferred': return { active: 'text-[#a25ddc] border-[#a25ddc]', badge: 'bg-[#a25ddc]/15 text-[#a25ddc]' }
     default: return { active: 'text-gray-500 border-gray-400', badge: 'bg-gray-200 text-gray-500' }
   }
+}
+
+function issueListStatusPillClass(stored: string, size: 'md' | 'sm') {
+  const custom = issueStatusCustomPillStyle(issueStatusFormMerged.value, stored)
+  const pad = size === 'md' ? 'px-3 py-1' : 'px-2.5 py-0.5'
+  const base = `inline-flex items-center ${pad} rounded-full text-[11px] font-semibold`
+  if (custom) return base
+  return `${base} ${statusStyle(stored)}`
+}
+
+function issueListStatusPillStyle(stored: string) {
+  return issueStatusCustomPillStyle(issueStatusFormMerged.value, stored)
+}
+
+function statusTabBarClass(tabId: string) {
+  const base = 'flex items-center gap-1.5 px-2.5 py-2.5 text-sm font-medium border-b-2 transition-colors cursor-pointer'
+  if (activeTab.value !== tabId) return `${base} text-gray-500 border-transparent hover:text-gray-700`
+  const bar = issueStatusTabBarStyleOverride(issueStatusFormMerged.value, tabId)
+  if (bar) return `${base} border-transparent`
+  return `${base} ${statusTabColor(tabId).active}`
+}
+
+function statusTabBarInline(tabId: string) {
+  if (activeTab.value !== tabId) return undefined
+  return issueStatusTabBarStyleOverride(issueStatusFormMerged.value, tabId)
+}
+
+function statusTabCountBadgeClass(tabId: string) {
+  const base = 'text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[20px] text-center'
+  const badge = issueStatusTabBadgeStyleOverride(issueStatusFormMerged.value, tabId)
+  if (badge) return base
+  return `${base} ${statusTabColor(tabId).badge}`
+}
+
+function statusTabCountBadgeInline(tabId: string) {
+  return issueStatusTabBadgeStyleOverride(issueStatusFormMerged.value, tabId)
 }
 
 function priorityStyle(priority: string) {
@@ -767,7 +1098,7 @@ function typeStyle(type: string | null) {
 }
 
 function statusLabel(status: string) {
-  return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return resolveIssueStatusDisplayLabel(issueStatusFormMerged.value, status)
 }
 
 function priorityLabel(priority: string) {
@@ -826,20 +1157,21 @@ function formatDate(dateStr: string | null) {
             @click="activeTab = 'all'"
           >
             All
-            <span class="text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[20px] text-center bg-red-500/15 text-red-500">{{ issuesByStatus.all.length }}</span>
+            <span class="text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[20px] text-center bg-red-500/15 text-red-500">{{ (issuesByStatus.all ?? []).length }}</span>
           </button>
           <!-- Status tabs -->
           <button
-            v-for="status in (['open', 'in_progress', 'resolved', 'deferred'] as const)"
+            v-for="status in statusTabsStrip"
             :key="status"
-            class="flex items-center gap-1.5 px-2.5 py-2.5 text-sm font-medium border-b-2 transition-colors cursor-pointer"
-            :class="activeTab === status
-              ? statusTabColor(status).active
-              : 'text-gray-500 border-transparent hover:text-gray-700'"
+            :class="statusTabBarClass(status)"
+            :style="statusTabBarInline(status)"
             @click="activeTab = status"
           >
             {{ statusLabel(status) }}
-            <span class="text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[20px] text-center" :class="statusTabColor(status).badge">{{ issuesByStatus[status].length }}</span>
+            <span
+              :class="statusTabCountBadgeClass(status)"
+              :style="statusTabCountBadgeInline(status)"
+            >{{ (issuesByStatus[status] ?? []).length }}</span>
           </button>
         </div>
 
@@ -858,13 +1190,14 @@ function formatDate(dateStr: string | null) {
           </label>
           <!-- Closed -->
           <button
+            v-if="hasClosedInIssueStatuses"
             class="flex items-center gap-1.5 p-1.5 rounded-lg transition-colors cursor-pointer"
             :class="activeTab === 'closed' ? 'bg-red-500/10 text-red-500' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
             @click="toggleClosedTab()"
             title="Closed issues"
           >
             <Archive :size="16" />
-            <span v-if="issuesByStatus.closed.length > 0" class="text-[10px] font-bold rounded-full px-1.5 py-0.5 bg-gray-400 text-white leading-none">{{ issuesByStatus.closed.length }}</span>
+            <span v-if="(issuesByStatus.closed ?? []).length > 0" class="text-[10px] font-bold rounded-full px-1.5 py-0.5 bg-gray-400 text-white leading-none">{{ (issuesByStatus.closed ?? []).length }}</span>
           </button>
 
           <!-- Activity Timeline -->
@@ -994,12 +1327,178 @@ function formatDate(dateStr: string | null) {
             </button>
           </div>
 
+          <!-- Column value filters (toolbar when column hidden or card view) -->
+          <div class="flex items-center gap-0.5">
+            <div
+              v-if="!statusFilterInTableHeader"
+              class="relative issues-column-filter-container"
+            >
+              <button
+                type="button"
+                class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors cursor-pointer"
+                :class="showStatusColumnFilter || statusColumnFilterActive
+                  ? 'bg-red-500/10 text-red-500'
+                  : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'"
+                title="Filter by status"
+                @click.stop="toggleStatusFilterPanel()"
+              >
+                <Filter :size="15" />
+              </button>
+              <Transition
+                enter-active-class="transition ease-out duration-150"
+                enter-from-class="opacity-0 scale-95 translate-y-1"
+                enter-to-class="opacity-100 scale-100 translate-y-0"
+                leave-active-class="transition ease-in duration-100"
+                leave-from-class="opacity-100 scale-100 translate-y-0"
+                leave-to-class="opacity-0 scale-95 translate-y-1"
+              >
+                <div
+                  v-if="showStatusColumnFilter && !statusFilterInTableHeader"
+                  class="absolute right-0 top-full z-50 mt-2 w-56 max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white py-2 shadow-xl"
+                  @click.stop
+                >
+                  <div class="flex items-center justify-between border-b border-gray-100 px-3 pb-2">
+                    <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Statuses</span>
+                    <button
+                      type="button"
+                      class="cursor-pointer text-[11px] text-red-500 hover:underline"
+                      @click="selectAllStatusColumnFilters"
+                    >
+                      All
+                    </button>
+                  </div>
+                  <label
+                    v-for="e in issueStatusCatalog"
+                    :key="e.id"
+                    class="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50"
+                  >
+                    <input
+                      type="checkbox"
+                      class="rounded border-gray-300 text-red-500 focus:ring-red-500"
+                      :checked="isStatusIncludedForFilter(e.id)"
+                      @change="toggleStatusColumnFilter(e.id)"
+                    />
+                    <span class="text-sm text-gray-800">{{ e.name }}</span>
+                  </label>
+                </div>
+              </Transition>
+            </div>
+            <div
+              v-if="!severityFilterInTableHeader"
+              class="relative issues-column-filter-container"
+            >
+              <button
+                type="button"
+                class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors cursor-pointer"
+                :class="showSeverityColumnFilter || severityColumnFilterActive
+                  ? 'bg-red-500/10 text-red-500'
+                  : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'"
+                title="Filter by severity"
+                @click.stop="toggleSeverityFilterPanel()"
+              >
+                <Filter :size="15" />
+              </button>
+              <Transition
+                enter-active-class="transition ease-out duration-150"
+                enter-from-class="opacity-0 scale-95 translate-y-1"
+                enter-to-class="opacity-100 scale-100 translate-y-0"
+                leave-active-class="transition ease-in duration-100"
+                leave-from-class="opacity-100 scale-100 translate-y-0"
+                leave-to-class="opacity-0 scale-95 translate-y-1"
+              >
+                <div
+                  v-if="showSeverityColumnFilter && !severityFilterInTableHeader"
+                  class="absolute right-0 top-full z-50 mt-2 w-56 max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white py-2 shadow-xl"
+                  @click.stop
+                >
+                  <div class="flex items-center justify-between border-b border-gray-100 px-3 pb-2">
+                    <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Severity</span>
+                    <button
+                      type="button"
+                      class="cursor-pointer text-[11px] text-red-500 hover:underline"
+                      @click="selectAllSeverityColumnFilters"
+                    >
+                      All
+                    </button>
+                  </div>
+                  <label
+                    v-for="sev in ISSUE_SEVERITY_FILTER_IDS"
+                    :key="sev"
+                    class="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50"
+                  >
+                    <input
+                      type="checkbox"
+                      class="rounded border-gray-300 text-red-500 focus:ring-red-500"
+                      :checked="isSeverityIncludedForFilter(sev)"
+                      @change="toggleSeverityColumnFilter(sev, $event)"
+                    />
+                    <span class="text-sm text-gray-800">{{ severityLabel(sev) }}</span>
+                  </label>
+                </div>
+              </Transition>
+            </div>
+            <div
+              v-if="!priorityFilterInTableHeader"
+              class="relative issues-column-filter-container"
+            >
+              <button
+                type="button"
+                class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors cursor-pointer"
+                :class="showPriorityColumnFilter || priorityColumnFilterActive
+                  ? 'bg-red-500/10 text-red-500'
+                  : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'"
+                title="Filter by priority"
+                @click.stop="togglePriorityFilterPanel()"
+              >
+                <Filter :size="15" />
+              </button>
+              <Transition
+                enter-active-class="transition ease-out duration-150"
+                enter-from-class="opacity-0 scale-95 translate-y-1"
+                enter-to-class="opacity-100 scale-100 translate-y-0"
+                leave-active-class="transition ease-in duration-100"
+                leave-from-class="opacity-100 scale-100 translate-y-0"
+                leave-to-class="opacity-0 scale-95 translate-y-1"
+              >
+                <div
+                  v-if="showPriorityColumnFilter && !priorityFilterInTableHeader"
+                  class="absolute right-0 top-full z-50 mt-2 w-56 max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white py-2 shadow-xl"
+                  @click.stop
+                >
+                  <div class="flex items-center justify-between border-b border-gray-100 px-3 pb-2">
+                    <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Priority</span>
+                    <button
+                      type="button"
+                      class="cursor-pointer text-[11px] text-red-500 hover:underline"
+                      @click="selectAllPriorityColumnFilters"
+                    >
+                      All
+                    </button>
+                  </div>
+                  <label
+                    v-for="pri in ISSUE_PRIORITY_FILTER_IDS"
+                    :key="pri"
+                    class="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50"
+                  >
+                    <input
+                      type="checkbox"
+                      class="rounded border-gray-300 text-red-500 focus:ring-red-500"
+                      :checked="isPriorityIncludedForFilter(pri)"
+                      @change="togglePriorityColumnFilter(pri, $event)"
+                    />
+                    <span class="text-sm text-gray-800">{{ priorityLabel(pri) }}</span>
+                  </label>
+                </div>
+              </Transition>
+            </div>
+          </div>
+
           <!-- Column Customizer -->
           <div class="relative column-customizer-container">
             <button
               class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer"
               :class="showColumnCustomizer ? 'bg-red-500/10 text-red-500' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
-              @click.stop="showColumnCustomizer = !showColumnCustomizer"
+              @click.stop="toggleColumnCustomizerPanel()"
               title="Customize columns"
             >
               <SlidersHorizontal :size="15" />
@@ -1116,23 +1615,189 @@ function formatDate(dateStr: string | null) {
             <div
               v-for="(col, colIdx) in visibleColumns"
               :key="col.field"
-              class="relative flex items-center pr-2"
-              :class="colIdx < visibleColumns.length - 1 ? 'border-r border-gray-100' : ''"
+              class="relative flex items-center pr-2 border-r border-gray-100"
             >
-              <button
-                class="flex items-center gap-1 text-[11px] font-medium tracking-wide uppercase cursor-pointer select-none transition-colors group/col"
-                :class="sortField === col.field ? 'text-red-500' : 'text-gray-400 hover:text-gray-600'"
-                @click="toggleSort(col.field)"
+              <div
+                class="flex min-w-0 items-center gap-0.5"
+                :class="['status', 'severity', 'priority'].includes(col.field) ? 'flex-1' : ''"
               >
-                {{ col.label }}
-                <span class="flex flex-col -space-y-1" v-if="sortField === col.field">
-                  <ArrowUp v-if="sortDirection === 'asc'" :size="12" class="text-red-500" />
-                  <ArrowDown v-else :size="12" class="text-red-500" />
-                </span>
-                <span v-else class="opacity-0 group-hover/col:opacity-50 transition-opacity">
-                  <ArrowUp :size="12" />
-                </span>
-              </button>
+                <button
+                  class="flex min-w-0 items-center gap-1 text-[11px] font-medium tracking-wide uppercase cursor-pointer select-none transition-colors group/col"
+                  :class="sortField === col.field ? 'text-red-500' : 'text-gray-400 hover:text-gray-600'"
+                  @click="toggleSort(col.field)"
+                >
+                  <span class="truncate">{{ col.label }}</span>
+                  <span class="flex shrink-0 flex-col -space-y-1" v-if="sortField === col.field">
+                    <ArrowUp v-if="sortDirection === 'asc'" :size="12" class="text-red-500" />
+                    <ArrowDown v-else :size="12" class="text-red-500" />
+                  </span>
+                  <span v-else class="shrink-0 opacity-0 group-hover/col:opacity-50 transition-opacity">
+                    <ArrowUp :size="12" />
+                  </span>
+                </button>
+                <div
+                  v-if="col.field === 'status'"
+                  class="relative shrink-0 issues-column-filter-container"
+                >
+                  <button
+                    type="button"
+                    class="rounded-md p-1 transition-colors cursor-pointer"
+                    :class="showStatusColumnFilter || statusColumnFilterActive
+                      ? 'bg-red-500/10 text-red-500'
+                      : 'text-gray-300 hover:bg-gray-100 hover:text-gray-500'"
+                    title="Filter by status"
+                    @click.stop="toggleStatusFilterPanel()"
+                  >
+                    <Filter :size="14" />
+                  </button>
+                  <Transition
+                    enter-active-class="transition ease-out duration-150"
+                    enter-from-class="opacity-0 scale-95 translate-y-1"
+                    enter-to-class="opacity-100 scale-100 translate-y-0"
+                    leave-active-class="transition ease-in duration-100"
+                    leave-from-class="opacity-100 scale-100 translate-y-0"
+                    leave-to-class="opacity-0 scale-95 translate-y-1"
+                  >
+                    <div
+                      v-if="showStatusColumnFilter && statusFilterInTableHeader"
+                      class="absolute left-0 top-full z-50 mt-1.5 w-56 max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white py-2 shadow-xl"
+                      @click.stop
+                    >
+                      <div class="flex items-center justify-between border-b border-gray-100 px-3 pb-2">
+                        <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Statuses</span>
+                        <button
+                          type="button"
+                          class="cursor-pointer text-[11px] text-red-500 hover:underline"
+                          @click="selectAllStatusColumnFilters"
+                        >
+                          All
+                        </button>
+                      </div>
+                      <label
+                        v-for="e in issueStatusCatalog"
+                        :key="e.id"
+                        class="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50"
+                      >
+                        <input
+                          type="checkbox"
+                          class="rounded border-gray-300 text-red-500 focus:ring-red-500"
+                          :checked="isStatusIncludedForFilter(e.id)"
+                          @change="toggleStatusColumnFilter(e.id)"
+                        />
+                        <span class="text-sm text-gray-800">{{ e.name }}</span>
+                      </label>
+                    </div>
+                  </Transition>
+                </div>
+                <div
+                  v-if="col.field === 'severity'"
+                  class="relative shrink-0 issues-column-filter-container"
+                >
+                  <button
+                    type="button"
+                    class="rounded-md p-1 transition-colors cursor-pointer"
+                    :class="showSeverityColumnFilter || severityColumnFilterActive
+                      ? 'bg-red-500/10 text-red-500'
+                      : 'text-gray-300 hover:bg-gray-100 hover:text-gray-500'"
+                    title="Filter by severity"
+                    @click.stop="toggleSeverityFilterPanel()"
+                  >
+                    <Filter :size="14" />
+                  </button>
+                  <Transition
+                    enter-active-class="transition ease-out duration-150"
+                    enter-from-class="opacity-0 scale-95 translate-y-1"
+                    enter-to-class="opacity-100 scale-100 translate-y-0"
+                    leave-active-class="transition ease-in duration-100"
+                    leave-from-class="opacity-100 scale-100 translate-y-0"
+                    leave-to-class="opacity-0 scale-95 translate-y-1"
+                  >
+                    <div
+                      v-if="showSeverityColumnFilter && severityFilterInTableHeader"
+                      class="absolute left-0 top-full z-50 mt-1.5 w-56 max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white py-2 shadow-xl"
+                      @click.stop
+                    >
+                      <div class="flex items-center justify-between border-b border-gray-100 px-3 pb-2">
+                        <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Severity</span>
+                        <button
+                          type="button"
+                          class="cursor-pointer text-[11px] text-red-500 hover:underline"
+                          @click="selectAllSeverityColumnFilters"
+                        >
+                          All
+                        </button>
+                      </div>
+                      <label
+                        v-for="sev in ISSUE_SEVERITY_FILTER_IDS"
+                        :key="sev"
+                        class="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50"
+                      >
+                        <input
+                          type="checkbox"
+                          class="rounded border-gray-300 text-red-500 focus:ring-red-500"
+                          :checked="isSeverityIncludedForFilter(sev)"
+                          @change="toggleSeverityColumnFilter(sev, $event)"
+                        />
+                        <span class="text-sm text-gray-800">{{ severityLabel(sev) }}</span>
+                      </label>
+                    </div>
+                  </Transition>
+                </div>
+                <div
+                  v-if="col.field === 'priority'"
+                  class="relative shrink-0 issues-column-filter-container"
+                >
+                  <button
+                    type="button"
+                    class="rounded-md p-1 transition-colors cursor-pointer"
+                    :class="showPriorityColumnFilter || priorityColumnFilterActive
+                      ? 'bg-red-500/10 text-red-500'
+                      : 'text-gray-300 hover:bg-gray-100 hover:text-gray-500'"
+                    title="Filter by priority"
+                    @click.stop="togglePriorityFilterPanel()"
+                  >
+                    <Filter :size="14" />
+                  </button>
+                  <Transition
+                    enter-active-class="transition ease-out duration-150"
+                    enter-from-class="opacity-0 scale-95 translate-y-1"
+                    enter-to-class="opacity-100 scale-100 translate-y-0"
+                    leave-active-class="transition ease-in duration-100"
+                    leave-from-class="opacity-100 scale-100 translate-y-0"
+                    leave-to-class="opacity-0 scale-95 translate-y-1"
+                  >
+                    <div
+                      v-if="showPriorityColumnFilter && priorityFilterInTableHeader"
+                      class="absolute left-0 top-full z-50 mt-1.5 w-56 max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white py-2 shadow-xl"
+                      @click.stop
+                    >
+                      <div class="flex items-center justify-between border-b border-gray-100 px-3 pb-2">
+                        <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Priority</span>
+                        <button
+                          type="button"
+                          class="cursor-pointer text-[11px] text-red-500 hover:underline"
+                          @click="selectAllPriorityColumnFilters"
+                        >
+                          All
+                        </button>
+                      </div>
+                      <label
+                        v-for="pri in ISSUE_PRIORITY_FILTER_IDS"
+                        :key="pri"
+                        class="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50"
+                      >
+                        <input
+                          type="checkbox"
+                          class="rounded border-gray-300 text-red-500 focus:ring-red-500"
+                          :checked="isPriorityIncludedForFilter(pri)"
+                          @change="togglePriorityColumnFilter(pri, $event)"
+                        />
+                        <span class="text-sm text-gray-800">{{ priorityLabel(pri) }}</span>
+                      </label>
+                    </div>
+                  </Transition>
+                </div>
+              </div>
               <!-- Resize handle -->
               <div
                 v-if="colIdx < visibleColumns.length - 1"
@@ -1142,23 +1807,38 @@ function formatDate(dateStr: string | null) {
                 <div class="w-px h-full transition-colors" :class="resizingCol === col.field ? 'bg-red-500' : 'bg-transparent group-hover/resize:bg-gray-300'"></div>
               </div>
             </div>
+            <!-- Matches row action column so header grid column count aligns with body rows -->
+            <div class="flex items-center justify-end shrink-0 min-w-0 pl-1" aria-hidden="true" />
           </div>
 
           <!-- Rows -->
           <div class="divide-y divide-gray-100">
-            <div
-              v-for="issue in sortedIssues"
-              :key="issue.id"
-              class="grid items-center px-6 py-3.5 transition-colors cursor-pointer group"
-              :class="[
-                selectedIssue?.id === issue.id
-                  ? 'bg-red-500/5 hover:bg-red-500/8 border-l-2 border-l-red-500'
-                  : inlineEditMode ? 'hover:bg-red-50/40 border-l-2 border-l-transparent' : 'hover:bg-gray-50/60 border-l-2 border-l-transparent',
-                issue.archived ? 'opacity-65' : '',
-              ]"
-              :style="{ gridTemplateColumns: gridTemplateCols, minWidth: minTableWidth + 'px' }"
-              @click="inlineEditMode ? null : openIssueDetail(issue)"
-            >
+            <template v-if="columnFilteredIssues.length === 0">
+              <div class="px-6 py-14 text-center">
+                <p class="text-sm text-gray-500">No issues match the column filters.</p>
+                <button
+                  type="button"
+                  class="mt-2 text-xs font-medium text-red-500 hover:underline cursor-pointer"
+                  @click="resetAllColumnValueFilters"
+                >
+                  Reset filters
+                </button>
+              </div>
+            </template>
+            <template v-else>
+              <div
+                v-for="issue in sortedIssues"
+                :key="issue.id"
+                class="grid items-center px-6 py-3.5 transition-colors cursor-pointer group"
+                :class="[
+                  selectedIssue?.id === issue.id
+                    ? 'bg-red-500/5 hover:bg-red-500/8 border-l-2 border-l-red-500'
+                    : inlineEditMode ? 'hover:bg-red-50/40 border-l-2 border-l-transparent' : 'hover:bg-gray-50/60 border-l-2 border-l-transparent',
+                  issue.archived ? 'opacity-65' : '',
+                ]"
+                :style="{ gridTemplateColumns: gridTemplateCols, minWidth: minTableWidth + 'px' }"
+                @click="inlineEditMode ? null : openIssueDetail(issue)"
+              >
               <template v-for="col in visibleColumns" :key="col.field">
                 <!-- Title -->
                 <div v-if="col.field === 'title'" class="flex items-center gap-2.5 min-w-0 inline-edit-cell"
@@ -1182,7 +1862,7 @@ function formatDate(dateStr: string | null) {
                     <Bug :size="16" class="shrink-0 text-red-500" />
                     <span
                       class="text-sm font-medium truncate"
-                      :class="issue.status === 'closed' ? 'text-gray-400 line-through' : issue.archived ? 'text-gray-500' : 'text-gray-800'"
+                      :class="issueStoredStatusMatchesTabId(issue.status, ISSUE_STATUS_ID_CLOSED, issueStatusCatalog) ? 'text-gray-400 line-through' : issue.archived ? 'text-gray-500' : 'text-gray-800'"
                     >{{ issue.title }}</span>
                     <span
                       v-if="issue.archived"
@@ -1197,19 +1877,27 @@ function formatDate(dateStr: string | null) {
                   :class="inlineEditMode ? 'cursor-pointer' : ''"
                   @click="startEditing(issue.id, 'status', issue.status, $event)"
                 >
-                  <span class="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-semibold" :class="statusStyle(issue.status)">
+                  <span
+                    class="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-semibold"
+                    :class="issueListStatusPillClass(issue.status, 'md')"
+                    :style="issueListStatusPillStyle(issue.status)"
+                  >
                     {{ statusLabel(issue.status) }}
                   </span>
                   <div v-if="isEditing(issue.id, 'status')"
                     class="inline-edit-dropdown absolute top-full left-0 mt-1 bg-white rounded-lg border border-gray-200 shadow-xl z-50 py-1 min-w-[150px]"
                     @click.stop
                   >
-                    <button v-for="opt in issueStatusOptions" :key="opt"
+                    <button v-for="opt in issueStatusTabs" :key="String(opt)"
                       class="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 flex items-center gap-2 cursor-pointer"
-                      :class="issue.status === opt ? 'bg-gray-50' : ''"
+                      :class="issueStoredStatusMatchesTabId(issue.status, opt, issueStatusCatalog) ? 'bg-gray-50' : ''"
                       @click.stop="saveInlineEdit(issue.id, 'status', opt)"
                     >
-                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold" :class="statusStyle(opt)">{{ statusLabel(opt) }}</span>
+                      <span
+                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold"
+                        :class="issueListStatusPillClass(opt, 'sm')"
+                        :style="issueListStatusPillStyle(opt)"
+                      >{{ statusLabel(opt) }}</span>
                     </button>
                   </div>
                 </div>
@@ -1382,23 +2070,27 @@ function formatDate(dateStr: string | null) {
                   <span class="text-sm text-gray-500">{{ formatDate(issue.updatedAt) }}</span>
                 </div>
               </template>
-              <!-- Reopen button for closed -->
-              <button
-                v-if="activeTab === 'closed'"
-                class="ml-auto p-1 rounded-md hover:bg-green-50 text-gray-300 hover:text-green-500 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                title="Reopen issue"
-                @click.stop="reopenIssue(issue.id)"
-              >
-                <RotateCw :size="14" />
-              </button>
-              <button
-                class="p-1 rounded-md hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                title="Delete issue"
-                @click.stop="deleteIssue(issue.id)"
-              >
-                <Trash2 :size="14" />
-              </button>
-            </div>
+              <div class="flex items-center justify-end gap-0.5 shrink-0 min-w-0 pl-1">
+                <button
+                  v-if="activeTab === 'closed'"
+                  type="button"
+                  class="p-1 rounded-md hover:bg-green-50 text-gray-300 hover:text-green-500 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                  title="Reopen issue"
+                  @click.stop="reopenIssue(issue.id)"
+                >
+                  <RotateCw :size="14" />
+                </button>
+                <button
+                  type="button"
+                  class="p-1 rounded-md hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                  title="Delete issue"
+                  @click.stop="deleteIssue(issue.id)"
+                >
+                  <Trash2 :size="14" />
+                </button>
+              </div>
+              </div>
+            </template>
           </div>
         </div>
 
@@ -1415,10 +2107,25 @@ function formatDate(dateStr: string | null) {
       <!-- CARD VIEW -->
       <template v-else-if="viewMode === 'card'">
         <div v-if="filteredIssues.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
-          <div
-            v-for="issue in sortedIssues"
-            :key="issue.id"
-            class="rounded-xl border transition-all duration-200 cursor-pointer group/card relative"
+          <template v-if="columnFilteredIssues.length === 0">
+            <div
+              class="col-span-full flex flex-col items-center justify-center rounded-xl border border-gray-200/80 bg-white py-16"
+            >
+              <p class="text-sm text-gray-500">No issues match the column filters.</p>
+              <button
+                type="button"
+                class="mt-2 text-xs font-medium text-red-500 hover:underline cursor-pointer"
+                @click="resetAllColumnValueFilters"
+              >
+                Reset filters
+              </button>
+            </div>
+          </template>
+          <template v-else>
+            <div
+              v-for="issue in sortedIssues"
+              :key="issue.id"
+              class="rounded-xl border transition-all duration-200 cursor-pointer group/card relative"
             :class="[
               selectedIssue?.id === issue.id
                 ? 'bg-red-500/5 border-red-500/30 shadow-md ring-1 ring-red-500/10'
@@ -1470,7 +2177,11 @@ function formatDate(dateStr: string | null) {
                   <span class="w-2 h-2 rounded-full shrink-0" :class="priorityDotStyle(issue.priority)"></span>
                   {{ priorityLabel(issue.priority) }}
                 </span>
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-semibold" :class="statusStyle(issue.status)">
+                <span
+                  class="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-semibold"
+                  :class="issueListStatusPillClass(issue.status, 'md')"
+                  :style="issueListStatusPillStyle(issue.status)"
+                >
                   {{ statusLabel(issue.status) }}
                 </span>
               </div>
@@ -1492,7 +2203,8 @@ function formatDate(dateStr: string | null) {
                 <span class="text-xs text-gray-400">{{ formatDate(issue.createdAt) }}</span>
               </div>
             </div>
-          </div>
+            </div>
+          </template>
         </div>
 
         <!-- Empty state (card) -->
@@ -1514,6 +2226,7 @@ function formatDate(dateStr: string | null) {
       :issue="selectedIssue"
       :open="showIssuePanel"
       :team-members="teamMembers"
+      :status-form-config="issueStatusFormConfigRaw"
       @close="closeIssuePanel"
       @updated="onIssueUpdated"
     />

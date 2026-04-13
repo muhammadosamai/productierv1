@@ -49,6 +49,14 @@ function toggleMultiOption(option: string) {
 function removeMultiTag(option: string) {
   selectedMulti.value = selectedMulti.value.filter(v => v !== option)
 }
+
+const issueStatusSelectItems = computed(() => {
+  if (props.field.key !== 'status' || !props.field.issueStatusCatalog?.length) return null
+  return (props.field.issueStatusCatalog || []).map((e) => ({
+    value: e.id,
+    label: e.name || e.id,
+  }))
+})
 </script>
 
 <template>
@@ -117,13 +125,24 @@ function removeMultiTag(option: string) {
         <SelectValue :placeholder="field.placeholder || `Select ${field.label.toLowerCase()}...`" />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem
-          v-for="opt in field.options"
-          :key="opt"
-          :value="opt"
-        >
-          {{ opt.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) }}
-        </SelectItem>
+        <template v-if="issueStatusSelectItems">
+          <SelectItem
+            v-for="opt in issueStatusSelectItems"
+            :key="opt.value"
+            :value="opt.value"
+          >
+            {{ opt.label }}
+          </SelectItem>
+        </template>
+        <template v-else>
+          <SelectItem
+            v-for="opt in field.options"
+            :key="opt"
+            :value="opt"
+          >
+            {{ opt.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) }}
+          </SelectItem>
+        </template>
       </SelectContent>
     </Select>
 

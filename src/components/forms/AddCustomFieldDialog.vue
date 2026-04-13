@@ -17,10 +17,13 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { X, Plus } from 'lucide-vue-next'
-import type { FormFieldConfig, FieldType } from '@/types/formConfig'
+import type { FormFieldConfig, FieldType, EntityType, IssueStatusCatalogEntry } from '@/types/formConfig'
+import { catalogForStatusField, normalizeIssueStatusOptionsList } from '@/lib/issueFormConfig'
+import IssueStatusCatalogEditor from '@/components/forms/IssueStatusCatalogEditor.vue'
 
 const props = defineProps<{
   editField?: FormFieldConfig
+  entityType?: EntityType
 }>()
 
 const open = defineModel<boolean>('open', { default: false })
@@ -48,13 +51,31 @@ const required = ref(false)
 const placeholder = ref('')
 const options = ref<string[]>([])
 const newOption = ref('')
+const statusCatalogDraft = ref<IssueStatusCatalogEntry[]>([])
 
 const isEditing = computed(() => !!props.editField)
-const dialogTitle = computed(() => isEditing.value ? 'Edit Custom Field' : 'Add Custom Field')
 
-const showOptions = computed(() => type.value === 'select' || type.value === 'multi_select')
+const isBuiltInIssueStatusEdit = computed(
+  () =>
+    props.entityType === 'issue' &&
+    !!props.editField?.isBuiltIn &&
+    props.editField?.key === 'status',
+)
+
+const dialogTitle = computed(() => {
+  if (isBuiltInIssueStatusEdit.value) return 'Issue status values'
+  return isEditing.value ? 'Edit Custom Field' : 'Add Custom Field'
+})
+
+const showOptions = computed(
+  () =>
+    isBuiltInIssueStatusEdit.value ||
+    type.value === 'select' ||
+    type.value === 'multi_select',
+)
 
 const isValid = computed(() => {
+  if (isBuiltInIssueStatusEdit.value) return statusCatalogDraft.value.length > 0
   if (!label.value.trim()) return false
   if (!key.value.trim()) return false
   if (showOptions.value && options.value.length === 0) return false
@@ -88,6 +109,11 @@ watch(open, (isOpen) => {
       required.value = props.editField.required
       placeholder.value = props.editField.placeholder || ''
       options.value = props.editField.options ? [...props.editField.options] : []
+      if (props.editField.key === 'status' && props.entityType === 'issue') {
+        statusCatalogDraft.value = catalogForStatusField(props.editField).map(e => ({ ...e }))
+      } else {
+        statusCatalogDraft.value = []
+      }
     } else {
       label.value = ''
       key.value = ''
@@ -95,6 +121,7 @@ watch(open, (isOpen) => {
       required.value = false
       placeholder.value = ''
       options.value = []
+      statusCatalogDraft.value = []
     }
     newOption.value = ''
   }
@@ -102,9 +129,9 @@ watch(open, (isOpen) => {
 
 function addOption() {
   const val = newOption.value.trim()
-  if (val && !options.value.includes(val)) {
-    options.value.push(val)
-  }
+  if (!val) return
+  const normalized = normalizeIssueStatusOptionsList([...options.value, val])
+  options.value = normalized
   newOption.value = ''
 }
 
@@ -114,6 +141,21 @@ function removeOption(index: number) {
 
 function handleSave() {
   if (!isValid.value) return
+
+  if (isBuiltInIssueStatusEdit.value && props.editField) {
+    if (!statusCatalogDraft.value.length) return
+    const catalog = statusCatalogDraft.value.map((e, i) => ({
+      ...e,
+      order: i,
+    }))
+    emit('save', {
+      ...props.editField,
+      type: 'select' as FieldType,
+      issueStatusCatalog: catalog,
+      options: catalog.map(e => e.slugKey ?? e.id),
+    })
+    return
+  }
 
   const field: FormFieldConfig = {
     key: key.value,
@@ -133,14 +175,27 @@ function handleSave() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-md">
-      <DialogHeader>
+    <DialogContent
+      :class="[
+        'flex w-full max-w-[calc(100%-2rem)] max-h-[min(90vh,720px)] flex-col gap-4 overflow-hidden',
+        isBuiltInIssueStatusEdit ? 'sm:max-w-2xl' : 'sm:max-w-md',
+      ]"
+    >
+      <DialogHeader class="shrink-0 pr-8">
         <DialogTitle>{{ dialogTitle }}</DialogTitle>
       </DialogHeader>
 
-      <div class="space-y-4 py-2">
+      <div class="min-h-0 flex-1 space-y-4 overflow-x-hidden overflow-y-auto overscroll-y-contain py-1 pr-1">
+        <p
+          v-if="isBuiltInIssueStatusEdit"
+          class="text-sm text-gray-600 -mt-1"
+        >
+          Statuses are stored by stable id; legacy products may still show a legacy key until all issues are saved again.
+          Click <strong>Apply</strong>, then <strong>Save Changes</strong> in the toolbar to sync to the server.
+          You cannot remove a status while non-archived issues still use it.
+        </p>
         <!-- Label -->
-        <div class="space-y-1.5">
+        <div v-if="!isBuiltInIssueStatusEdit" class="space-y-1.5">
           <label class="text-sm font-medium text-gray-700">Label</label>
           <Input
             v-model="label"
@@ -149,7 +204,7 @@ function handleSave() {
         </div>
 
         <!-- Key -->
-        <div class="space-y-1.5">
+        <div v-if="!isBuiltInIssueStatusEdit" class="space-y-1.5">
           <label class="text-sm font-medium text-gray-700">Key</label>
           <Input
             v-model="key"
@@ -164,7 +219,7 @@ function handleSave() {
         </div>
 
         <!-- Type -->
-        <div class="space-y-1.5">
+        <div v-if="!isBuiltInIssueStatusEdit" class="space-y-1.5">
           <label class="text-sm font-medium text-gray-700">Type</label>
           <Select v-model="type">
             <SelectTrigger class="w-full">
@@ -183,7 +238,7 @@ function handleSave() {
         </div>
 
         <!-- Required -->
-        <div class="flex items-center gap-2">
+        <div v-if="!isBuiltInIssueStatusEdit" class="flex items-center gap-2">
           <input
             id="field-required"
             v-model="required"
@@ -193,8 +248,14 @@ function handleSave() {
           <label for="field-required" class="text-sm font-medium text-gray-700">Required field</label>
         </div>
 
+        <!-- Built-in issue status catalog -->
+        <div v-if="isBuiltInIssueStatusEdit" class="space-y-2">
+          <label class="text-sm font-medium text-gray-700">Statuses</label>
+          <IssueStatusCatalogEditor v-model="statusCatalogDraft" />
+        </div>
+
         <!-- Options (for select / multi_select) -->
-        <div v-if="showOptions" class="space-y-2">
+        <div v-else-if="showOptions" class="space-y-2">
           <label class="text-sm font-medium text-gray-700">Options</label>
           <div class="flex gap-2">
             <Input
@@ -234,7 +295,7 @@ function handleSave() {
         </div>
 
         <!-- Placeholder -->
-        <div class="space-y-1.5">
+        <div v-if="!isBuiltInIssueStatusEdit" class="space-y-1.5">
           <label class="text-sm font-medium text-gray-700">Placeholder <span class="text-gray-400">(optional)</span></label>
           <Input
             v-model="placeholder"
@@ -243,7 +304,7 @@ function handleSave() {
         </div>
       </div>
 
-      <DialogFooter>
+      <DialogFooter class="shrink-0 border-t border-gray-100 pt-4">
         <Button variant="outline" @click="open = false">
           Cancel
         </Button>
@@ -252,7 +313,7 @@ function handleSave() {
           :disabled="!isValid"
           @click="handleSave"
         >
-          {{ isEditing ? 'Update Field' : 'Add Field' }}
+          {{ isBuiltInIssueStatusEdit ? 'Apply' : isEditing ? 'Update Field' : 'Add Field' }}
         </Button>
       </DialogFooter>
     </DialogContent>

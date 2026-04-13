@@ -6,9 +6,11 @@ import { Loader2, Plus, CheckCircle2 } from 'lucide-vue-next'
 import { useFormConfigsStore } from '@/stores/formConfigs'
 import { useProductStore } from '@/stores/products'
 import { getDefaultConfig } from '@/lib/builtInFields'
+import { mergeIssueFormConfig } from '@/lib/issueFormConfig'
 import type { EntityType, FormFieldConfig, FormConfigJson } from '@/types/formConfig'
 import FormFieldCard from './FormFieldCard.vue'
 import AddCustomFieldDialog from './AddCustomFieldDialog.vue'
+import { toast } from 'vue-sonner'
 
 const props = defineProps<{
   entityType: EntityType
@@ -50,8 +52,10 @@ async function loadConfig() {
 
   const config = await formConfigsStore.fetchConfig(product, props.entityType)
   if (config && config.fields.length > 0) {
-    fields.value = config.fields.map(f => ({ ...f }))
-    savedFields.value = config.fields.map(f => ({ ...f }))
+    const normalized =
+      props.entityType === 'issue' ? mergeIssueFormConfig(config) : config
+    fields.value = normalized.fields.map(f => ({ ...f }))
+    savedFields.value = normalized.fields.map(f => ({ ...f }))
   } else {
     const defaults = getDefaultConfig(props.entityType)
     fields.value = defaults.fields.map(f => ({ ...f }))
@@ -70,12 +74,14 @@ async function handleSave() {
   fields.value = orderedFields
 
   const config: FormConfigJson = { fields: orderedFields }
-  const success = await formConfigsStore.saveConfig(product, props.entityType, config)
+  const result = await formConfigsStore.saveConfig(product, props.entityType, config)
 
-  if (success) {
+  if (result.ok) {
     savedFields.value = orderedFields.map(f => ({ ...f }))
     saved.value = true
     setTimeout(() => (saved.value = false), 3000)
+  } else {
+    toast.error(result.error)
   }
   saving.value = false
 }
@@ -181,6 +187,7 @@ watch(() => props.entityType, loadConfig)
         <template #item="{ element }">
           <FormFieldCard
             :field="element"
+            :entity-type="entityType"
             @update:visible="handleVisibilityUpdate(element.key, $event)"
             @update:required="handleRequiredUpdate(element.key, $event)"
             @update:label="handleLabelUpdate(element.key, $event)"
@@ -204,6 +211,7 @@ watch(() => props.entityType, loadConfig)
     <AddCustomFieldDialog
       v-model:open="showAddDialog"
       :edit-field="editingField"
+      :entity-type="entityType"
       @save="handleSaveField"
     />
   </div>

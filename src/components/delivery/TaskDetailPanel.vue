@@ -25,6 +25,9 @@ import {
 } from '@/utils/allowedAttachments'
 import { toast } from 'vue-sonner'
 import { useCopyLink } from '@/utils/useCopyLink'
+import MentionTextarea from '@/components/comments/MentionTextarea.vue'
+import FormattedCommentContent from '@/components/comments/FormattedCommentContent.vue'
+import type { MentionUser } from '@/lib/commentMentions'
 
 interface TeamUser {
   id: string
@@ -156,6 +159,32 @@ const filteredStories = computed(() => {
 const currentStory = computed(() => {
   if (!props.task?.storyId) return null
   return backlogStore.stories.find(s => s.id === props.task!.storyId) || null
+})
+
+const mentionUsers = computed<MentionUser[]>(() =>
+  props.teamMembers.map(u => ({
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    avatar: u.avatar,
+  })),
+)
+
+const mentionUsersForDisplay = computed<MentionUser[]>(() => {
+  const map = new Map<string, MentionUser>()
+  const add = (u: { id: string; name: string; email: string; avatar: string | null }) => {
+    map.set(u.id.toLowerCase(), {
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      avatar: u.avatar,
+    })
+  }
+  for (const u of mentionUsers.value) add(u)
+  for (const c of comments.value) {
+    if (c.user?.id) add(c.user)
+  }
+  return [...map.values()]
 })
 
 function storyStatusDot(status: string) {
@@ -1732,7 +1761,9 @@ function onBackdropClick(e: MouseEvent) {
                               <Trash2 v-else :size="11" />
                             </button>
                           </div>
-                          <p class="text-sm text-gray-600 leading-snug mt-0.5">{{ comment.content }}</p>
+                          <div class="mt-0.5">
+                            <FormattedCommentContent :text="comment.content" :users="mentionUsersForDisplay" />
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2094,14 +2125,14 @@ function onBackdropClick(e: MouseEvent) {
             </div>
           </div>
           <div class="mt-2 flex items-end gap-2">
-            <div class="flex-1 relative">
-              <textarea
+            <div class="flex-1 min-w-0">
+              <MentionTextarea
                 v-model="newComment"
-                rows="2"
-                class="w-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 outline-none resize-none focus:border-[#4857FE] focus:ring-1 focus:ring-[#4857FE]/20 transition-colors placeholder-gray-400"
+                :users="mentionUsers"
+                :rows="2"
                 placeholder="Write your message here..."
                 @keydown.enter.exact.prevent="submitComment"
-              ></textarea>
+              />
             </div>
             <button
               class="p-2.5 rounded-full transition-colors shrink-0"

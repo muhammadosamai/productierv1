@@ -45,6 +45,9 @@ import { useCopyLink } from '@/utils/useCopyLink'
 import { useFormConfigsStore } from '@/stores/formConfigs'
 import { mergeIssueFormConfig, resolveIssueStatusDisplayLabel, issueStatusCustomPillStyle } from '@/lib/issueFormConfig'
 import { issueStatusSemanticTone } from '@/lib/issueStatusId'
+import MentionTextarea from '@/components/comments/MentionTextarea.vue'
+import FormattedCommentContent from '@/components/comments/FormattedCommentContent.vue'
+import type { MentionUser } from '@/lib/commentMentions'
 
 interface TeamUser {
   id: string
@@ -179,6 +182,15 @@ const filteredOwnerMembers = computed(() => {
     u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
   )
 })
+
+const mentionUsers = computed<MentionUser[]>(() =>
+  props.teamMembers.map(u => ({
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    avatar: u.avatar,
+  })),
+)
 
 // Attachments state
 const attachments = ref<StoryAttachment[]>([])
@@ -903,6 +915,24 @@ const allComments = computed(() => {
   return comments.sort((a, b) =>
     new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   )
+})
+
+/** Team list + everyone who has commented (fixes @mentions when user is outside `/api/auth/users?` limit). */
+const mentionUsersForDisplay = computed<MentionUser[]>(() => {
+  const map = new Map<string, MentionUser>()
+  const add = (u: { id: string; name: string; email: string; avatar: string | null }) => {
+    map.set(u.id.toLowerCase(), {
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      avatar: u.avatar,
+    })
+  }
+  for (const u of mentionUsers.value) add(u)
+  for (const c of allComments.value) {
+    if (c.user?.id) add(c.user)
+  }
+  return [...map.values()]
 })
 
 const filteredComments = computed(() => {
@@ -1661,7 +1691,9 @@ async function deleteComment(comment: UnifiedComment) {
                             <Trash2 v-else :size="11" />
                           </button>
                         </div>
-                        <p class="text-sm text-gray-600 leading-snug mt-0.5">{{ comment.content }}</p>
+                        <div class="mt-0.5">
+                          <FormattedCommentContent :text="comment.content" :users="mentionUsersForDisplay" />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1909,14 +1941,14 @@ async function deleteComment(comment: UnifiedComment) {
             </select>
           </div>
           <div class="flex items-end gap-2">
-            <div class="flex-1 relative">
-              <textarea
+            <div class="flex-1 min-w-0">
+              <MentionTextarea
                 v-model="newComment"
-                rows="2"
-                class="w-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 outline-none resize-none focus:border-[#4857FE] focus:ring-1 focus:ring-[#4857FE]/20 transition-colors placeholder-gray-400"
+                :users="mentionUsers"
+                :rows="2"
                 placeholder="Write your comment..."
                 @keydown.enter.exact.prevent="submitComment"
-              ></textarea>
+              />
             </div>
             <button
               class="p-2.5 rounded-full transition-colors shrink-0 cursor-pointer"

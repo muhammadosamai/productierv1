@@ -29,6 +29,9 @@ import {
 } from '@/utils/allowedAttachments'
 import { toast } from 'vue-sonner'
 import { useCopyLink } from '@/utils/useCopyLink'
+import MentionTextarea from '@/components/comments/MentionTextarea.vue'
+import FormattedCommentContent from '@/components/comments/FormattedCommentContent.vue'
+import type { MentionUser } from '@/lib/commentMentions'
 import {
   mergeIssueFormConfig,
   getIssueStatusCatalogFromMerged,
@@ -101,6 +104,15 @@ watch(
     if (product && open) await productMembersStore.fetchMembers(product)
   },
   { immediate: true },
+)
+
+const issueMentionUsers = computed<MentionUser[]>(() =>
+  productMembersStore.members.map(m => ({
+    id: m.userId,
+    name: m.userName,
+    email: m.userEmail,
+    avatar: m.userAvatar,
+  })),
 )
 
 async function setIssueArchived(archived: boolean) {
@@ -235,6 +247,23 @@ onBeforeUnmount(() => {
 // Comments (loaded from issue or fetched)
 const comments = ref<IssueComment[]>([])
 const commentsLoading = ref(false)
+
+const issueMentionUsersForDisplay = computed<MentionUser[]>(() => {
+  const map = new Map<string, MentionUser>()
+  const add = (u: { id: string; name: string; email: string; avatar: string | null }) => {
+    map.set(u.id.toLowerCase(), {
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      avatar: u.avatar,
+    })
+  }
+  for (const u of issueMentionUsers.value) add(u)
+  for (const c of comments.value) {
+    if (c.user?.id) add(c.user)
+  }
+  return [...map.values()]
+})
 
 // ──── Options ────
 
@@ -1979,7 +2008,9 @@ const groupedActivities = computed(() => {
                               <Trash2 v-else :size="11" />
                             </button>
                           </div>
-                          <p class="text-sm text-gray-600 leading-snug mt-0.5">{{ comment.content }}</p>
+                          <div class="mt-0.5">
+                            <FormattedCommentContent :text="comment.content" :users="issueMentionUsersForDisplay" />
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2215,14 +2246,14 @@ const groupedActivities = computed(() => {
         <!-- Comment Input Footer (always on comments tab) -->
         <div v-if="activeTab === 'comments'" class="border-t border-gray-100 bg-white px-5 py-3 shrink-0">
           <div class="flex items-end gap-2">
-            <div class="flex-1 relative">
-              <textarea
+            <div class="flex-1 min-w-0">
+              <MentionTextarea
                 v-model="newComment"
-                rows="2"
-                class="w-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 outline-none resize-none focus:border-[#4857FE] focus:ring-1 focus:ring-[#4857FE]/20 transition-colors placeholder-gray-400"
+                :users="issueMentionUsers"
+                :rows="2"
                 placeholder="Write your comment..."
                 @keydown.enter.exact.prevent="submitComment"
-              ></textarea>
+              />
             </div>
             <button
               class="p-2.5 rounded-full transition-colors shrink-0 cursor-pointer"

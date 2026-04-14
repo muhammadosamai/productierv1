@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
+import { onClickOutside } from '@vueuse/core'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -96,8 +97,15 @@ const memberSearchResults = ref<UserResult[]>([])
 const memberSearchLoading = ref(false)
 const selectedMemberIndex = ref(-1)
 const memberInputRef = ref<HTMLInputElement | null>(null)
+const memberSearchContainerRef = ref<HTMLElement | null>(null)
+const memberSearchPanelOpen = ref(false)
 const teamMembers = ref<TeamMember[]>([])
 let memberSearchTimeout: ReturnType<typeof setTimeout> | null = null
+
+onClickOutside(memberSearchContainerRef, () => {
+  memberSearchPanelOpen.value = false
+  memberSearchResults.value = []
+})
 
 async function searchUsers(query: string) {
   memberSearchLoading.value = true
@@ -120,6 +128,7 @@ async function searchUsers(query: string) {
 }
 
 function onMemberInput() {
+  memberSearchPanelOpen.value = true
   selectedMemberIndex.value = -1
   if (memberSearchTimeout) clearTimeout(memberSearchTimeout)
   memberSearchTimeout = setTimeout(() => {
@@ -159,10 +168,12 @@ function onMemberKeydown(e: KeyboardEvent) {
     }
   } else if (e.key === 'Escape') {
     memberSearchResults.value = []
+    memberSearchPanelOpen.value = false
   }
 }
 
 function onMemberFocus() {
+  memberSearchPanelOpen.value = true
   searchUsers(memberSearchQuery.value)
 }
 
@@ -180,6 +191,7 @@ watch(open, (val) => {
     teamMembers.value = []
     memberSearchQuery.value = ''
     memberSearchResults.value = []
+    memberSearchPanelOpen.value = false
     error.value = ''
   }
 })
@@ -312,7 +324,7 @@ async function handleSubmit() {
           </div>
 
           <!-- Member search input -->
-          <div class="relative">
+          <div ref="memberSearchContainerRef" class="relative">
             <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-2.5 py-1.5 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white">
               <Search :size="14" class="text-gray-400 shrink-0" />
               <input
@@ -329,7 +341,7 @@ async function handleSubmit() {
 
             <!-- Autocomplete dropdown -->
             <div
-              v-if="memberSearchResults.length > 0"
+              v-if="memberSearchPanelOpen && memberSearchResults.length > 0"
               class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[200px] overflow-auto z-[100]"
               @mousedown.prevent
             >
@@ -360,7 +372,7 @@ async function handleSubmit() {
 
             <!-- No results -->
             <div
-              v-else-if="memberSearchQuery && !memberSearchLoading && memberSearchResults.length === 0"
+              v-else-if="memberSearchPanelOpen && memberSearchQuery && !memberSearchLoading && memberSearchResults.length === 0"
               class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-[100]"
             >
               <p class="text-xs text-gray-400 text-center">No users found</p>

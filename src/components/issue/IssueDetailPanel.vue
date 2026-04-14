@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, watch, computed, nextTick, onBeforeUnmount } from 'vue'
+import { ref, watch, computed, nextTick, onBeforeUnmount, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  X, Maximize2, Copy, Loader2, ChevronDown, Check,
+  X, Maximize2, Copy, Loader2, ChevronDown, ChevronLeft, ChevronRight, Check, Link2,
   Clock, CalendarDays, FileText, Shield,
   Bug, Circle, Wrench, Server,
   Target, History, Search,
@@ -10,7 +10,7 @@ import {
   MessageSquare, Send, Trash2,
   Upload, Download, ImageIcon, FileIcon, Paperclip,
   AlertTriangle, Eye, Monitor, Smartphone, Globe, Zap, Database, LayoutDashboard, Lock,
-  Archive, RotateCcw, ExternalLink,
+  Archive, RotateCcw, ExternalLink, Pencil,
 } from 'lucide-vue-next'
 import { useIssuesStore } from '@/stores/issues'
 import { useBacklogStore } from '@/stores/backlog'
@@ -29,14 +29,24 @@ import {
 } from '@/utils/allowedAttachments'
 import { toast } from 'vue-sonner'
 import { useCopyLink } from '@/utils/useCopyLink'
+import MentionTextarea from '@/components/comments/MentionTextarea.vue'
+import FormattedCommentContent from '@/components/comments/FormattedCommentContent.vue'
+import type { MentionUser } from '@/lib/commentMentions'
 import {
   mergeIssueFormConfig,
   getIssueStatusCatalogFromMerged,
+  getVisibleCustomIssueFields,
+  defaultCustomFieldValue,
+  isCustomFieldValueEmpty,
   resolveIssueStatusDisplayLabel,
   issueStoredStatusMatchesTabId,
   issueStatusCustomPillStyle,
 } from '@/lib/issueFormConfig'
+import { useFormConfigsStore } from '@/stores/formConfigs'
+import DynamicField from '@/components/forms/DynamicField.vue'
 import { issueStatusSemanticTone } from '@/lib/issueStatusId'
+import { fetchDistinctIssueModules } from '@/lib/issueModulesApi'
+import SearchableStringCombobox from '@/components/shared/SearchableStringCombobox.vue'
 
 const router = useRouter()
 const { copied, copyLink } = useCopyLink()
@@ -81,6 +91,7 @@ const issuesStore = useIssuesStore()
 const backlogStore = useBacklogStore()
 const authStore = useAuthStore()
 const productMembersStore = useProductMembersStore()
+const formConfigsStore = useFormConfigsStore()
 
 const archiving = ref(false)
 const deletingIssue = ref(false)
@@ -99,6 +110,15 @@ watch(
     if (product && open) await productMembersStore.fetchMembers(product)
   },
   { immediate: true },
+)
+
+const issueMentionUsers = computed<MentionUser[]>(() =>
+  productMembersStore.members.map(m => ({
+    id: m.userId,
+    name: m.userName,
+    email: m.userEmail,
+    avatar: m.userAvatar,
+  })),
 )
 
 async function setIssueArchived(archived: boolean) {
@@ -127,8 +147,10 @@ async function deleteIssue() {
   }
 }
 
+type IssueDetailTabKey = 'description' | 'reproduction' | 'customFields' | 'comments' | 'attachments' | 'activities'
+
 // Active tab
-const activeTab = ref<'description' | 'reproduction' | 'comments' | 'attachments' | 'activities'>('description')
+const activeTab = ref<IssueDetailTabKey>('description')
 
 // Editing state
 const editingField = ref<string | null>(null)
@@ -142,12 +164,14 @@ const showSeverityDropdown = ref(false)
 const showPriorityDropdown = ref(false)
 const showTypeDropdown = ref(false)
 const showAssigneeDropdown = ref(false)
+const showReportedByDropdown = ref(false)
 const showReproducibilityDropdown = ref(false)
 const showEnvironmentDropdown = ref(false)
 const showBrowserDropdown = ref(false)
 const showOsDropdown = ref(false)
 const showStoryDropdown = ref(false)
 const assigneeSearchQuery = ref('')
+const reporterSearchQuery = ref('')
 const storySearchQuery = ref('')
 
 // Edit fields
@@ -157,6 +181,12 @@ const editExpectedBehavior = ref('')
 const editActualBehavior = ref('')
 const editModule = ref('')
 const editAppVersion = ref('')
+const editEstimate = ref('')
+const editStartDate = ref('')
+const editEndDate = ref('')
+const moduleSuggestions = ref<string[]>([])
+const moduleSuggestionsLoading = ref(false)
+const moduleComboboxRef = ref<{ focus: () => void } | null>(null)
 
 // Activities
 const activities = ref<Activity[]>([])
@@ -229,6 +259,23 @@ onBeforeUnmount(() => {
 const comments = ref<IssueComment[]>([])
 const commentsLoading = ref(false)
 
+const issueMentionUsersForDisplay = computed<MentionUser[]>(() => {
+  const map = new Map<string, MentionUser>()
+  const add = (u: { id: string; name: string; email: string; avatar: string | null }) => {
+    map.set(u.id.toLowerCase(), {
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      avatar: u.avatar,
+    })
+  }
+  for (const u of issueMentionUsers.value) add(u)
+  for (const c of comments.value) {
+    if (c.user?.id) add(c.user)
+  }
+  return [...map.values()]
+})
+
 // ──── Options ────
 
 const typeOptions: { value: IssueType; label: string; icon: any }[] = [
@@ -255,6 +302,190 @@ const statusOptions = computed(() => {
 function statusOptionLabel(s: string) {
   return resolveIssueStatusDisplayLabel(statusMerged.value, s)
 }
+
+const customIssueFields = computed(() => getVisibleCustomIssueFields(statusMerged.value))
+
+const customFieldValues = reactive<Record<string, unknown>>({})
+const customFieldsSaving = ref(false)
+
+const issueDetailTabs = computed(() => {
+  const tabs: { key: IssueDetailTabKey; label: string; icon: typeof FileText; count: number }[] = [
+    { key: 'description', label: 'Description', icon: FileText, count: 0 },
+    { key: 'reproduction', label: 'Reproduction', icon: Bug, count: 0 },
+  ]
+  if (customIssueFields.value.length > 0) {
+    tabs.push({ key: 'customFields', label: 'Custom fields', icon: Tag, count: 0 })
+  }
+  tabs.push(
+    { key: 'comments', label: 'Comments', icon: MessageSquare, count: comments.value.length },
+    { key: 'attachments', label: 'Attachments', icon: Paperclip, count: attachments.value.length },
+    { key: 'activities', label: 'Activities', icon: History, count: 0 },
+  )
+  return tabs
+})
+
+watch(customIssueFields, fields => {
+  if (activeTab.value === 'customFields' && fields.length === 0) {
+    activeTab.value = 'description'
+  }
+})
+
+type IssueDetailTabItem = { key: IssueDetailTabKey; label: string; icon: typeof FileText; count: number }
+
+const tabStripRef = ref<HTMLElement | null>(null)
+const tabStripGrabbing = ref(false)
+const tabStripCanScrollLeft = ref(false)
+const tabStripCanScrollRight = ref(false)
+let tabStripDrag: { startX: number; scrollLeft: number } | null = null
+let tabStripSuppressTabClickUntil = 0
+let tabStripResizeObserver: ResizeObserver | null = null
+
+function updateTabStripOverflowEdges() {
+  const el = tabStripRef.value
+  if (!el) {
+    tabStripCanScrollLeft.value = false
+    tabStripCanScrollRight.value = false
+    return
+  }
+  const { scrollLeft, scrollWidth, clientWidth } = el
+  const maxScroll = scrollWidth - clientWidth
+  const eps = 2
+  tabStripCanScrollLeft.value = scrollLeft > eps
+  tabStripCanScrollRight.value = maxScroll > eps && scrollLeft < maxScroll - eps
+}
+
+function scrollTabStripByArrow(dir: 'left' | 'right') {
+  const el = tabStripRef.value
+  if (!el) return
+  const step = Math.max(100, Math.round(el.clientWidth * 0.5))
+  el.scrollBy({ left: dir === 'right' ? step : -step, behavior: 'smooth' })
+  const refresh = () => updateTabStripOverflowEdges()
+  requestAnimationFrame(refresh)
+  setTimeout(refresh, 400)
+}
+
+function onTabStripPointerDown(e: PointerEvent) {
+  const el = (e.currentTarget as HTMLElement) || tabStripRef.value
+  if (!el || e.button !== 0) return
+  tabStripDrag = { startX: e.clientX, scrollLeft: el.scrollLeft }
+  tabStripGrabbing.value = true
+  el.setPointerCapture(e.pointerId)
+}
+
+function onTabStripPointerMove(e: PointerEvent) {
+  if (!tabStripDrag) return
+  const el = (e.currentTarget as HTMLElement) || tabStripRef.value
+  if (!el) return
+  const dx = e.clientX - tabStripDrag.startX
+  el.scrollLeft = tabStripDrag.scrollLeft - dx
+  updateTabStripOverflowEdges()
+  if (Math.abs(dx) > 4) {
+    tabStripSuppressTabClickUntil = Date.now() + 320
+    e.preventDefault()
+  }
+}
+
+function onTabStripPointerEnd(e: PointerEvent) {
+  const el = (e.currentTarget as HTMLElement) || tabStripRef.value
+  if (tabStripDrag && el) {
+    try {
+      el.releasePointerCapture(e.pointerId)
+    } catch {
+      /* already released */
+    }
+  }
+  tabStripDrag = null
+  tabStripGrabbing.value = false
+  updateTabStripOverflowEdges()
+}
+
+function onIssueDetailTabActivate(tab: IssueDetailTabItem) {
+  if (Date.now() < tabStripSuppressTabClickUntil) return
+  activeTab.value = tab.key
+  if (tab.key === 'activities' && props.issue) void loadActivities(props.issue.id)
+  if (tab.key === 'attachments' && props.issue) void loadAttachments(props.issue.id)
+  if (tab.key === 'comments' && props.issue) void loadComments(props.issue.id)
+  void nextTick(() => updateTabStripOverflowEdges())
+}
+
+watch(
+  tabStripRef,
+  el => {
+    tabStripResizeObserver?.disconnect()
+    tabStripResizeObserver = null
+    if (!el) return
+    tabStripResizeObserver = new ResizeObserver(() => updateTabStripOverflowEdges())
+    tabStripResizeObserver.observe(el)
+    void nextTick(() => updateTabStripOverflowEdges())
+  },
+  { flush: 'post' },
+)
+
+watch(
+  () => issueDetailTabs.value.map(t => `${t.key}:${t.count}`).join('|'),
+  () => void nextTick(() => updateTabStripOverflowEdges()),
+)
+
+watch(
+  () => props.open,
+  open => {
+    if (open) void nextTick(() => updateTabStripOverflowEdges())
+  },
+)
+
+onBeforeUnmount(() => {
+  tabStripResizeObserver?.disconnect()
+  tabStripResizeObserver = null
+})
+
+async function loadIssueCustomFields() {
+  const id = props.issue?.id
+  if (!id || !props.open) return
+  const vals = await formConfigsStore.fetchCustomValues('issue', id)
+  for (const k of Object.keys(customFieldValues)) delete customFieldValues[k]
+  for (const f of customIssueFields.value) {
+    const raw = vals[f.key]
+    customFieldValues[f.key] = raw !== undefined && raw !== null ? raw : defaultCustomFieldValue(f)
+  }
+}
+
+async function saveIssueCustomFields() {
+  const id = props.issue?.id
+  if (!id || customIssueFields.value.length === 0) return
+  for (const f of customIssueFields.value) {
+    if (!f.required) continue
+    if (isCustomFieldValueEmpty(customFieldValues[f.key], f.type)) {
+      toast.error(`Please fill in "${f.label}".`)
+      return
+    }
+  }
+  customFieldsSaving.value = true
+  try {
+    const payload: Record<string, unknown> = {}
+    for (const f of customIssueFields.value) {
+      const v = customFieldValues[f.key]
+      if (isCustomFieldValueEmpty(v, f.type)) payload[f.key] = null
+      else payload[f.key] = v
+    }
+    const ok = await formConfigsStore.saveCustomValues('issue', id, payload)
+    if (!ok) {
+      toast.error('Could not save custom fields.')
+      return
+    }
+    toast.success('Additional fields saved')
+    emit('updated')
+  } finally {
+    customFieldsSaving.value = false
+  }
+}
+
+watch(
+  () => [props.issue?.id, props.open] as const,
+  async ([id, isOpen]) => {
+    if (!id || !isOpen) return
+    await loadIssueCustomFields()
+  },
+)
 
 const severityOptions: { value: IssueSeverity; label: string }[] = [
   { value: 'blocker', label: 'Blocker' },
@@ -316,6 +547,29 @@ const filteredAssigneeMembers = computed(() => {
   const q = assigneeSearchQuery.value.toLowerCase().trim()
   if (!q) return props.teamMembers
   return props.teamMembers.filter(u =>
+    u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+  )
+})
+
+/** Reported-by picker: only users who are members of this issue's product (matches API validation). */
+const productReporterPickerMembers = computed<TeamUser[]>(() => {
+  const p = props.issue?.product
+  if (!p) return []
+  return productMembersStore.members
+    .filter(m => m.product === p)
+    .map(m => ({
+      id: m.userId,
+      name: m.userName,
+      email: m.userEmail,
+      avatar: m.userAvatar,
+    }))
+})
+
+const filteredReporterMembers = computed(() => {
+  const q = reporterSearchQuery.value.toLowerCase().trim()
+  const list = productReporterPickerMembers.value
+  if (!q) return list
+  return list.filter(u =>
     u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
   )
 })
@@ -501,6 +755,21 @@ function formatDate(dateStr: string | null) {
   return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+function issueDateWire(iso: string | null | undefined): string {
+  if (!iso) return ''
+  return String(iso).slice(0, 10)
+}
+
+function formatIssueCalendarDate(iso: string | null | undefined): string {
+  if (!iso) return '\u2014'
+  const part = String(iso).slice(0, 10)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(part)
+  if (!m) return formatDate(String(iso))
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  if (Number.isNaN(d.getTime())) return '\u2014'
+  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 function label(s: string) {
   return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
 }
@@ -528,12 +797,14 @@ function closeAllDropdowns() {
   showPriorityDropdown.value = false
   showTypeDropdown.value = false
   showAssigneeDropdown.value = false
+  showReportedByDropdown.value = false
   showReproducibilityDropdown.value = false
   showEnvironmentDropdown.value = false
   showBrowserDropdown.value = false
   showOsDropdown.value = false
   showStoryDropdown.value = false
   assigneeSearchQuery.value = ''
+  reporterSearchQuery.value = ''
   storySearchQuery.value = ''
 }
 
@@ -546,7 +817,7 @@ const filteredStories = computed(() => {
 
 async function startStoryEdit() {
   if (!props.issue) return
-  storySearchQuery.value = ''
+  closeAllDropdowns()
   showStoryDropdown.value = true
   if (backlogStore.stories.length === 0 && props.issue.product) {
     await backlogStore.fetchStories(props.issue.product)
@@ -567,14 +838,20 @@ async function clearStory() {
 
 // ──── Update field ────
 
-async function updateField(field: string, value: any) {
+async function updateField(field: string, value: any, onAfter?: () => void) {
   if (!props.issue) return
   saving.value = true
   try {
-    await issuesStore.updateIssue(props.issue.id, { [field]: value })
-    emit('updated')
-  } catch {}
-  finally {
+    const updated = await issuesStore.updateIssue(props.issue.id, { [field]: value })
+    if (updated) {
+      emit('updated')
+      onAfter?.()
+    } else {
+      toast.error('Could not save changes')
+    }
+  } catch {
+    toast.error('Could not save changes')
+  } finally {
     saving.value = false
     editingField.value = null
     closeAllDropdowns()
@@ -646,11 +923,15 @@ async function selectOs(val: IssueOs) {
 function startAssigneeEdit() {
   editingField.value = 'assignedTo'
   assigneeSearchQuery.value = ''
+  showReportedByDropdown.value = false
+  reporterSearchQuery.value = ''
   showAssigneeDropdown.value = true
 }
 
 async function selectAssignee(user: TeamUser) {
   showAssigneeDropdown.value = false
+  showReportedByDropdown.value = false
+  reporterSearchQuery.value = ''
   assigneeSearchQuery.value = ''
   saving.value = true
   try {
@@ -665,6 +946,8 @@ async function selectAssignee(user: TeamUser) {
 
 async function clearAssignee() {
   showAssigneeDropdown.value = false
+  showReportedByDropdown.value = false
+  reporterSearchQuery.value = ''
   saving.value = true
   try {
     await issuesStore.updateIssue(props.issue!.id, { assignedToUserId: null })
@@ -676,11 +959,58 @@ async function clearAssignee() {
   }
 }
 
+// ──── Reported By ────
+function toggleReportedByDropdown() {
+  showStatusDropdown.value = false
+  showSeverityDropdown.value = false
+  showPriorityDropdown.value = false
+  showTypeDropdown.value = false
+  showAssigneeDropdown.value = false
+  showReproducibilityDropdown.value = false
+  showEnvironmentDropdown.value = false
+  showBrowserDropdown.value = false
+  showOsDropdown.value = false
+  showStoryDropdown.value = false
+  assigneeSearchQuery.value = ''
+  storySearchQuery.value = ''
+  reporterSearchQuery.value = ''
+  showReportedByDropdown.value = !showReportedByDropdown.value
+  editingField.value = showReportedByDropdown.value ? 'reportedBy' : null
+}
+
+async function selectReporter(user: TeamUser) {
+  if (!props.issue) return
+  showAssigneeDropdown.value = false
+  assigneeSearchQuery.value = ''
+  showReportedByDropdown.value = false
+  reporterSearchQuery.value = ''
+  if (user.id === props.issue.reportedByUserId) {
+    editingField.value = null
+    return
+  }
+  await updateField('reportedByUserId', user.id)
+}
+
 // ──── Module ────
-function startEditModule() {
+async function loadModuleSuggestions() {
+  const p = props.issue?.product
+  if (!p) return
+  moduleSuggestionsLoading.value = true
+  try {
+    const list = await fetchDistinctIssueModules(p, authStore.token)
+    moduleSuggestions.value = [...new Set(list)]
+  } finally {
+    moduleSuggestionsLoading.value = false
+  }
+}
+
+async function startEditModule() {
   if (!props.issue) return
   editModule.value = props.issue.module || ''
   editingField.value = 'module'
+  void loadModuleSuggestions()
+  await nextTick()
+  moduleComboboxRef.value?.focus()
 }
 
 async function saveModule() {
@@ -689,7 +1019,9 @@ async function saveModule() {
     editingField.value = null
     return
   }
-  await updateField('module', editModule.value || null)
+  await updateField('module', editModule.value || null, () => {
+    void loadModuleSuggestions()
+  })
 }
 
 // ──── App Version ────
@@ -706,6 +1038,71 @@ async function saveAppVersion() {
     return
   }
   await updateField('appVersion', editAppVersion.value || null)
+}
+
+function startEditEstimate() {
+  if (!props.issue) return
+  editEstimate.value = props.issue.estimateValue != null ? String(props.issue.estimateValue) : ''
+  editingField.value = 'estimate'
+}
+
+async function saveIssueEstimate() {
+  if (!props.issue) return
+  const raw = editEstimate.value.trim()
+  const parsed = raw === '' ? null : Number.parseFloat(raw)
+  if (parsed !== null && (!Number.isFinite(parsed) || parsed < 0)) {
+    toast.error('Enter a valid non-negative estimate in hours')
+    return
+  }
+  const val = parsed === null ? null : Math.round(parsed * 2) / 2
+  const cur = props.issue.estimateValue ?? null
+  if (val === cur) {
+    editingField.value = null
+    return
+  }
+  await updateField('estimateValue', val)
+}
+
+function startEditStartDate() {
+  if (!props.issue) return
+  editStartDate.value = issueDateWire(props.issue.startDate)
+  editingField.value = 'startDate'
+}
+
+async function saveIssueStartDate() {
+  if (!props.issue) return
+  const v = editStartDate.value ? editStartDate.value : null
+  if (v === (issueDateWire(props.issue.startDate) || null)) {
+    editingField.value = null
+    return
+  }
+  const endCmp = issueDateWire(props.issue.endDate)
+  if (v && endCmp && endCmp < v) {
+    toast.error('Start date must be on or before end date')
+    return
+  }
+  await updateField('startDate', v)
+}
+
+function startEditEndDate() {
+  if (!props.issue) return
+  editEndDate.value = issueDateWire(props.issue.endDate)
+  editingField.value = 'endDate'
+}
+
+async function saveIssueEndDate() {
+  if (!props.issue) return
+  const v = editEndDate.value ? editEndDate.value : null
+  if (v === (issueDateWire(props.issue.endDate) || null)) {
+    editingField.value = null
+    return
+  }
+  const startCmp = issueDateWire(props.issue.startDate)
+  if (startCmp && v && v < startCmp) {
+    toast.error('End date must be on or after start date')
+    return
+  }
+  await updateField('endDate', v)
 }
 
 // ──── Description ────
@@ -1121,8 +1518,8 @@ const groupedActivities = computed(() => {
 
           <!-- Metadata Grid -->
           <div class="px-6 pt-4 pb-4">
-            <div class="space-y-4">
-
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1 items-start">
+              <div class="space-y-3 min-w-0">
               <!-- Status (dropdown) -->
               <div class="flex items-center gap-3">
                 <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
@@ -1133,7 +1530,7 @@ const groupedActivities = computed(() => {
                     class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold cursor-pointer hover:opacity-80 transition-opacity"
                     :class="statusPillToneClass(issue.status)"
                     :style="statusPillStyleFor(issue.status)"
-                    @click="showStatusDropdown = !showStatusDropdown; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
+                    @click="showStatusDropdown = !showStatusDropdown; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
                   >
                     {{ statusOptionLabel(issue.status) }}
                     <ChevronDown :size="12" />
@@ -1169,7 +1566,7 @@ const groupedActivities = computed(() => {
                   <button
                     class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold cursor-pointer hover:opacity-80 transition-opacity"
                     :class="severityStyle(issue.severity)"
-                    @click="showSeverityDropdown = !showSeverityDropdown; showStatusDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
+                    @click="showSeverityDropdown = !showSeverityDropdown; showStatusDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
                   >
                     {{ label(issue.severity) }}
                     <ChevronDown :size="12" />
@@ -1201,7 +1598,7 @@ const groupedActivities = computed(() => {
                   <button
                     class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold cursor-pointer hover:opacity-80 transition-opacity"
                     :class="priorityStyle(issue.priority)"
-                    @click="showPriorityDropdown = !showPriorityDropdown; showStatusDropdown = false; showSeverityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
+                    @click="showPriorityDropdown = !showPriorityDropdown; showStatusDropdown = false; showSeverityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
                   >
                     {{ label(issue.priority) }}
                     <ChevronDown :size="12" />
@@ -1233,7 +1630,7 @@ const groupedActivities = computed(() => {
                   <button
                     class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer hover:opacity-80 transition-opacity"
                     :class="typeBadgeStyle(issue.type)"
-                    @click="showTypeDropdown = !showTypeDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showAssigneeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
+                    @click="showTypeDropdown = !showTypeDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
                   >
                     <component :is="typeIcons[issue.type] || Circle" :size="12" />
                     {{ label(issue.type) }}
@@ -1333,7 +1730,7 @@ const groupedActivities = computed(() => {
                 <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5 pt-1">
                   <User :size="13" class="text-gray-400" /> Assigned To
                 </span>
-                <div class="flex-1" @click.stop>
+                <div class="flex-1 relative" @click.stop>
                   <div class="flex items-center gap-2 flex-wrap">
                     <template v-if="issue.assignedTo">
                       <div class="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/assignee">
@@ -1354,7 +1751,7 @@ const groupedActivities = computed(() => {
                     <span v-else class="text-xs text-gray-400">Unassigned</span>
                     <button
                       class="w-5 h-5 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
-                      @click="showAssigneeDropdown = !showAssigneeDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false; assigneeSearchQuery = ''; editingField = 'assignedTo'"
+                      @click="showAssigneeDropdown = !showAssigneeDropdown; showReportedByDropdown = false; reporterSearchQuery = ''; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false; assigneeSearchQuery = ''; editingField = 'assignedTo'"
                     >
                       <span class="text-xs">+</span>
                     </button>
@@ -1362,7 +1759,7 @@ const groupedActivities = computed(() => {
                   <!-- Assignee dropdown -->
                   <div
                     v-if="showAssigneeDropdown"
-                    class="mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-10 w-full max-w-[280px]"
+                    class="absolute top-full left-0 z-30 mt-1 w-full max-w-[280px] rounded-lg border border-gray-200 bg-white shadow-lg"
                   >
                     <div class="p-2 border-b border-gray-100">
                       <div class="flex items-center gap-1.5 bg-gray-50 rounded-md px-2 py-1.5">
@@ -1406,19 +1803,58 @@ const groupedActivities = computed(() => {
                 </div>
               </div>
 
-              <!-- Reported By (read-only) -->
+              <!-- Reported By (same control style as Environment / OS; list is product members only) -->
               <div class="flex items-center gap-3">
                 <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
                   <User :size="13" class="text-gray-400" /> Reported By
                 </span>
-                <div v-if="issue.reportedBy" class="inline-flex items-center gap-1.5 bg-gray-50 rounded-full pl-1 pr-2.5 py-1">
-                  <div class="w-5 h-5 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                    <UploadAssetImg v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-5 h-5 rounded-full object-cover" />
-                    <span v-else>{{ issue.reportedBy.name[0] }}</span>
+                <div class="relative min-w-0" @click.stop>
+                  <button
+                    type="button"
+                    class="inline-flex max-w-[min(100%,240px)] cursor-pointer items-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1 text-left text-xs font-medium text-gray-700 transition-colors hover:border-gray-300"
+                    title="Change reporter"
+                    @click="toggleReportedByDropdown"
+                  >
+                    <span class="min-w-0 truncate">{{ issue.reportedBy?.name || '\u2014' }}</span>
+                    <ChevronDown :size="12" class="shrink-0" />
+                  </button>
+                  <div
+                    v-if="showReportedByDropdown"
+                    class="absolute top-full left-0 z-30 mt-1 w-[min(280px,calc(100vw-3rem))] rounded-lg border border-gray-200 bg-white shadow-lg"
+                  >
+                    <div class="p-2 border-b border-gray-100">
+                      <div class="flex items-center gap-1.5 bg-gray-50 rounded-md px-2 py-1.5">
+                        <Search :size="12" class="text-gray-400" />
+                        <input
+                          v-model="reporterSearchQuery"
+                          class="text-xs bg-transparent outline-none w-full placeholder-gray-400"
+                          placeholder="Search team members..."
+                          autofocus
+                        />
+                      </div>
+                    </div>
+                    <div class="max-h-[200px] overflow-auto py-1">
+                      <button
+                        v-for="member in filteredReporterMembers"
+                        :key="member.id"
+                        type="button"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
+                        @click="selectReporter(member)"
+                      >
+                        <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
+                          <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
+                          <span v-else>{{ member.name[0] }}</span>
+                        </div>
+                        <div class="flex-1 text-left min-w-0">
+                          <p class="text-sm text-gray-700 truncate">{{ member.name }}</p>
+                          <p class="text-[10px] text-gray-400 truncate">{{ member.email }}</p>
+                        </div>
+                        <Check v-if="issue.reportedByUserId === member.id" :size="14" class="text-[#4857FE] shrink-0" />
+                      </button>
+                      <p v-if="filteredReporterMembers.length === 0" class="text-xs text-gray-400 text-center py-3">No members found</p>
+                    </div>
                   </div>
-                  <span class="text-xs font-medium text-gray-600">{{ issue.reportedBy.name }}</span>
                 </div>
-                <span v-else class="text-sm text-gray-400">&mdash;</span>
               </div>
 
               <!-- Module (editable inline text) -->
@@ -1428,24 +1864,234 @@ const groupedActivities = computed(() => {
                 </span>
                 <div @click.stop>
                   <div v-if="editingField === 'module'" class="flex items-center gap-2">
-                    <input
+                    <SearchableStringCombobox
+                      ref="moduleComboboxRef"
                       v-model="editModule"
-                      class="text-sm text-gray-700 border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-[#4857FE] w-48"
-                      placeholder="Module name..."
-                      autofocus
-                      @keydown.enter="saveModule"
-                      @keydown.escape="editingField = null"
+                      :suggestions="moduleSuggestions"
+                      :loading="moduleSuggestionsLoading"
+                      placeholder="Search Modules"
+                      show-trailing-edit-icon
+                      @enter="saveModule"
+                      @escape="editingField = null"
                     />
                     <button @click="saveModule" class="text-green-500 hover:text-green-600"><Check :size="14" /></button>
                     <button @click="editingField = null" class="text-gray-400 hover:text-gray-600"><X :size="14" /></button>
                   </div>
+                  <div
+                    v-else
+                    class="group flex items-center gap-2 min-w-0 max-w-[min(100%,16rem)] cursor-pointer"
+                    title="Edit module"
+                    aria-label="Edit module"
+                    role="button"
+                    tabindex="0"
+                    @click="startEditModule"
+                    @keydown.enter.prevent="startEditModule"
+                    @keydown.space.prevent="startEditModule"
+                  >
+                    <span
+                      class="text-sm truncate flex-1"
+                      :class="issue.module ? 'font-medium text-gray-700 group-hover:text-[#4857FE]' : 'font-normal text-gray-400'"
+                    >
+                      {{ issue.module || 'Search Modules' }}
+                    </span>
+                    <Pencil
+                      :size="14"
+                      class="shrink-0 text-gray-300 transition-colors group-hover:text-[#4857FE]/80"
+                      aria-hidden="true"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Estimate (hours) -->
+              <div class="flex items-center gap-3">
+                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
+                  <Link2 :size="13" class="text-gray-400" /> Estimate
+                </span>
+                <div @click.stop>
+                  <div v-if="editingField === 'estimate'" class="flex items-center gap-2">
+                    <input
+                      v-model="editEstimate"
+                      type="number"
+                      class="text-sm text-gray-700 border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-[#4857FE] w-20"
+                      placeholder="Hours"
+                      min="0"
+                      step="0.5"
+                      @keydown.enter="saveIssueEstimate"
+                      @keydown.escape="editingField = null"
+                    />
+                    <span class="text-xs text-gray-400">hours</span>
+                    <button type="button" @click="saveIssueEstimate" class="text-green-500 hover:text-green-600"><Check :size="14" /></button>
+                    <button type="button" @click="editingField = null" class="text-gray-400 hover:text-gray-600"><X :size="14" /></button>
+                  </div>
                   <span
                     v-else
                     class="text-sm font-medium text-gray-700 cursor-pointer hover:text-[#4857FE] transition-colors"
-                    @click="startEditModule"
+                    @click="startEditEstimate"
                   >
-                    {{ issue.module || '\u2014' }}
+                    {{ issue.estimateValue != null ? issue.estimateValue + 'h' : '\u2014' }}
                   </span>
+                </div>
+              </div>
+
+              <!-- Start date -->
+              <div class="flex items-center gap-3">
+                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
+                  <CalendarDays :size="13" class="text-gray-400" /> Start date
+                </span>
+                <div @click.stop>
+                  <div v-if="editingField === 'startDate'" class="flex items-center gap-2">
+                    <input
+                      v-model="editStartDate"
+                      type="date"
+                      class="text-sm text-gray-700 border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-[#4857FE]"
+                      @keydown.enter="saveIssueStartDate"
+                      @keydown.escape="editingField = null"
+                    />
+                    <button type="button" @click="saveIssueStartDate" class="text-green-500 hover:text-green-600"><Check :size="14" /></button>
+                    <button type="button" @click="editingField = null" class="text-gray-400 hover:text-gray-600"><X :size="14" /></button>
+                  </div>
+                  <span
+                    v-else
+                    class="text-sm font-medium text-gray-700 cursor-pointer hover:text-[#4857FE] transition-colors"
+                    @click="startEditStartDate"
+                  >
+                    {{ formatIssueCalendarDate(issue.startDate) }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- End date -->
+              <div class="flex items-center gap-3">
+                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
+                  <CalendarDays :size="13" class="text-gray-400" /> End date
+                </span>
+                <div @click.stop>
+                  <div v-if="editingField === 'endDate'" class="flex items-center gap-2">
+                    <input
+                      v-model="editEndDate"
+                      type="date"
+                      class="text-sm text-gray-700 border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-[#4857FE]"
+                      @keydown.enter="saveIssueEndDate"
+                      @keydown.escape="editingField = null"
+                    />
+                    <button type="button" @click="saveIssueEndDate" class="text-green-500 hover:text-green-600"><Check :size="14" /></button>
+                    <button type="button" @click="editingField = null" class="text-gray-400 hover:text-gray-600"><X :size="14" /></button>
+                  </div>
+                  <span
+                    v-else
+                    class="text-sm font-medium text-gray-700 cursor-pointer hover:text-[#4857FE] transition-colors"
+                    @click="startEditEndDate"
+                  >
+                    {{ formatIssueCalendarDate(issue.endDate) }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Created -->
+              <div class="flex items-center gap-3">
+                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
+                  <Clock :size="13" class="text-gray-400" /> Created
+                </span>
+                <span class="text-sm text-gray-500">{{ formatDate(issue.createdAt) }}</span>
+              </div>
+
+              </div>
+
+              <!-- Secondary fields: environment & context -->
+              <div class="space-y-3 min-w-0 border-t border-gray-100 pt-3 sm:border-t-0 sm:pt-0 sm:border-l sm:border-gray-100 sm:pl-6">
+                <p class="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Environment and context</p>
+
+              <!-- Environment (dropdown) -->
+              <div class="flex items-center gap-3">
+                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
+                  <Globe :size="13" class="text-gray-400" /> Environment
+                </span>
+                <div class="relative" @click.stop>
+                  <button
+                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-300 transition-colors"
+                    @click="showEnvironmentDropdown = !showEnvironmentDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
+                  >
+                    {{ issue.environment ? label(issue.environment) : '\u2014' }}
+                    <ChevronDown :size="12" />
+                  </button>
+                  <div
+                    v-if="showEnvironmentDropdown"
+                    class="absolute top-full left-0 sm:left-auto sm:right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[11] py-1 w-[160px]"
+                  >
+                    <button
+                      v-for="opt in environmentOptions"
+                      :key="opt.value"
+                      class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
+                      :class="issue.environment === opt.value ? 'text-[#4857FE] font-medium' : 'text-gray-600'"
+                      @click="selectEnvironment(opt.value)"
+                    >
+                      {{ opt.label }}
+                      <Check v-if="issue.environment === opt.value" :size="14" class="ml-auto text-[#4857FE]" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Browser (dropdown) -->
+              <div class="flex items-center gap-3">
+                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
+                  <Monitor :size="13" class="text-gray-400" /> Browser
+                </span>
+                <div class="relative" @click.stop>
+                  <button
+                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-300 transition-colors"
+                    @click="showBrowserDropdown = !showBrowserDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showOsDropdown = false"
+                  >
+                    {{ issue.browser ? label(issue.browser) : '\u2014' }}
+                    <ChevronDown :size="12" />
+                  </button>
+                  <div
+                    v-if="showBrowserDropdown"
+                    class="absolute top-full left-0 sm:left-auto sm:right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[11] py-1 w-[160px]"
+                  >
+                    <button
+                      v-for="opt in browserOptions"
+                      :key="opt.value"
+                      class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
+                      :class="issue.browser === opt.value ? 'text-[#4857FE] font-medium' : 'text-gray-600'"
+                      @click="selectBrowser(opt.value)"
+                    >
+                      {{ opt.label }}
+                      <Check v-if="issue.browser === opt.value" :size="14" class="ml-auto text-[#4857FE]" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- OS (dropdown) -->
+              <div class="flex items-center gap-3">
+                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
+                  <Smartphone :size="13" class="text-gray-400" /> OS
+                </span>
+                <div class="relative" @click.stop>
+                  <button
+                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-300 transition-colors"
+                    @click="showOsDropdown = !showOsDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false"
+                  >
+                    {{ issue.operatingSystem ? label(issue.operatingSystem) : '\u2014' }}
+                    <ChevronDown :size="12" />
+                  </button>
+                  <div
+                    v-if="showOsDropdown"
+                    class="absolute top-full left-0 sm:left-auto sm:right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[11] py-1 w-[160px]"
+                  >
+                    <button
+                      v-for="opt in osOptions"
+                      :key="opt.value"
+                      class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
+                      :class="issue.operatingSystem === opt.value ? 'text-[#4857FE] font-medium' : 'text-gray-600'"
+                      @click="selectOs(opt.value)"
+                    >
+                      {{ opt.label }}
+                      <Check v-if="issue.operatingSystem === opt.value" :size="14" class="ml-auto text-[#4857FE]" />
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1485,14 +2131,14 @@ const groupedActivities = computed(() => {
                 <div class="relative" @click.stop>
                   <button
                     class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-300 transition-colors"
-                    @click="showReproducibilityDropdown = !showReproducibilityDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
+                    @click="showReproducibilityDropdown = !showReproducibilityDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
                   >
                     {{ issue.reproducibility ? label(issue.reproducibility) : '\u2014' }}
                     <ChevronDown :size="12" />
                   </button>
                   <div
                     v-if="showReproducibilityDropdown"
-                    class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[11] py-1 w-[200px]"
+                    class="absolute top-full left-0 sm:left-auto sm:right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[11] py-1 w-[200px]"
                   >
                     <button
                       v-for="opt in reproducibilityOptions"
@@ -1508,129 +2154,34 @@ const groupedActivities = computed(() => {
                 </div>
               </div>
 
-              <!-- Environment (dropdown) -->
-              <div class="flex items-center gap-3">
-                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
-                  <Globe :size="13" class="text-gray-400" /> Environment
-                </span>
-                <div class="relative" @click.stop>
-                  <button
-                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-300 transition-colors"
-                    @click="showEnvironmentDropdown = !showEnvironmentDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReproducibilityDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
-                  >
-                    {{ issue.environment ? label(issue.environment) : '\u2014' }}
-                    <ChevronDown :size="12" />
-                  </button>
-                  <div
-                    v-if="showEnvironmentDropdown"
-                    class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[11] py-1 w-[160px]"
-                  >
-                    <button
-                      v-for="opt in environmentOptions"
-                      :key="opt.value"
-                      class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
-                      :class="issue.environment === opt.value ? 'text-[#4857FE] font-medium' : 'text-gray-600'"
-                      @click="selectEnvironment(opt.value)"
-                    >
-                      {{ opt.label }}
-                      <Check v-if="issue.environment === opt.value" :size="14" class="ml-auto text-[#4857FE]" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Browser (dropdown) -->
-              <div class="flex items-center gap-3">
-                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
-                  <Monitor :size="13" class="text-gray-400" /> Browser
-                </span>
-                <div class="relative" @click.stop>
-                  <button
-                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-300 transition-colors"
-                    @click="showBrowserDropdown = !showBrowserDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showOsDropdown = false"
-                  >
-                    {{ issue.browser ? label(issue.browser) : '\u2014' }}
-                    <ChevronDown :size="12" />
-                  </button>
-                  <div
-                    v-if="showBrowserDropdown"
-                    class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[11] py-1 w-[160px]"
-                  >
-                    <button
-                      v-for="opt in browserOptions"
-                      :key="opt.value"
-                      class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
-                      :class="issue.browser === opt.value ? 'text-[#4857FE] font-medium' : 'text-gray-600'"
-                      @click="selectBrowser(opt.value)"
-                    >
-                      {{ opt.label }}
-                      <Check v-if="issue.browser === opt.value" :size="14" class="ml-auto text-[#4857FE]" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- OS (dropdown) -->
-              <div class="flex items-center gap-3">
-                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
-                  <Smartphone :size="13" class="text-gray-400" /> OS
-                </span>
-                <div class="relative" @click.stop>
-                  <button
-                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-300 transition-colors"
-                    @click="showOsDropdown = !showOsDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false"
-                  >
-                    {{ issue.operatingSystem ? label(issue.operatingSystem) : '\u2014' }}
-                    <ChevronDown :size="12" />
-                  </button>
-                  <div
-                    v-if="showOsDropdown"
-                    class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[11] py-1 w-[160px]"
-                  >
-                    <button
-                      v-for="opt in osOptions"
-                      :key="opt.value"
-                      class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
-                      :class="issue.operatingSystem === opt.value ? 'text-[#4857FE] font-medium' : 'text-gray-600'"
-                      @click="selectOs(opt.value)"
-                    >
-                      {{ opt.label }}
-                      <Check v-if="issue.operatingSystem === opt.value" :size="14" class="ml-auto text-[#4857FE]" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Created -->
-              <div class="flex items-center gap-3">
-                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
-                  <Clock :size="13" class="text-gray-400" /> Created
-                </span>
-                <span class="text-sm text-gray-500">{{ formatDate(issue.createdAt) }}</span>
               </div>
 
             </div>
           </div>
 
           <!-- Sticky Tabs -->
-          <div class="sticky top-[44px] z-10 bg-white border-t border-b border-gray-100">
-            <div class="flex px-6 gap-0">
+          <div class="sticky top-[44px] z-10 bg-white border-t border-b border-gray-100 relative">
+            <div
+              ref="tabStripRef"
+              class="flex px-6 gap-0 overflow-x-auto select-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+              :class="tabStripGrabbing ? 'cursor-grabbing' : 'cursor-grab'"
+              @scroll="updateTabStripOverflowEdges"
+              @pointerdown="onTabStripPointerDown"
+              @pointermove="onTabStripPointerMove"
+              @pointerup="onTabStripPointerEnd"
+              @pointercancel="onTabStripPointerEnd"
+            >
               <button
-                v-for="tab in ([
-                  { key: 'description', label: 'Description', icon: FileText, count: 0 },
-                  { key: 'reproduction', label: 'Reproduction', icon: Bug, count: 0 },
-                  { key: 'comments', label: 'Comments', icon: MessageSquare, count: comments.length },
-                  { key: 'attachments', label: 'Attachments', icon: Paperclip, count: attachments.length },
-                  { key: 'activities', label: 'Activities', icon: History, count: 0 },
-                ] as const)"
+                v-for="tab in issueDetailTabs"
                 :key="tab.key"
-                class="px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer"
+                type="button"
+                class="shrink-0 px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap"
                 :class="activeTab === tab.key
                   ? 'text-[#F97316] border-[#F97316]'
                   : 'text-gray-400 border-transparent hover:text-gray-600'"
-                @click="activeTab = tab.key as any; tab.key === 'activities' && issue && loadActivities(issue.id); tab.key === 'attachments' && issue && loadAttachments(issue.id); tab.key === 'comments' && issue && loadComments(issue.id)"
+                @click="onIssueDetailTabActivate(tab)"
               >
-                <span class="flex items-center gap-1.5">
+                <span class="inline-flex items-center gap-1.5 whitespace-nowrap">
                   <component :is="tab.icon" :size="14" />
                   {{ tab.label }}
                   <span
@@ -1641,6 +2192,24 @@ const groupedActivities = computed(() => {
                 </span>
               </button>
             </div>
+            <button
+              v-if="tabStripCanScrollLeft"
+              type="button"
+              class="absolute inset-y-0 left-0 z-[2] w-12 flex items-center justify-start pl-1 border-0 bg-gradient-to-r from-gray-50 from-45% via-gray-50/85 to-transparent cursor-pointer hover:from-gray-100/95 hover:via-gray-100/80 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#4857FE]/30 focus-visible:ring-inset"
+              aria-label="Scroll tabs left"
+              @click.stop="scrollTabStripByArrow('left')"
+            >
+              <ChevronLeft :size="18" class="text-gray-500 shrink-0 drop-shadow-sm pointer-events-none" />
+            </button>
+            <button
+              v-if="tabStripCanScrollRight"
+              type="button"
+              class="absolute inset-y-0 right-0 z-[2] w-12 flex items-center justify-end pr-1 border-0 bg-gradient-to-l from-gray-50 from-45% via-gray-50/85 to-transparent cursor-pointer hover:from-gray-100/95 hover:via-gray-100/80 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#4857FE]/30 focus-visible:ring-inset"
+              aria-label="Scroll tabs right"
+              @click.stop="scrollTabStripByArrow('right')"
+            >
+              <ChevronRight :size="18" class="text-gray-500 shrink-0 drop-shadow-sm pointer-events-none" />
+            </button>
           </div>
 
           <!-- Tab Content -->
@@ -1784,6 +2353,33 @@ const groupedActivities = computed(() => {
               </div>
             </template>
 
+            <!-- Custom fields (form builder) -->
+            <template v-if="activeTab === 'customFields'">
+              <div class="py-4 space-y-4" @click.stop>
+                <p v-if="customIssueFields.length === 0" class="text-sm text-gray-400">No custom fields configured.</p>
+                <template v-else>
+                  <DynamicField
+                    v-for="field in customIssueFields"
+                    :key="field.key"
+                    :field="field"
+                    :model-value="customFieldValues[field.key]"
+                    @update:model-value="customFieldValues[field.key] = $event"
+                  />
+                  <div class="flex items-center gap-2 pt-2 border-t border-gray-100">
+                    <button
+                      type="button"
+                      class="px-3 py-1.5 text-xs font-medium text-white bg-[#4857FE] rounded-md hover:bg-[#3a46d9] transition-colors cursor-pointer disabled:opacity-50"
+                      :disabled="customFieldsSaving"
+                      @click="saveIssueCustomFields"
+                    >
+                      <Loader2 v-if="customFieldsSaving" :size="14" class="inline animate-spin mr-1 align-middle" />
+                      Save additional fields
+                    </button>
+                  </div>
+                </template>
+              </div>
+            </template>
+
             <!-- Comments Tab -->
             <template v-if="activeTab === 'comments'">
               <div v-if="commentsLoading" class="flex items-center justify-center py-8">
@@ -1829,7 +2425,9 @@ const groupedActivities = computed(() => {
                               <Trash2 v-else :size="11" />
                             </button>
                           </div>
-                          <p class="text-sm text-gray-600 leading-snug mt-0.5">{{ comment.content }}</p>
+                          <div class="mt-0.5">
+                            <FormattedCommentContent :text="comment.content" :users="issueMentionUsersForDisplay" />
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2065,14 +2663,14 @@ const groupedActivities = computed(() => {
         <!-- Comment Input Footer (always on comments tab) -->
         <div v-if="activeTab === 'comments'" class="border-t border-gray-100 bg-white px-5 py-3 shrink-0">
           <div class="flex items-end gap-2">
-            <div class="flex-1 relative">
-              <textarea
+            <div class="flex-1 min-w-0">
+              <MentionTextarea
                 v-model="newComment"
-                rows="2"
-                class="w-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 outline-none resize-none focus:border-[#4857FE] focus:ring-1 focus:ring-[#4857FE]/20 transition-colors placeholder-gray-400"
+                :users="issueMentionUsers"
+                :rows="2"
                 placeholder="Write your comment..."
                 @keydown.enter.exact.prevent="submitComment"
-              ></textarea>
+              />
             </div>
             <button
               class="p-2.5 rounded-full transition-colors shrink-0 cursor-pointer"

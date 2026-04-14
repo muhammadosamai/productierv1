@@ -1,7 +1,7 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { issues, issueComments, issueAttachments, users, productMembers } from '../db/schema'
-import { eq, sql, and } from 'drizzle-orm'
+import { eq, sql, and, asc, isNotNull, ne } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
@@ -206,7 +206,43 @@ BEGIN
 END $$;
 `)
 
+  await db.execute(sql`ALTER TABLE issues ADD COLUMN IF NOT EXISTS estimate_value double precision;`)
+  await db.execute(sql`ALTER TABLE issues ADD COLUMN IF NOT EXISTS start_date date;`)
+  await db.execute(sql`ALTER TABLE issues ADD COLUMN IF NOT EXISTS end_date date;`)
+
   issueSchemaBootstrapped = true
+}
+
+const ISSUE_ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
+
+function normalizeIssueDateWireValue(raw: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (raw === null || raw === undefined) return { ok: true, value: null }
+  if (typeof raw !== 'string') return { ok: false, error: 'startDate and endDate must be YYYY-MM-DD strings or null' }
+  const s = raw.trim()
+  if (!s) return { ok: true, value: null }
+  const m = ISSUE_ISO_DATE.exec(s)
+  if (!m) return { ok: false, error: 'Invalid date (use YYYY-MM-DD)' }
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3])
+  const dt = new Date(Date.UTC(y, mo - 1, d))
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) {
+    return { ok: false, error: 'Invalid calendar date' }
+  }
+  return { ok: true, value: s }
+}
+
+function normalizeIssueEstimateWireValue(raw: unknown): { ok: true; value: number | null } | { ok: false; error: string } {
+  if (raw === null || raw === undefined) return { ok: true, value: null }
+  const n = typeof raw === 'number' ? raw : Number.parseFloat(String(raw))
+  if (!Number.isFinite(n)) return { ok: false, error: 'Estimate must be a finite number of hours' }
+  if (n < 0) return { ok: false, error: 'Estimate cannot be negative' }
+  return { ok: true, value: Math.round(n * 2) / 2 }
+}
+
+function issueStoredDateToComparable(v: unknown): string | null {
+  if (v == null) return null
+  if (typeof v === 'string') return v.length >= 10 ? v.slice(0, 10) : v
+  if (v instanceof Date) return v.toISOString().slice(0, 10)
+  return String(v).slice(0, 10)
 }
 
 const issueBodyShared = {
@@ -231,6 +267,8 @@ const issueBodyShared = {
   ])),
   status: t.Optional(t.Nullable(t.String({ maxLength: 64 }))),
   assignedToUserId: t.Optional(t.Nullable(t.String())),
+  /** Change issue reporter; must be a product team member (validated on PUT). */
+  reportedByUserId: t.Optional(t.String()),
   appVersion: t.Optional(t.Nullable(t.String())),
   environment: t.Optional(t.Nullable(t.Union([
     t.Literal('production'), t.Literal('staging'), t.Literal('development'), t.Literal('testing'),
@@ -246,6 +284,9 @@ const issueBodyShared = {
   storyId: t.Optional(t.Nullable(t.String())),
   taskId: t.Optional(t.Nullable(t.String())),
   testCycleId: t.Optional(t.Nullable(t.String())),
+  estimateValue: t.Optional(t.Nullable(t.Number())),
+  startDate: t.Optional(t.Nullable(t.String())),
+  endDate: t.Optional(t.Nullable(t.String())),
 } as const
 
 const issueCreateBody = t.Object({
@@ -259,6 +300,47 @@ const issueUpdateBody = t.Object({
   archived: t.Optional(t.Boolean()),
   ...issueBodyShared,
 })
+
+/**
+ * Only these keys may flow into `db.update(issues).set(...)` (defense in depth vs arbitrary JSON).
+ * Intentionally omits `product` — moving issues between products should be a dedicated flow if ever needed.
+ */
+const ISSUE_PUT_ALLOWED_KEYS = [
+  'title',
+  'archived',
+  'description',
+  'type',
+  'module',
+  'stepsToReproduce',
+  'expectedBehavior',
+  'actualBehavior',
+  'reproducibility',
+  'severity',
+  'priority',
+  'status',
+  'assignedToUserId',
+  'reportedByUserId',
+  'appVersion',
+  'environment',
+  'browser',
+  'operatingSystem',
+  'storyId',
+  'taskId',
+  'testCycleId',
+  'estimateValue',
+  'startDate',
+  'endDate',
+] as const
+
+function pickIssueUpdatePayload(body: Record<string, unknown>): Record<string, any> {
+  const out: Record<string, any> = {}
+  for (const k of ISSUE_PUT_ALLOWED_KEYS) {
+    if (k in body && body[k] !== undefined) {
+      out[k] = body[k]
+    }
+  }
+  return out
+}
 
 async function getUserFromHeader(jwtVerify: any, headers: Record<string, string | undefined>) {
   const authHeader = headers.authorization
@@ -337,6 +419,31 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const taskId = optionalUuid(body.taskId)
     const testCycleId = optionalUuid(body.testCycleId)
 
+    let createEstimate: number | null | undefined
+    if (body.estimateValue !== undefined) {
+      const ev = normalizeIssueEstimateWireValue(body.estimateValue)
+      if (!ev.ok) { set.status = 400; return { error: ev.error } }
+      createEstimate = ev.value
+    }
+    let createStart: string | null | undefined
+    let createEnd: string | null | undefined
+    if (body.startDate !== undefined) {
+      const sd = normalizeIssueDateWireValue(body.startDate)
+      if (!sd.ok) { set.status = 400; return { error: sd.error } }
+      createStart = sd.value
+    }
+    if (body.endDate !== undefined) {
+      const ed = normalizeIssueDateWireValue(body.endDate)
+      if (!ed.ok) { set.status = 400; return { error: ed.error } }
+      createEnd = ed.value
+    }
+    const effStart = createStart !== undefined ? createStart : null
+    const effEnd = createEnd !== undefined ? createEnd : null
+    if (effStart && effEnd && effEnd < effStart) {
+      set.status = 400
+      return { error: 'End date must be on or after start date' }
+    }
+
     let issue: typeof issues.$inferSelect | null = null
 
     const [inserted] = await db.insert(issues).values({
@@ -361,6 +468,9 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       storyId,
       taskId,
       testCycleId,
+      ...(createEstimate !== undefined ? { estimateValue: createEstimate } : {}),
+      ...(createStart !== undefined ? { startDate: createStart } : {}),
+      ...(createEnd !== undefined ? { endDate: createEnd } : {}),
     }).returning()
     issue = inserted || null
 
@@ -407,6 +517,35 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       },
       orderBy: (items, { desc }) => [desc(items.createdAt)],
     })
+  })
+
+  // GET /api/issues/distinct-modules?product=X — non-null module names for autocomplete (must be before /:id)
+  .get('/distinct-modules', async ({ query, set, headers, jwt: jwtInstance }) => {
+    const user = await getUserFromHeader(jwtInstance.verify, headers)
+    if (!user) {
+      set.status = 401
+      return { error: 'Unauthorized' }
+    }
+    const product = query.product?.trim()
+    if (!product) {
+      set.status = 400
+      return { error: 'product query parameter is required' }
+    }
+    const rows = await db
+      .select({ module: issues.module })
+      .from(issues)
+      .where(
+        and(
+          eq(issues.product, product),
+          eq(issues.archived, false),
+          isNotNull(issues.module),
+          ne(sql`trim(${issues.module})`, ''),
+        ),
+      )
+      .groupBy(issues.module)
+      .orderBy(asc(issues.module))
+      .limit(200)
+    return rows.map(r => r.module as string)
   })
 
   // GET /api/issues/:id
@@ -463,21 +602,69 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       }
     }
 
-    const updatePayload: Record<string, any> = { ...body }
+    const updatePayload = pickIssueUpdatePayload(body as Record<string, unknown>)
+    if (Object.keys(updatePayload).length === 0) {
+      set.status = 400
+      return { error: 'No valid fields to update' }
+    }
     if (body.status !== undefined && body.status !== null) {
       const raw = String(body.status).trim()
       updatePayload.status = normalizeIssueStatusToCanonicalId(merged, raw) ?? raw
     }
     if ('assignedToUserId' in updatePayload) updatePayload.assignedToUserId = optionalUuid(updatePayload.assignedToUserId)
+    if ('reportedByUserId' in updatePayload) {
+      const rid = optionalUuid(updatePayload.reportedByUserId)
+      if (!rid) {
+        set.status = 400
+        return { error: 'reportedByUserId must be a valid user id' }
+      }
+      if (user.role !== 'super_admin') {
+        const mem = await db.query.productMembers.findFirst({
+          where: and(eq(productMembers.product, existing.product), eq(productMembers.userId, rid)),
+        })
+        if (!mem) {
+          set.status = 400
+          return { error: 'Reporter must be a member of this product' }
+        }
+      }
+      updatePayload.reportedByUserId = rid
+    }
     if ('storyId' in updatePayload) updatePayload.storyId = optionalUuid(updatePayload.storyId)
     if ('taskId' in updatePayload) updatePayload.taskId = optionalUuid(updatePayload.taskId)
     if ('testCycleId' in updatePayload) updatePayload.testCycleId = optionalUuid(updatePayload.testCycleId)
+
+    if ('estimateValue' in updatePayload) {
+      const ev = normalizeIssueEstimateWireValue(updatePayload.estimateValue)
+      if (!ev.ok) { set.status = 400; return { error: ev.error } }
+      updatePayload.estimateValue = ev.value
+    }
+    if ('startDate' in updatePayload) {
+      const sd = normalizeIssueDateWireValue(updatePayload.startDate)
+      if (!sd.ok) { set.status = 400; return { error: sd.error } }
+      updatePayload.startDate = sd.value
+    }
+    if ('endDate' in updatePayload) {
+      const ed = normalizeIssueDateWireValue(updatePayload.endDate)
+      if (!ed.ok) { set.status = 400; return { error: ed.error } }
+      updatePayload.endDate = ed.value
+    }
+    const nextStart = 'startDate' in updatePayload
+      ? (updatePayload.startDate as string | null)
+      : issueStoredDateToComparable(existing.startDate)
+    const nextEnd = 'endDate' in updatePayload
+      ? (updatePayload.endDate as string | null)
+      : issueStoredDateToComparable(existing.endDate)
+    if (nextStart && nextEnd && nextEnd < nextStart) {
+      set.status = 400
+      return { error: 'End date must be on or after start date' }
+    }
 
     const [updated] = await db.update(issues).set(updatePayload).where(eq(issues.id, id)).returning()
 
     const changes = computeChanges(existing, updated!, [
       'title', 'description', 'type', 'severity', 'priority', 'status',
-      'assignedToUserId', 'module', 'environment', 'browser', 'operatingSystem', 'archived',
+      'assignedToUserId', 'reportedByUserId', 'module', 'environment', 'browser', 'operatingSystem', 'archived',
+      'estimateValue', 'startDate', 'endDate',
     ])
 
     if (changes.length > 0) {
@@ -495,8 +682,11 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     }
 
     // Notification: assignee changed
-    if (body.assignedToUserId && body.assignedToUserId !== existing.assignedToUserId) {
-      const assigneeId = optionalUuid(body.assignedToUserId)
+    if (
+      'assignedToUserId' in updatePayload &&
+      updatePayload.assignedToUserId !== existing.assignedToUserId
+    ) {
+      const assigneeId = optionalUuid(updatePayload.assignedToUserId as string | null)
       if (assigneeId) {
         sendNotificationIfEnabled({
           targetUserId: assigneeId,
@@ -510,7 +700,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     }
 
     // Notification: status changed
-    if (body.status && body.status !== existing.status) {
+    if (updatePayload.status !== undefined && updatePayload.status !== existing.status) {
       const notifyIds = new Set<string>()
       if (existing.assignedToUserId) notifyIds.add(existing.assignedToUserId)
       if (existing.reportedByUserId) notifyIds.add(existing.reportedByUserId)
@@ -522,7 +712,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
           entityType: 'issue',
           entityTitle: updated!.title,
           entityPath: `/issues?issue=${updated!.id}`,
-          details: body.status,
+          details: updatePayload.status,
         }).catch(() => {})
       }
     }

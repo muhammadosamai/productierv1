@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ChevronRight, ChevronDown, Plus, Frown, Sparkles, Bug, Lightbulb, FlaskConical, FolderOpen, Wrench, Server, TestTube2, FileText, BugPlay, Gauge, MessageSquareWarning, PanelLeftClose, LayoutDashboard, Users, BookOpen } from 'lucide-vue-next'
 import TaskStatusIcon from '@/components/shared/TaskStatusIcon.vue'
+import UploadAssetImg from '@/components/shared/UploadAssetImg.vue'
 import { useProductStore } from '@/stores/products'
 import { useInitiativesStore } from '@/stores/initiatives'
 import { useBacklogStore } from '@/stores/backlog'
@@ -577,6 +578,24 @@ function selectItem(label: string) {
   }
 }
 
+/** Native `title` tooltips on sidebar + create actions */
+function addActionTooltip(label: string): string {
+  const map: Record<string, string> = {
+    Team: 'Invite team member',
+    Initiatives: 'Create initiative',
+    Stories: 'Create story',
+    Issues: 'Create issues',
+    Tasks: 'Create tasks',
+    Deliveries: 'Create delivery',
+    Releases: 'Create release',
+    'Testing Cycles': 'Create testing cycle',
+    'Performance Cycles': 'Open performance cycles',
+    'Consumer Feedback': 'Submit feedback',
+    'Feature Requests': 'Create feature request',
+  }
+  return map[label] ?? `Create ${label.toLowerCase()}`
+}
+
 function handleAddClick(item: NavItem, event: Event) {
   event.stopPropagation()
   if (item.label === 'Initiatives') {
@@ -692,7 +711,7 @@ function onIssueCreated() {
     <!-- Product header -->
     <div class="flex items-center gap-3 px-5 pt-4 pb-3">
       <div class="flex items-center justify-center w-10 h-10 rounded-xl overflow-hidden shrink-0">
-        <img
+        <UploadAssetImg
           v-if="activeProductLogo"
           :src="activeProductLogo"
           :alt="activeProductName || 'Product'"
@@ -748,12 +767,14 @@ function onIssueCreated() {
               <component :is="expandedItems[item.label] ? ChevronDown : ChevronRight" :size="16" />
             </span>
 
-            <Plus
+            <span
               v-if="item.hasAdd"
-              :size="16"
-              class="text-gray-300 hover:text-[#4857FE] transition-colors shrink-0"
+              class="shrink-0 inline-flex cursor-pointer rounded p-0.5 -m-0.5 hover:bg-gray-100/80"
+              :title="addActionTooltip(item.label)"
               @click.stop="handleAddClick(item, $event)"
-            />
+            >
+              <Plus :size="16" class="text-gray-300 hover:text-[#4857FE] transition-colors" />
+            </span>
           </button>
 
           <!-- Children (Team members) -->
@@ -830,12 +851,14 @@ function onIssueCreated() {
               </span>
 
               <!-- Add button -->
-              <Plus
+              <span
                 v-if="item.hasAdd"
-                :size="16"
-                class="text-gray-300 hover:text-[#4857FE] transition-colors shrink-0"
-                @click="handleAddClick(item, $event)"
-              />
+                class="shrink-0 inline-flex cursor-pointer rounded p-0.5 -m-0.5 hover:bg-gray-100/80"
+                :title="addActionTooltip(item.label)"
+                @click.stop="handleAddClick(item, $event)"
+              >
+                <Plus :size="16" class="text-gray-300 hover:text-[#4857FE] transition-colors" />
+              </span>
             </button>
 
             <!-- Children -->
@@ -956,12 +979,14 @@ function onIssueCreated() {
                 />
               </span>
 
-              <Plus
+              <span
                 v-if="item.hasAdd"
-                :size="16"
-                class="text-gray-300 hover:text-[#4857FE] transition-colors shrink-0"
+                class="shrink-0 inline-flex cursor-pointer rounded p-0.5 -m-0.5 hover:bg-gray-100/80"
+                :title="addActionTooltip(item.label)"
                 @click.stop="handleAddClick(item, $event)"
-              />
+              >
+                <Plus :size="16" class="text-gray-300 hover:text-[#4857FE] transition-colors" />
+              </span>
             </button>
 
             <!-- Children -->

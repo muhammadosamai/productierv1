@@ -39,7 +39,7 @@ defineExpose({ showProductSidebars })
     style="background-color: rgb(32 36 81)"
   >
     <!-- App logo -->
-    <div class="flex flex-col items-center mb-2">
+    <div class="flex flex-col items-center mb-2" title="Productier">
       <div class="flex items-center justify-center w-10 h-10">
         <img src="/logo.png" alt="Productier" class="w-9 h-9 rounded-full" />
       </div>
@@ -53,6 +53,8 @@ defineExpose({ showProductSidebars })
 
       <!-- Home -->
       <button
+        type="button"
+        title="Home"
         class="flex items-center justify-center w-10 h-10 rounded-xl text-white transition-colors"
         :class="activeIndex === 0 ? 'bg-white/15' : 'hover:bg-white/10'"
         @click="navigateTo(0)"
@@ -70,6 +72,8 @@ defineExpose({ showProductSidebars })
 
       <!-- Products -->
       <button
+        type="button"
+        title="Products"
         class="flex items-center justify-center w-10 h-10 rounded-xl text-white transition-colors"
         :class="activeIndex === 1 ? 'bg-white/15' : 'hover:bg-white/10'"
         @click="navigateTo(1)"
@@ -89,6 +93,8 @@ defineExpose({ showProductSidebars })
       <!-- Team / Users -->
       <button
         v-if="rolesStore.canAccess('users')"
+        type="button"
+        title="Users"
         class="flex items-center justify-center w-10 h-10 rounded-xl text-white transition-colors"
         :class="activeIndex === 2 ? 'bg-white/15' : 'hover:bg-white/10'"
         @click="navigateTo(2)"
@@ -114,6 +120,8 @@ defineExpose({ showProductSidebars })
       <!-- Link / Integrations -->
       <button
         v-if="rolesStore.canAccess('integrations')"
+        type="button"
+        title="Integrations"
         class="flex items-center justify-center w-10 h-10 rounded-xl text-white transition-colors"
         :class="activeIndex === 3 ? 'bg-white/15' : 'hover:bg-white/10'"
         @click="navigateTo(3)"
@@ -131,6 +139,8 @@ defineExpose({ showProductSidebars })
     <!-- Bottom settings icon -->
     <div v-if="rolesStore.canAccess('settings')" class="flex flex-col items-center">
       <button
+        type="button"
+        title="Settings"
         class="flex items-center justify-center w-10 h-10 rounded-xl text-white/60 hover:text-white hover:bg-white/10 transition-colors"
         @click="$router.push('/settings')"
       >

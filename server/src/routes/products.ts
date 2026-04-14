@@ -27,6 +27,22 @@ async function isProductAdmin(userId: string, product: string): Promise<boolean>
   return member?.role === 'admin'
 }
 
+function isOwnerOrSuperAdmin(
+  user: { id: string; role: string },
+  product: { createdByUserId: string },
+): boolean {
+  return product.createdByUserId === user.id || user.role === 'super_admin'
+}
+
+async function canManageProductBranding(
+  user: { id: string; role: string },
+  productName: string,
+  product: { createdByUserId: string },
+): Promise<boolean> {
+  if (isOwnerOrSuperAdmin(user, product)) return true
+  return isProductAdmin(user.id, productName)
+}
+
 function normalizeProjectKeyBase(input: string) {
   const base = input.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 5)
   return base || 'PRD'
@@ -318,11 +334,29 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
   })
 
   // POST /api/products/upload-logo - Upload product logo image
-  .post('/upload-logo', async ({ body, set, jwt: jwtInstance, headers }) => {
+  // When `product` query is omitted, any authenticated user may upload (e.g. create-product flow before a product exists).
+  // When `product` is set, only owner / product admin / super_admin may upload for that product.
+  .post('/upload-logo', async ({ body, query, set, jwt: jwtInstance, headers }) => {
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) {
       set.status = 401
       return { error: 'Unauthorized' }
+    }
+
+    const productName = query.product?.trim()
+    if (productName) {
+      const scopedProduct = await db.query.products.findFirst({
+        where: eq(products.name, productName),
+      })
+      if (!scopedProduct) {
+        set.status = 404
+        return { error: 'Product not found' }
+      }
+      const allowed = await canManageProductBranding(user, productName, scopedProduct)
+      if (!allowed) {
+        set.status = 403
+        return { error: 'Only the product owner, a product admin, or super admin can upload a logo for this product' }
+      }
     }
 
     const file = body.file
@@ -345,6 +379,9 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     body: t.Object({
       file: t.File({ maxSize: '5m', type: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'] }),
     }),
+    query: t.Object({
+      product: t.Optional(t.String()),
+    }),
   })
 
   // PUT /api/products/:name - Update product name, description, logo
@@ -363,16 +400,30 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       return { error: 'Product not found' }
     }
 
-    // Only product creator or super_admin can update
-    if (product.createdByUserId !== user.id && user.role !== 'super_admin') {
+    const ownerOrSuper = isOwnerOrSuperAdmin(user, product)
+    const productAdmin = await isProductAdmin(user.id, name)
+
+    if (!ownerOrSuper && !productAdmin) {
       set.status = 403
-      return { error: 'Only the product owner or super admin can update this product' }
+      return { error: 'Only the product owner, a product admin, or super admin can update this product' }
+    }
+
+    if (!ownerOrSuper && productAdmin) {
+      if (body.name !== undefined && body.name !== name) {
+        set.status = 403
+        return { error: 'Only the product owner or super admin can rename this product' }
+      }
     }
 
     const updates: Record<string, any> = {}
-    if (body.name !== undefined) updates.name = body.name
-    if (body.description !== undefined) updates.description = body.description
-    if (body.logo !== undefined) updates.logo = body.logo
+    if (ownerOrSuper) {
+      if (body.name !== undefined) updates.name = body.name
+      if (body.description !== undefined) updates.description = body.description
+      if (body.logo !== undefined) updates.logo = body.logo
+    } else {
+      if (body.description !== undefined) updates.description = body.description
+      if (body.logo !== undefined) updates.logo = body.logo
+    }
 
     if (Object.keys(updates).length === 0) {
       return product

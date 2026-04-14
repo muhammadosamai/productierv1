@@ -31,6 +31,9 @@ export interface Issue {
   storyId: string | null
   taskId: string | null
   testCycleId: string | null
+  estimateValue: number | null
+  startDate: string | null
+  endDate: string | null
   /** Hidden from lists/search when true; only product admins can archive or view. */
   archived?: boolean
   createdAt: string
@@ -78,6 +81,7 @@ export interface CreateIssuePayload {
   priority?: IssuePriority
   status?: IssueStatus
   assignedToUserId?: string | null
+  reportedByUserId?: string
   appVersion?: string | null
   environment?: IssueEnvironment | null
   browser?: IssueBrowser | null
@@ -86,5 +90,8 @@ export interface CreateIssuePayload {
   storyId?: string | null
   taskId?: string | null
   testCycleId?: string | null
+  estimateValue?: number | null
+  startDate?: string | null
+  endDate?: string | null
   archived?: boolean
 }

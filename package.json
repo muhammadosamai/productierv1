@@ -7,7 +7,7 @@
     "dev": "vite",
     "dev:server": "cd server && bun run dev",
     "dev:all": "run-p dev dev:server",
-    "build": "run-p type-check \"build-only {@}\" --",
+    "build": "npm run type-check && npm run build-only",
     "preview": "vite preview",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",

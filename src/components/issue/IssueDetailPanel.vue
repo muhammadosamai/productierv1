@@ -367,6 +367,11 @@ function scrollTabStripByArrow(dir: 'left' | 'right') {
 function onTabStripPointerDown(e: PointerEvent) {
   const el = (e.currentTarget as HTMLElement) || tabStripRef.value
   if (!el || e.button !== 0) return
+  // Do not capture the pointer when the user pressed on a tab (or other control):
+  // setPointerCapture on the strip retargets pointerup away from the button and
+  // breaks the synthetic click, so tabs would only respond to drag-scroll.
+  const target = e.target as HTMLElement | null
+  if (target?.closest('button, a, input, select, textarea')) return
   tabStripDrag = { startX: e.clientX, scrollLeft: el.scrollLeft }
   tabStripGrabbing.value = true
   el.setPointerCapture(e.pointerId)

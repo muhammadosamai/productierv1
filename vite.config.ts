@@ -12,6 +12,19 @@ export default defineConfig({
     vueDevTools(),
     tailwindcss(),
   ],
+  build: {
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (id.includes('@tiptap')) return 'tiptap'
+          if (id.includes('chart.js') || id.includes('vue-chartjs')) return 'charts'
+          if (id.includes('lucide-vue-next')) return 'lucide'
+        },
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))

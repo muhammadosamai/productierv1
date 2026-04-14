@@ -7,7 +7,7 @@
     "dev": "vite",
     "dev:server": "cd server && bun run dev",
     "dev:all": "run-p dev dev:server",
-    "build": "run-p type-check \"build-only {@}\" --",
+    "build": "npm run type-check && npm run build-only",
     "preview": "vite preview",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
@@ -17,20 +17,20 @@
   },
   "dependencies": {
     "@internationalized/date": "^3.12.0",
-    "@tiptap/core": "^3.20.6",
-    "@tiptap/extension-document": "^3.20.6",
-    "@tiptap/extension-hard-break": "^3.20.6",
-    "@tiptap/extension-history": "^3.20.6",
-    "@tiptap/extension-link": "^3.20.1",
-    "@tiptap/extension-mention": "^3.20.6",
-    "@tiptap/extension-paragraph": "^3.20.6",
-    "@tiptap/extension-placeholder": "^3.20.1",
-    "@tiptap/extension-text": "^3.20.6",
-    "@tiptap/extension-underline": "^3.20.1",
-    "@tiptap/pm": "^3.20.6",
-    "@tiptap/starter-kit": "^3.20.1",
-    "@tiptap/suggestion": "^3.20.6",
-    "@tiptap/vue-3": "^3.20.1",
+    "@tiptap/core": "^3.22.3",
+    "@tiptap/extension-document": "^3.22.3",
+    "@tiptap/extension-hard-break": "^3.22.3",
+    "@tiptap/extension-history": "^3.22.3",
+    "@tiptap/extension-link": "^3.22.3",
+    "@tiptap/extension-mention": "^3.22.3",
+    "@tiptap/extension-paragraph": "^3.22.3",
+    "@tiptap/extension-placeholder": "^3.22.3",
+    "@tiptap/extension-text": "^3.22.3",
+    "@tiptap/extension-underline": "^3.22.3",
+    "@tiptap/pm": "^3.22.3",
+    "@tiptap/starter-kit": "^3.22.3",
+    "@tiptap/suggestion": "^3.22.3",
+    "@tiptap/vue-3": "^3.22.3",
     "@vueuse/core": "^14.2.1",
     "chart.js": "^4.5.1",
     "class-variance-authority": "^0.7.1",
@@ -62,5 +62,9 @@
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
+  },
+  "overrides": {
+    "@tiptap/core": "$@tiptap/core",
+    "@tiptap/pm": "$@tiptap/pm"
   }
 }

@@ -310,7 +310,7 @@ async function handleSubmit() {
   if (!validateCustomFields()) return
 
   let estimatePayload: number | null | undefined
-  const estRaw = estimateHours.value.trim()
+  const estRaw = String(estimateHours.value ?? '').trim()
   if (estRaw !== '') {
     const n = Number.parseFloat(estRaw)
     if (!Number.isFinite(n) || n < 0) {
@@ -320,8 +320,8 @@ async function handleSubmit() {
     estimatePayload = Math.round(n * 2) / 2
   }
 
-  const startWire = issueStartDate.value.trim() || null
-  const endWire = issueEndDate.value.trim() || null
+  const startWire = String(issueStartDate.value ?? '').trim() || null
+  const endWire = String(issueEndDate.value ?? '').trim() || null
   if (startWire && endWire && endWire < startWire) {
     error.value = 'End date must be on or after start date.'
     return

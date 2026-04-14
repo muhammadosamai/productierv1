@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { Pencil } from 'lucide-vue-next'
 
 const props = withDefaults(
   defineProps<{
@@ -9,13 +10,20 @@ const props = withDefaults(
     disabled?: boolean
     loading?: boolean
     inputClass?: string
+    /** Decorative pencil on the right (e.g. module field). Hidden while loading. */
+    showTrailingEditIcon?: boolean
   }>(),
   {
     placeholder: '',
     disabled: false,
     loading: false,
     inputClass: '',
+    showTrailingEditIcon: false,
   },
+)
+
+const inputRightPadClass = computed(() =>
+  props.loading || props.showTrailingEditIcon ? 'pr-8' : '',
 )
 
 const emit = defineEmits<{
@@ -122,15 +130,21 @@ defineExpose({ focus: () => inputRef.value?.focus() })
         type="text"
         :disabled="disabled"
         :placeholder="placeholder"
-        class="text-sm text-gray-700 border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-[#4857FE] w-48 disabled:opacity-50"
-        :class="[inputClass, loading ? 'pr-8' : '']"
+        class="text-sm text-gray-700 placeholder:text-gray-400 border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-[#4857FE] w-48 min-w-[12rem] disabled:opacity-50"
+        :class="[inputClass, inputRightPadClass]"
         @input="emit('update:modelValue', ($event.target as HTMLInputElement).value); onInput()"
         @focus="onFocus"
         @keydown="onKeydown"
       />
+      <Pencil
+        v-if="showTrailingEditIcon && !loading"
+        :size="14"
+        class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 pointer-events-none shrink-0"
+        aria-hidden="true"
+      />
       <span
         v-if="loading"
-        class="absolute right-2 pointer-events-none text-gray-400"
+        class="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400"
         aria-hidden="true"
       >
         <span class="inline-block w-3 h-3 border-2 border-gray-300 border-t-[#4857FE] rounded-full animate-spin" />

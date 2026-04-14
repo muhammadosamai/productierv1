@@ -10,7 +10,7 @@ import {
   MessageSquare, Send, Trash2,
   Upload, Download, ImageIcon, FileIcon, Paperclip,
   AlertTriangle, Eye, Monitor, Smartphone, Globe, Zap, Database, LayoutDashboard, Lock,
-  Archive, RotateCcw, ExternalLink,
+  Archive, RotateCcw, ExternalLink, Pencil,
 } from 'lucide-vue-next'
 import { useIssuesStore } from '@/stores/issues'
 import { useBacklogStore } from '@/stores/backlog'
@@ -144,12 +144,14 @@ const showSeverityDropdown = ref(false)
 const showPriorityDropdown = ref(false)
 const showTypeDropdown = ref(false)
 const showAssigneeDropdown = ref(false)
+const showReportedByDropdown = ref(false)
 const showReproducibilityDropdown = ref(false)
 const showEnvironmentDropdown = ref(false)
 const showBrowserDropdown = ref(false)
 const showOsDropdown = ref(false)
 const showStoryDropdown = ref(false)
 const assigneeSearchQuery = ref('')
+const reporterSearchQuery = ref('')
 const storySearchQuery = ref('')
 
 // Edit fields
@@ -321,6 +323,29 @@ const filteredAssigneeMembers = computed(() => {
   const q = assigneeSearchQuery.value.toLowerCase().trim()
   if (!q) return props.teamMembers
   return props.teamMembers.filter(u =>
+    u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+  )
+})
+
+/** Reported-by picker: only users who are members of this issue's product (matches API validation). */
+const productReporterPickerMembers = computed<TeamUser[]>(() => {
+  const p = props.issue?.product
+  if (!p) return []
+  return productMembersStore.members
+    .filter(m => m.product === p)
+    .map(m => ({
+      id: m.userId,
+      name: m.userName,
+      email: m.userEmail,
+      avatar: m.userAvatar,
+    }))
+})
+
+const filteredReporterMembers = computed(() => {
+  const q = reporterSearchQuery.value.toLowerCase().trim()
+  const list = productReporterPickerMembers.value
+  if (!q) return list
+  return list.filter(u =>
     u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
   )
 })
@@ -533,12 +558,14 @@ function closeAllDropdowns() {
   showPriorityDropdown.value = false
   showTypeDropdown.value = false
   showAssigneeDropdown.value = false
+  showReportedByDropdown.value = false
   showReproducibilityDropdown.value = false
   showEnvironmentDropdown.value = false
   showBrowserDropdown.value = false
   showOsDropdown.value = false
   showStoryDropdown.value = false
   assigneeSearchQuery.value = ''
+  reporterSearchQuery.value = ''
   storySearchQuery.value = ''
 }
 
@@ -551,7 +578,7 @@ const filteredStories = computed(() => {
 
 async function startStoryEdit() {
   if (!props.issue) return
-  storySearchQuery.value = ''
+  closeAllDropdowns()
   showStoryDropdown.value = true
   if (backlogStore.stories.length === 0 && props.issue.product) {
     await backlogStore.fetchStories(props.issue.product)
@@ -657,11 +684,15 @@ async function selectOs(val: IssueOs) {
 function startAssigneeEdit() {
   editingField.value = 'assignedTo'
   assigneeSearchQuery.value = ''
+  showReportedByDropdown.value = false
+  reporterSearchQuery.value = ''
   showAssigneeDropdown.value = true
 }
 
 async function selectAssignee(user: TeamUser) {
   showAssigneeDropdown.value = false
+  showReportedByDropdown.value = false
+  reporterSearchQuery.value = ''
   assigneeSearchQuery.value = ''
   saving.value = true
   try {
@@ -676,6 +707,8 @@ async function selectAssignee(user: TeamUser) {
 
 async function clearAssignee() {
   showAssigneeDropdown.value = false
+  showReportedByDropdown.value = false
+  reporterSearchQuery.value = ''
   saving.value = true
   try {
     await issuesStore.updateIssue(props.issue!.id, { assignedToUserId: null })
@@ -685,6 +718,38 @@ async function clearAssignee() {
     saving.value = false
     editingField.value = null
   }
+}
+
+// ──── Reported By ────
+function toggleReportedByDropdown() {
+  showStatusDropdown.value = false
+  showSeverityDropdown.value = false
+  showPriorityDropdown.value = false
+  showTypeDropdown.value = false
+  showAssigneeDropdown.value = false
+  showReproducibilityDropdown.value = false
+  showEnvironmentDropdown.value = false
+  showBrowserDropdown.value = false
+  showOsDropdown.value = false
+  showStoryDropdown.value = false
+  assigneeSearchQuery.value = ''
+  storySearchQuery.value = ''
+  reporterSearchQuery.value = ''
+  showReportedByDropdown.value = !showReportedByDropdown.value
+  editingField.value = showReportedByDropdown.value ? 'reportedBy' : null
+}
+
+async function selectReporter(user: TeamUser) {
+  if (!props.issue) return
+  showAssigneeDropdown.value = false
+  assigneeSearchQuery.value = ''
+  showReportedByDropdown.value = false
+  reporterSearchQuery.value = ''
+  if (user.id === props.issue.reportedByUserId) {
+    editingField.value = null
+    return
+  }
+  await updateField('reportedByUserId', user.id)
 }
 
 // ──── Module ────
@@ -1161,7 +1226,7 @@ const groupedActivities = computed(() => {
                     class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold cursor-pointer hover:opacity-80 transition-opacity"
                     :class="statusPillToneClass(issue.status)"
                     :style="statusPillStyleFor(issue.status)"
-                    @click="showStatusDropdown = !showStatusDropdown; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
+                    @click="showStatusDropdown = !showStatusDropdown; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
                   >
                     {{ statusOptionLabel(issue.status) }}
                     <ChevronDown :size="12" />
@@ -1197,7 +1262,7 @@ const groupedActivities = computed(() => {
                   <button
                     class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold cursor-pointer hover:opacity-80 transition-opacity"
                     :class="severityStyle(issue.severity)"
-                    @click="showSeverityDropdown = !showSeverityDropdown; showStatusDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
+                    @click="showSeverityDropdown = !showSeverityDropdown; showStatusDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
                   >
                     {{ label(issue.severity) }}
                     <ChevronDown :size="12" />
@@ -1229,7 +1294,7 @@ const groupedActivities = computed(() => {
                   <button
                     class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold cursor-pointer hover:opacity-80 transition-opacity"
                     :class="priorityStyle(issue.priority)"
-                    @click="showPriorityDropdown = !showPriorityDropdown; showStatusDropdown = false; showSeverityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
+                    @click="showPriorityDropdown = !showPriorityDropdown; showStatusDropdown = false; showSeverityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
                   >
                     {{ label(issue.priority) }}
                     <ChevronDown :size="12" />
@@ -1261,7 +1326,7 @@ const groupedActivities = computed(() => {
                   <button
                     class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer hover:opacity-80 transition-opacity"
                     :class="typeBadgeStyle(issue.type)"
-                    @click="showTypeDropdown = !showTypeDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showAssigneeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
+                    @click="showTypeDropdown = !showTypeDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
                   >
                     <component :is="typeIcons[issue.type] || Circle" :size="12" />
                     {{ label(issue.type) }}
@@ -1361,7 +1426,7 @@ const groupedActivities = computed(() => {
                 <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5 pt-1">
                   <User :size="13" class="text-gray-400" /> Assigned To
                 </span>
-                <div class="flex-1" @click.stop>
+                <div class="flex-1 relative" @click.stop>
                   <div class="flex items-center gap-2 flex-wrap">
                     <template v-if="issue.assignedTo">
                       <div class="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/assignee">
@@ -1382,7 +1447,7 @@ const groupedActivities = computed(() => {
                     <span v-else class="text-xs text-gray-400">Unassigned</span>
                     <button
                       class="w-5 h-5 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
-                      @click="showAssigneeDropdown = !showAssigneeDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false; assigneeSearchQuery = ''; editingField = 'assignedTo'"
+                      @click="showAssigneeDropdown = !showAssigneeDropdown; showReportedByDropdown = false; reporterSearchQuery = ''; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false; assigneeSearchQuery = ''; editingField = 'assignedTo'"
                     >
                       <span class="text-xs">+</span>
                     </button>
@@ -1390,7 +1455,7 @@ const groupedActivities = computed(() => {
                   <!-- Assignee dropdown -->
                   <div
                     v-if="showAssigneeDropdown"
-                    class="mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-10 w-full max-w-[280px]"
+                    class="absolute top-full left-0 z-30 mt-1 w-full max-w-[280px] rounded-lg border border-gray-200 bg-white shadow-lg"
                   >
                     <div class="p-2 border-b border-gray-100">
                       <div class="flex items-center gap-1.5 bg-gray-50 rounded-md px-2 py-1.5">
@@ -1434,19 +1499,58 @@ const groupedActivities = computed(() => {
                 </div>
               </div>
 
-              <!-- Reported By (read-only) -->
+              <!-- Reported By (same control style as Environment / OS; list is product members only) -->
               <div class="flex items-center gap-3">
                 <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
                   <User :size="13" class="text-gray-400" /> Reported By
                 </span>
-                <div v-if="issue.reportedBy" class="inline-flex items-center gap-1.5 bg-gray-50 rounded-full pl-1 pr-2.5 py-1">
-                  <div class="w-5 h-5 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
-                    <UploadAssetImg v-if="issue.reportedBy.avatar" :src="issue.reportedBy.avatar" class="w-5 h-5 rounded-full object-cover" />
-                    <span v-else>{{ issue.reportedBy.name[0] }}</span>
+                <div class="relative min-w-0" @click.stop>
+                  <button
+                    type="button"
+                    class="inline-flex max-w-[min(100%,240px)] cursor-pointer items-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1 text-left text-xs font-medium text-gray-700 transition-colors hover:border-gray-300"
+                    title="Change reporter"
+                    @click="toggleReportedByDropdown"
+                  >
+                    <span class="min-w-0 truncate">{{ issue.reportedBy?.name || '\u2014' }}</span>
+                    <ChevronDown :size="12" class="shrink-0" />
+                  </button>
+                  <div
+                    v-if="showReportedByDropdown"
+                    class="absolute top-full left-0 z-30 mt-1 w-[min(280px,calc(100vw-3rem))] rounded-lg border border-gray-200 bg-white shadow-lg"
+                  >
+                    <div class="p-2 border-b border-gray-100">
+                      <div class="flex items-center gap-1.5 bg-gray-50 rounded-md px-2 py-1.5">
+                        <Search :size="12" class="text-gray-400" />
+                        <input
+                          v-model="reporterSearchQuery"
+                          class="text-xs bg-transparent outline-none w-full placeholder-gray-400"
+                          placeholder="Search team members..."
+                          autofocus
+                        />
+                      </div>
+                    </div>
+                    <div class="max-h-[200px] overflow-auto py-1">
+                      <button
+                        v-for="member in filteredReporterMembers"
+                        :key="member.id"
+                        type="button"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
+                        @click="selectReporter(member)"
+                      >
+                        <div class="w-6 h-6 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
+                          <UploadAssetImg v-if="member.avatar" :src="member.avatar" class="w-6 h-6 rounded-full object-cover" />
+                          <span v-else>{{ member.name[0] }}</span>
+                        </div>
+                        <div class="flex-1 text-left min-w-0">
+                          <p class="text-sm text-gray-700 truncate">{{ member.name }}</p>
+                          <p class="text-[10px] text-gray-400 truncate">{{ member.email }}</p>
+                        </div>
+                        <Check v-if="issue.reportedByUserId === member.id" :size="14" class="text-[#4857FE] shrink-0" />
+                      </button>
+                      <p v-if="filteredReporterMembers.length === 0" class="text-xs text-gray-400 text-center py-3">No members found</p>
+                    </div>
                   </div>
-                  <span class="text-xs font-medium text-gray-600">{{ issue.reportedBy.name }}</span>
                 </div>
-                <span v-else class="text-sm text-gray-400">&mdash;</span>
               </div>
 
               <!-- Module (editable inline text) -->
@@ -1461,20 +1565,37 @@ const groupedActivities = computed(() => {
                       v-model="editModule"
                       :suggestions="moduleSuggestions"
                       :loading="moduleSuggestionsLoading"
-                      placeholder="Module name..."
+                      placeholder="Search Modules"
+                      show-trailing-edit-icon
                       @enter="saveModule"
                       @escape="editingField = null"
                     />
                     <button @click="saveModule" class="text-green-500 hover:text-green-600"><Check :size="14" /></button>
                     <button @click="editingField = null" class="text-gray-400 hover:text-gray-600"><X :size="14" /></button>
                   </div>
-                  <span
+                  <div
                     v-else
-                    class="text-sm font-medium text-gray-700 cursor-pointer hover:text-[#4857FE] transition-colors"
+                    class="group flex items-center gap-2 min-w-0 max-w-[min(100%,16rem)] cursor-pointer"
+                    title="Edit module"
+                    aria-label="Edit module"
+                    role="button"
+                    tabindex="0"
                     @click="startEditModule"
+                    @keydown.enter.prevent="startEditModule"
+                    @keydown.space.prevent="startEditModule"
                   >
-                    {{ issue.module || '\u2014' }}
-                  </span>
+                    <span
+                      class="text-sm truncate flex-1"
+                      :class="issue.module ? 'font-medium text-gray-700 group-hover:text-[#4857FE]' : 'font-normal text-gray-400'"
+                    >
+                      {{ issue.module || 'Search Modules' }}
+                    </span>
+                    <Pencil
+                      :size="14"
+                      class="shrink-0 text-gray-300 transition-colors group-hover:text-[#4857FE]/80"
+                      aria-hidden="true"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1514,7 +1635,7 @@ const groupedActivities = computed(() => {
                 <div class="relative" @click.stop>
                   <button
                     class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-300 transition-colors"
-                    @click="showReproducibilityDropdown = !showReproducibilityDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
+                    @click="showReproducibilityDropdown = !showReproducibilityDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
                   >
                     {{ issue.reproducibility ? label(issue.reproducibility) : '\u2014' }}
                     <ChevronDown :size="12" />
@@ -1545,7 +1666,7 @@ const groupedActivities = computed(() => {
                 <div class="relative" @click.stop>
                   <button
                     class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-300 transition-colors"
-                    @click="showEnvironmentDropdown = !showEnvironmentDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReproducibilityDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
+                    @click="showEnvironmentDropdown = !showEnvironmentDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
                   >
                     {{ issue.environment ? label(issue.environment) : '\u2014' }}
                     <ChevronDown :size="12" />
@@ -1576,7 +1697,7 @@ const groupedActivities = computed(() => {
                 <div class="relative" @click.stop>
                   <button
                     class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-300 transition-colors"
-                    @click="showBrowserDropdown = !showBrowserDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showOsDropdown = false"
+                    @click="showBrowserDropdown = !showBrowserDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showOsDropdown = false"
                   >
                     {{ issue.browser ? label(issue.browser) : '\u2014' }}
                     <ChevronDown :size="12" />
@@ -1607,7 +1728,7 @@ const groupedActivities = computed(() => {
                 <div class="relative" @click.stop>
                   <button
                     class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-300 transition-colors"
-                    @click="showOsDropdown = !showOsDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false"
+                    @click="showOsDropdown = !showOsDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false"
                   >
                     {{ issue.operatingSystem ? label(issue.operatingSystem) : '\u2014' }}
                     <ChevronDown :size="12" />

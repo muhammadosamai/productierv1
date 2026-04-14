@@ -78,6 +78,7 @@ export interface CreateIssuePayload {
   priority?: IssuePriority
   status?: IssueStatus
   assignedToUserId?: string | null
+  reportedByUserId?: string
   appVersion?: string | null
   environment?: IssueEnvironment | null
   browser?: IssueBrowser | null

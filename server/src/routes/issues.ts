@@ -231,6 +231,8 @@ const issueBodyShared = {
   ])),
   status: t.Optional(t.Nullable(t.String({ maxLength: 64 }))),
   assignedToUserId: t.Optional(t.Nullable(t.String())),
+  /** Change issue reporter; must be a product team member (validated on PUT). */
+  reportedByUserId: t.Optional(t.String()),
   appVersion: t.Optional(t.Nullable(t.String())),
   environment: t.Optional(t.Nullable(t.Union([
     t.Literal('production'), t.Literal('staging'), t.Literal('development'), t.Literal('testing'),
@@ -259,6 +261,44 @@ const issueUpdateBody = t.Object({
   archived: t.Optional(t.Boolean()),
   ...issueBodyShared,
 })
+
+/**
+ * Only these keys may flow into `db.update(issues).set(...)` (defense in depth vs arbitrary JSON).
+ * Intentionally omits `product` — moving issues between products should be a dedicated flow if ever needed.
+ */
+const ISSUE_PUT_ALLOWED_KEYS = [
+  'title',
+  'archived',
+  'description',
+  'type',
+  'module',
+  'stepsToReproduce',
+  'expectedBehavior',
+  'actualBehavior',
+  'reproducibility',
+  'severity',
+  'priority',
+  'status',
+  'assignedToUserId',
+  'reportedByUserId',
+  'appVersion',
+  'environment',
+  'browser',
+  'operatingSystem',
+  'storyId',
+  'taskId',
+  'testCycleId',
+] as const
+
+function pickIssueUpdatePayload(body: Record<string, unknown>): Record<string, any> {
+  const out: Record<string, any> = {}
+  for (const k of ISSUE_PUT_ALLOWED_KEYS) {
+    if (k in body && body[k] !== undefined) {
+      out[k] = body[k]
+    }
+  }
+  return out
+}
 
 async function getUserFromHeader(jwtVerify: any, headers: Record<string, string | undefined>) {
   const authHeader = headers.authorization
@@ -492,12 +532,33 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       }
     }
 
-    const updatePayload: Record<string, any> = { ...body }
+    const updatePayload = pickIssueUpdatePayload(body as Record<string, unknown>)
+    if (Object.keys(updatePayload).length === 0) {
+      set.status = 400
+      return { error: 'No valid fields to update' }
+    }
     if (body.status !== undefined && body.status !== null) {
       const raw = String(body.status).trim()
       updatePayload.status = normalizeIssueStatusToCanonicalId(merged, raw) ?? raw
     }
     if ('assignedToUserId' in updatePayload) updatePayload.assignedToUserId = optionalUuid(updatePayload.assignedToUserId)
+    if ('reportedByUserId' in updatePayload) {
+      const rid = optionalUuid(updatePayload.reportedByUserId)
+      if (!rid) {
+        set.status = 400
+        return { error: 'reportedByUserId must be a valid user id' }
+      }
+      if (user.role !== 'super_admin') {
+        const mem = await db.query.productMembers.findFirst({
+          where: and(eq(productMembers.product, existing.product), eq(productMembers.userId, rid)),
+        })
+        if (!mem) {
+          set.status = 400
+          return { error: 'Reporter must be a member of this product' }
+        }
+      }
+      updatePayload.reportedByUserId = rid
+    }
     if ('storyId' in updatePayload) updatePayload.storyId = optionalUuid(updatePayload.storyId)
     if ('taskId' in updatePayload) updatePayload.taskId = optionalUuid(updatePayload.taskId)
     if ('testCycleId' in updatePayload) updatePayload.testCycleId = optionalUuid(updatePayload.testCycleId)
@@ -506,7 +567,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
 
     const changes = computeChanges(existing, updated!, [
       'title', 'description', 'type', 'severity', 'priority', 'status',
-      'assignedToUserId', 'module', 'environment', 'browser', 'operatingSystem', 'archived',
+      'assignedToUserId', 'reportedByUserId', 'module', 'environment', 'browser', 'operatingSystem', 'archived',
     ])
 
     if (changes.length > 0) {
@@ -524,8 +585,11 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     }
 
     // Notification: assignee changed
-    if (body.assignedToUserId && body.assignedToUserId !== existing.assignedToUserId) {
-      const assigneeId = optionalUuid(body.assignedToUserId)
+    if (
+      'assignedToUserId' in updatePayload &&
+      updatePayload.assignedToUserId !== existing.assignedToUserId
+    ) {
+      const assigneeId = optionalUuid(updatePayload.assignedToUserId as string | null)
       if (assigneeId) {
         sendNotificationIfEnabled({
           targetUserId: assigneeId,
@@ -539,7 +603,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     }
 
     // Notification: status changed
-    if (body.status && body.status !== existing.status) {
+    if (updatePayload.status !== undefined && updatePayload.status !== existing.status) {
       const notifyIds = new Set<string>()
       if (existing.assignedToUserId) notifyIds.add(existing.assignedToUserId)
       if (existing.reportedByUserId) notifyIds.add(existing.reportedByUserId)
@@ -551,7 +615,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
           entityType: 'issue',
           entityTitle: updated!.title,
           entityPath: `/issues?issue=${updated!.id}`,
-          details: body.status,
+          details: updatePayload.status,
         }).catch(() => {})
       }
     }

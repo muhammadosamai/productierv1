@@ -155,7 +155,10 @@ export const useProductStore = defineStore('products', () => {
     }
   }
 
-  async function updateProduct(currentName: string, data: { name?: string; description?: string | null; logo?: string | null }): Promise<boolean> {
+  async function updateProduct(
+    currentName: string,
+    data: { name?: string; description?: string | null; logo?: string | null },
+  ): Promise<{ success: true } | { success: false; error: string }> {
     const authStore = useAuthStore()
     try {
       const res = await fetch(`/api/products/${encodeURIComponent(currentName)}`, {
@@ -166,7 +169,10 @@ export const useProductStore = defineStore('products', () => {
         },
         body: JSON.stringify(data),
       })
-      if (!res.ok) return false
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string }
+        return { success: false, error: errBody.error || 'Failed to update product' }
+      }
 
       const updated = await res.json()
       const idx = products.value.findIndex(p => p.name === currentName)
@@ -184,9 +190,9 @@ export const useProductStore = defineStore('products', () => {
         activeProductName.value = updated.name
         localStorage.setItem(ACTIVE_PRODUCT_KEY, updated.name)
       }
-      return true
+      return { success: true }
     } catch {
-      return false
+      return { success: false, error: 'Network error. Please try again.' }
     }
   }
 

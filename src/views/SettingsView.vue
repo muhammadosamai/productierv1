@@ -103,6 +103,21 @@ const canDeleteProduct = computed(() => {
   return product.createdByUserId === authStore.user?.id || authStore.user?.role === 'super_admin'
 })
 
+const canEditProductName = computed(() => {
+  const product = productStore.activeProduct
+  const user = authStore.user
+  if (!product || !user) return false
+  return product.createdByUserId === user.id || user.role === 'super_admin'
+})
+
+const canEditProductLogoAndDescription = computed(() => {
+  const product = productStore.activeProduct
+  const user = authStore.user
+  if (!product || !user) return false
+  if (product.createdByUserId === user.id || user.role === 'super_admin') return true
+  return product.myRole === 'admin'
+})
+
 // Product edit form
 const productName = ref('')
 const productDescription = ref('')
@@ -127,6 +142,7 @@ watch(() => productStore.activeProduct?.name, () => loadProductForm())
 watch(activeTab, (tab) => { if (tab === 'product') loadProductForm() })
 
 function triggerProductLogoUpload() {
+  if (!canEditProductLogoAndDescription.value) return
   productLogoInputRef.value?.click()
 }
 
@@ -148,9 +164,11 @@ function removeProductLogo() {
 
 async function uploadProductLogo(): Promise<string> {
   if (!productLogoFile.value) throw new Error('No file selected')
+  const productName = productStore.activeProductName
+  const qs = productName ? `?product=${encodeURIComponent(productName)}` : ''
   const formData = new FormData()
   formData.append('file', productLogoFile.value)
-  const res = await fetch('/api/products/upload-logo', {
+  const res = await fetch(`/api/products/upload-logo${qs}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${authStore.token}` },
     body: formData,
@@ -198,12 +216,12 @@ async function handleProductSave() {
       return
     }
 
-    const success = await productStore.updateProduct(currentName, updates)
-    if (success) {
+    const result = await productStore.updateProduct(currentName, updates)
+    if (result.success) {
       productSaved.value = true
       setTimeout(() => productSaved.value = false, 3000)
     } else {
-      productError.value = 'Failed to update product. The name may already be taken.'
+      productError.value = result.error
     }
   } catch {
     productError.value = 'Network error. Please try again.'
@@ -679,7 +697,10 @@ const userInitials = () => {
             <!-- Logo upload -->
             <div class="relative group shrink-0">
               <div
-                class="w-20 h-20 rounded-xl bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden cursor-pointer transition-colors hover:border-[#4857FE] hover:bg-[#4857FE]/5"
+                class="w-20 h-20 rounded-xl bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden transition-colors"
+                :class="canEditProductLogoAndDescription
+                  ? 'cursor-pointer hover:border-[#4857FE] hover:bg-[#4857FE]/5'
+                  : 'cursor-not-allowed opacity-60'"
                 @click="triggerProductLogoUpload"
               >
                 <UploadAssetImg
@@ -691,7 +712,7 @@ const userInitials = () => {
                 <ImagePlus v-else :size="24" class="text-gray-400" />
               </div>
               <button
-                v-if="productLogoPreview"
+                v-if="productLogoPreview && canEditProductLogoAndDescription"
                 type="button"
                 class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center shadow-sm hover:bg-red-600 transition-colors"
                 @click.stop="removeProductLogo"
@@ -703,14 +724,20 @@ const userInitials = () => {
                 type="file"
                 accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml"
                 class="hidden"
+                :disabled="!canEditProductLogoAndDescription"
                 @change="handleProductLogoChange"
               />
             </div>
 
             <div class="flex-1 space-y-1.5">
               <label class="text-sm font-medium text-gray-700">Product Name</label>
-              <Input v-model="productName" placeholder="Product name" />
-              <p class="text-xs text-gray-400">Click the icon to change the logo</p>
+              <Input v-model="productName" placeholder="Product name" :disabled="!canEditProductName" />
+              <p v-if="canEditProductLogoAndDescription" class="text-xs text-gray-400">
+                {{ canEditProductName ? 'Click the icon to change the logo' : 'Only the product owner or a super admin can rename this product. You can still update the logo and description.' }}
+              </p>
+              <p v-else class="text-xs text-gray-400">
+                Only the product owner, a product admin, or a super admin can change the logo or description.
+              </p>
             </div>
           </div>
 
@@ -721,6 +748,7 @@ const userInitials = () => {
               v-model="productDescription"
               placeholder="Briefly describe the product..."
               :rows="3"
+              :disabled="!canEditProductLogoAndDescription"
             />
           </div>
 
@@ -729,7 +757,7 @@ const userInitials = () => {
             <Button
               type="submit"
               class="bg-[#7C5CFC] hover:bg-[#6B4CE0] h-10 px-6 text-sm font-medium"
-              :disabled="productSaving"
+              :disabled="productSaving || !canEditProductLogoAndDescription"
             >
               <Loader2 v-if="productSaving" :size="16" class="animate-spin mr-2" />
               {{ productSaving ? 'Saving...' : 'Save Changes' }}

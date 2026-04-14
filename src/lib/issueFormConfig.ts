@@ -1,5 +1,5 @@
 import { getDefaultConfig } from '@/lib/builtInFields'
-import type { FormConfigJson, FormFieldConfig, IssueStatusCatalogEntry } from '@/types/formConfig'
+import type { FieldType, FormConfigJson, FormFieldConfig, IssueStatusCatalogEntry } from '@/types/formConfig'
 import {
   DEFAULT_LEGACY_SLUG_TO_CANONICAL_ID,
   ISSUE_STATUS_ID_OPEN,
@@ -171,6 +171,24 @@ export function getIssueStatusCatalogFromMerged(merged: FormConfigJson): IssueSt
   const f = merged.fields.find(x => x.key === 'status')
   if (f?.issueStatusCatalog?.length) return [...f.issueStatusCatalog].sort((a, b) => a.order - b.order)
   return buildCatalogFromSlugs([...DEFAULT_ISSUE_STATUS_OPTIONS])
+}
+
+/** Form builder custom fields only (not built-in columns); visible, merge order. */
+export function getVisibleCustomIssueFields(merged: FormConfigJson): FormFieldConfig[] {
+  return merged.fields.filter(f => f.isBuiltIn !== true && f.visible !== false)
+}
+
+export function defaultCustomFieldValue(f: FormFieldConfig): unknown {
+  if (f.type === 'multi_select' || f.type === 'user_picker') return []
+  return ''
+}
+
+export function isCustomFieldValueEmpty(v: unknown, type: FieldType): boolean {
+  if (v === null || v === undefined) return true
+  if (typeof v === 'number') return Number.isNaN(v)
+  if (typeof v === 'string') return v.trim() === ''
+  if (Array.isArray(v)) return v.length === 0
+  return false
 }
 
 export function getAllowedIssueStatusStoredValues(merged: FormConfigJson): string[] {

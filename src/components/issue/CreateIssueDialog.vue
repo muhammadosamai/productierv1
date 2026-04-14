@@ -1,8 +1,16 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, reactive } from 'vue'
 import { useIssuesStore } from '@/stores/issues'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
+import { useFormConfigsStore } from '@/stores/formConfigs'
+import {
+  mergeIssueFormConfig,
+  getVisibleCustomIssueFields,
+  defaultCustomFieldValue,
+  isCustomFieldValueEmpty,
+} from '@/lib/issueFormConfig'
+import DynamicField from '@/components/forms/DynamicField.vue'
 import {
   Dialog,
   DialogContent,
@@ -23,7 +31,7 @@ import {
 import {
   Loader2, Bug, RotateCcw, Send,
   AlertTriangle, Monitor, Paperclip,
-  ChevronLeft, ChevronRight, Check, Link, X, Search,
+  ChevronLeft, ChevronRight, Check, Link, Link2, CalendarDays, X, Search, Tags,
 } from 'lucide-vue-next'
 import type { IssueType, IssueSeverity, IssuePriority, IssueReproducibility, IssueEnvironment, IssueBrowser, IssueOs } from '@/types/issue'
 import {
@@ -41,6 +49,38 @@ const emit = defineEmits<{ created: [id: string] }>()
 const issuesStore = useIssuesStore()
 const productStore = useProductStore()
 const authStore = useAuthStore()
+const formConfigsStore = useFormConfigsStore()
+
+const mergedIssueForm = computed(() => {
+  const p = productStore.activeProduct?.name
+  const raw = p ? formConfigsStore.getConfig(p, 'issue') : null
+  return mergeIssueFormConfig(raw ?? undefined)
+})
+
+const customIssueFields = computed(() => getVisibleCustomIssueFields(mergedIssueForm.value))
+
+const customFieldValues = reactive<Record<string, unknown>>({})
+
+function resetCustomFieldValues() {
+  for (const k of Object.keys(customFieldValues)) delete customFieldValues[k]
+  for (const f of customIssueFields.value) {
+    customFieldValues[f.key] = defaultCustomFieldValue(f)
+  }
+}
+
+watch(
+  () => customIssueFields.value.map(f => `${f.key}:${f.type}`).join('|'),
+  () => {
+    resetCustomFieldValues()
+  },
+  { immediate: true },
+)
+
+watch(open, async isOpen => {
+  if (!isOpen) return
+  const p = productStore.activeProduct?.name
+  if (p && authStore.token) await formConfigsStore.fetchConfig(p, 'issue')
+})
 
 // Wizard step
 const step = ref(1)
@@ -64,6 +104,9 @@ const appVersion = ref('')
 const environment = ref<IssueEnvironment | ''>('')
 const browser = ref<IssueBrowser | ''>('')
 const operatingSystem = ref<IssueOs | ''>('')
+const estimateHours = ref('')
+const issueStartDate = ref('')
+const issueEndDate = ref('')
 
 const submitting = ref(false)
 const error = ref('')
@@ -169,12 +212,14 @@ function clearForm() {
   reproducibility.value = ''; severity.value = 'minor'; priority.value = 'medium'
   assigneeSearch.value = ''; assigneeId.value = null; assigneeName.value = ''
   appVersion.value = ''; environment.value = ''; browser.value = ''; operatingSystem.value = ''
+  estimateHours.value = ''; issueStartDate.value = ''; issueEndDate.value = ''
   pendingFiles.value = []; error.value = ''
   linkSearch.value = ''; linkResults.value = []
   // Preserve storyId if provided as prop
   linkedStoryId.value = props.storyId || null
   linkedStoryTitle.value = props.storyId ? linkedStoryTitle.value : ''
   linkedTaskId.value = null; linkedTaskTitle.value = ''
+  resetCustomFieldValues()
 }
 
 // Sync prop storyId on open
@@ -239,9 +284,49 @@ function typeLabel(t: string) {
   return t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
+function validateCustomFields(): boolean {
+  for (const f of customIssueFields.value) {
+    if (!f.required) continue
+    if (isCustomFieldValueEmpty(customFieldValues[f.key], f.type)) {
+      error.value = `Please fill in "${f.label}".`
+      return false
+    }
+  }
+  return true
+}
+
+function buildCustomFieldsPayload(): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const f of customIssueFields.value) {
+    const v = customFieldValues[f.key]
+    if (!isCustomFieldValueEmpty(v, f.type)) out[f.key] = v
+  }
+  return out
+}
+
 async function handleSubmit() {
   if (!title.value.trim()) return
   error.value = ''
+  if (!validateCustomFields()) return
+
+  let estimatePayload: number | null | undefined
+  const estRaw = estimateHours.value.trim()
+  if (estRaw !== '') {
+    const n = Number.parseFloat(estRaw)
+    if (!Number.isFinite(n) || n < 0) {
+      error.value = 'Enter a valid non-negative estimate in hours (or leave empty).'
+      return
+    }
+    estimatePayload = Math.round(n * 2) / 2
+  }
+
+  const startWire = issueStartDate.value.trim() || null
+  const endWire = issueEndDate.value.trim() || null
+  if (startWire && endWire && endWire < startWire) {
+    error.value = 'End date must be on or after start date.'
+    return
+  }
+
   submitting.value = true
 
   const issue = await issuesStore.createIssue({
@@ -263,6 +348,9 @@ async function handleSubmit() {
     product: productStore.activeProduct?.name,
     storyId: linkedStoryId.value,
     taskId: linkedTaskId.value,
+    ...(estimatePayload !== undefined ? { estimateValue: estimatePayload } : {}),
+    ...(startWire ? { startDate: startWire } : {}),
+    ...(endWire ? { endDate: endWire } : {}),
   })
 
   if (!issue) {
@@ -287,6 +375,12 @@ async function handleSubmit() {
         } catch { /* ignore */ }
       }
     }
+  }
+
+  const customPayload = buildCustomFieldsPayload()
+  if (Object.keys(customPayload).length > 0) {
+    const ok = await formConfigsStore.saveCustomValues('issue', issue.id, customPayload)
+    if (!ok) toast.error('Issue was created but custom fields could not be saved.')
   }
 
   submitting.value = false
@@ -468,6 +562,35 @@ async function handleSubmit() {
             </div>
           </fieldset>
 
+          <!-- Estimate & dates -->
+          <fieldset class="border border-gray-200 rounded-xl p-4 space-y-3">
+            <legend class="text-sm font-semibold text-gray-700 px-2 flex items-center gap-1.5">
+              <CalendarDays :size="14" class="text-gray-400" /> Estimate & dates
+            </legend>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div class="space-y-1.5">
+                <label class="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                  <Link2 :size="14" class="text-gray-400" /> Estimate (hours)
+                </label>
+                <Input
+                  v-model="estimateHours"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  placeholder="e.g. 4"
+                />
+              </div>
+              <div class="space-y-1.5">
+                <label class="text-sm font-medium text-gray-700">Start date</label>
+                <Input v-model="issueStartDate" type="date" />
+              </div>
+              <div class="space-y-1.5">
+                <label class="text-sm font-medium text-gray-700">End date</label>
+                <Input v-model="issueEndDate" type="date" />
+              </div>
+            </div>
+          </fieldset>
+
           <!-- Environment -->
           <fieldset class="border border-gray-200 rounded-xl p-4 space-y-3">
             <legend class="text-sm font-semibold text-gray-700 px-2 flex items-center gap-1.5">
@@ -575,6 +698,25 @@ async function handleSubmit() {
             </div>
 
             <p class="text-xs text-gray-400">Optional — link this issue to a related story or task.</p>
+          </fieldset>
+
+          <!-- Custom fields from form builder -->
+          <fieldset
+            v-if="customIssueFields.length > 0"
+            class="border border-gray-200 rounded-xl p-4 space-y-3"
+          >
+            <legend class="text-sm font-semibold text-gray-700 px-2 flex items-center gap-1.5">
+              <Tags :size="14" class="text-gray-400" /> Additional fields
+            </legend>
+            <div class="space-y-4">
+              <DynamicField
+                v-for="field in customIssueFields"
+                :key="field.key"
+                :field="field"
+                :model-value="customFieldValues[field.key]"
+                @update:model-value="customFieldValues[field.key] = $event"
+              />
+            </div>
           </fieldset>
         </template>
 

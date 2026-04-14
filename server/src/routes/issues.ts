@@ -206,7 +206,43 @@ BEGIN
 END $$;
 `)
 
+  await db.execute(sql`ALTER TABLE issues ADD COLUMN IF NOT EXISTS estimate_value double precision;`)
+  await db.execute(sql`ALTER TABLE issues ADD COLUMN IF NOT EXISTS start_date date;`)
+  await db.execute(sql`ALTER TABLE issues ADD COLUMN IF NOT EXISTS end_date date;`)
+
   issueSchemaBootstrapped = true
+}
+
+const ISSUE_ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
+
+function normalizeIssueDateWireValue(raw: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (raw === null || raw === undefined) return { ok: true, value: null }
+  if (typeof raw !== 'string') return { ok: false, error: 'startDate and endDate must be YYYY-MM-DD strings or null' }
+  const s = raw.trim()
+  if (!s) return { ok: true, value: null }
+  const m = ISSUE_ISO_DATE.exec(s)
+  if (!m) return { ok: false, error: 'Invalid date (use YYYY-MM-DD)' }
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3])
+  const dt = new Date(Date.UTC(y, mo - 1, d))
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) {
+    return { ok: false, error: 'Invalid calendar date' }
+  }
+  return { ok: true, value: s }
+}
+
+function normalizeIssueEstimateWireValue(raw: unknown): { ok: true; value: number | null } | { ok: false; error: string } {
+  if (raw === null || raw === undefined) return { ok: true, value: null }
+  const n = typeof raw === 'number' ? raw : Number.parseFloat(String(raw))
+  if (!Number.isFinite(n)) return { ok: false, error: 'Estimate must be a finite number of hours' }
+  if (n < 0) return { ok: false, error: 'Estimate cannot be negative' }
+  return { ok: true, value: Math.round(n * 2) / 2 }
+}
+
+function issueStoredDateToComparable(v: unknown): string | null {
+  if (v == null) return null
+  if (typeof v === 'string') return v.length >= 10 ? v.slice(0, 10) : v
+  if (v instanceof Date) return v.toISOString().slice(0, 10)
+  return String(v).slice(0, 10)
 }
 
 const issueBodyShared = {
@@ -248,6 +284,9 @@ const issueBodyShared = {
   storyId: t.Optional(t.Nullable(t.String())),
   taskId: t.Optional(t.Nullable(t.String())),
   testCycleId: t.Optional(t.Nullable(t.String())),
+  estimateValue: t.Optional(t.Nullable(t.Number())),
+  startDate: t.Optional(t.Nullable(t.String())),
+  endDate: t.Optional(t.Nullable(t.String())),
 } as const
 
 const issueCreateBody = t.Object({
@@ -288,6 +327,9 @@ const ISSUE_PUT_ALLOWED_KEYS = [
   'storyId',
   'taskId',
   'testCycleId',
+  'estimateValue',
+  'startDate',
+  'endDate',
 ] as const
 
 function pickIssueUpdatePayload(body: Record<string, unknown>): Record<string, any> {
@@ -377,6 +419,31 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const taskId = optionalUuid(body.taskId)
     const testCycleId = optionalUuid(body.testCycleId)
 
+    let createEstimate: number | null | undefined
+    if (body.estimateValue !== undefined) {
+      const ev = normalizeIssueEstimateWireValue(body.estimateValue)
+      if (!ev.ok) { set.status = 400; return { error: ev.error } }
+      createEstimate = ev.value
+    }
+    let createStart: string | null | undefined
+    let createEnd: string | null | undefined
+    if (body.startDate !== undefined) {
+      const sd = normalizeIssueDateWireValue(body.startDate)
+      if (!sd.ok) { set.status = 400; return { error: sd.error } }
+      createStart = sd.value
+    }
+    if (body.endDate !== undefined) {
+      const ed = normalizeIssueDateWireValue(body.endDate)
+      if (!ed.ok) { set.status = 400; return { error: ed.error } }
+      createEnd = ed.value
+    }
+    const effStart = createStart !== undefined ? createStart : null
+    const effEnd = createEnd !== undefined ? createEnd : null
+    if (effStart && effEnd && effEnd < effStart) {
+      set.status = 400
+      return { error: 'End date must be on or after start date' }
+    }
+
     let issue: typeof issues.$inferSelect | null = null
 
     const [inserted] = await db.insert(issues).values({
@@ -401,6 +468,9 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       storyId,
       taskId,
       testCycleId,
+      ...(createEstimate !== undefined ? { estimateValue: createEstimate } : {}),
+      ...(createStart !== undefined ? { startDate: createStart } : {}),
+      ...(createEnd !== undefined ? { endDate: createEnd } : {}),
     }).returning()
     issue = inserted || null
 
@@ -563,11 +633,38 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     if ('taskId' in updatePayload) updatePayload.taskId = optionalUuid(updatePayload.taskId)
     if ('testCycleId' in updatePayload) updatePayload.testCycleId = optionalUuid(updatePayload.testCycleId)
 
+    if ('estimateValue' in updatePayload) {
+      const ev = normalizeIssueEstimateWireValue(updatePayload.estimateValue)
+      if (!ev.ok) { set.status = 400; return { error: ev.error } }
+      updatePayload.estimateValue = ev.value
+    }
+    if ('startDate' in updatePayload) {
+      const sd = normalizeIssueDateWireValue(updatePayload.startDate)
+      if (!sd.ok) { set.status = 400; return { error: sd.error } }
+      updatePayload.startDate = sd.value
+    }
+    if ('endDate' in updatePayload) {
+      const ed = normalizeIssueDateWireValue(updatePayload.endDate)
+      if (!ed.ok) { set.status = 400; return { error: ed.error } }
+      updatePayload.endDate = ed.value
+    }
+    const nextStart = 'startDate' in updatePayload
+      ? (updatePayload.startDate as string | null)
+      : issueStoredDateToComparable(existing.startDate)
+    const nextEnd = 'endDate' in updatePayload
+      ? (updatePayload.endDate as string | null)
+      : issueStoredDateToComparable(existing.endDate)
+    if (nextStart && nextEnd && nextEnd < nextStart) {
+      set.status = 400
+      return { error: 'End date must be on or after start date' }
+    }
+
     const [updated] = await db.update(issues).set(updatePayload).where(eq(issues.id, id)).returning()
 
     const changes = computeChanges(existing, updated!, [
       'title', 'description', 'type', 'severity', 'priority', 'status',
       'assignedToUserId', 'reportedByUserId', 'module', 'environment', 'browser', 'operatingSystem', 'archived',
+      'estimateValue', 'startDate', 'endDate',
     ])
 
     if (changes.length > 0) {

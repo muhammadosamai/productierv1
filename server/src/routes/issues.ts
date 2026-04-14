@@ -1,7 +1,7 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { issues, issueComments, issueAttachments, users, productMembers } from '../db/schema'
-import { eq, sql, and } from 'drizzle-orm'
+import { eq, sql, and, asc, isNotNull, ne } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
@@ -407,6 +407,35 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       },
       orderBy: (items, { desc }) => [desc(items.createdAt)],
     })
+  })
+
+  // GET /api/issues/distinct-modules?product=X — non-null module names for autocomplete (must be before /:id)
+  .get('/distinct-modules', async ({ query, set, headers, jwt: jwtInstance }) => {
+    const user = await getUserFromHeader(jwtInstance.verify, headers)
+    if (!user) {
+      set.status = 401
+      return { error: 'Unauthorized' }
+    }
+    const product = query.product?.trim()
+    if (!product) {
+      set.status = 400
+      return { error: 'product query parameter is required' }
+    }
+    const rows = await db
+      .select({ module: issues.module })
+      .from(issues)
+      .where(
+        and(
+          eq(issues.product, product),
+          eq(issues.archived, false),
+          isNotNull(issues.module),
+          ne(sql`trim(${issues.module})`, ''),
+        ),
+      )
+      .groupBy(issues.module)
+      .orderBy(asc(issues.module))
+      .limit(200)
+    return rows.map(r => r.module as string)
   })
 
   // GET /api/issues/:id

@@ -37,6 +37,8 @@ import {
   issueStatusCustomPillStyle,
 } from '@/lib/issueFormConfig'
 import { issueStatusSemanticTone } from '@/lib/issueStatusId'
+import { fetchDistinctIssueModules } from '@/lib/issueModulesApi'
+import SearchableStringCombobox from '@/components/shared/SearchableStringCombobox.vue'
 
 const router = useRouter()
 const { copied, copyLink } = useCopyLink()
@@ -157,6 +159,9 @@ const editExpectedBehavior = ref('')
 const editActualBehavior = ref('')
 const editModule = ref('')
 const editAppVersion = ref('')
+const moduleSuggestions = ref<string[]>([])
+const moduleSuggestionsLoading = ref(false)
+const moduleComboboxRef = ref<{ focus: () => void } | null>(null)
 
 // Activities
 const activities = ref<Activity[]>([])
@@ -567,14 +572,20 @@ async function clearStory() {
 
 // ──── Update field ────
 
-async function updateField(field: string, value: any) {
+async function updateField(field: string, value: any, onAfter?: () => void) {
   if (!props.issue) return
   saving.value = true
   try {
-    await issuesStore.updateIssue(props.issue.id, { [field]: value })
-    emit('updated')
-  } catch {}
-  finally {
+    const updated = await issuesStore.updateIssue(props.issue.id, { [field]: value })
+    if (updated) {
+      emit('updated')
+      onAfter?.()
+    } else {
+      toast.error('Could not save changes')
+    }
+  } catch {
+    toast.error('Could not save changes')
+  } finally {
     saving.value = false
     editingField.value = null
     closeAllDropdowns()
@@ -677,10 +688,25 @@ async function clearAssignee() {
 }
 
 // ──── Module ────
-function startEditModule() {
+async function loadModuleSuggestions() {
+  const p = props.issue?.product
+  if (!p) return
+  moduleSuggestionsLoading.value = true
+  try {
+    const list = await fetchDistinctIssueModules(p, authStore.token)
+    moduleSuggestions.value = [...new Set(list)]
+  } finally {
+    moduleSuggestionsLoading.value = false
+  }
+}
+
+async function startEditModule() {
   if (!props.issue) return
   editModule.value = props.issue.module || ''
   editingField.value = 'module'
+  void loadModuleSuggestions()
+  await nextTick()
+  moduleComboboxRef.value?.focus()
 }
 
 async function saveModule() {
@@ -689,7 +715,9 @@ async function saveModule() {
     editingField.value = null
     return
   }
-  await updateField('module', editModule.value || null)
+  await updateField('module', editModule.value || null, () => {
+    void loadModuleSuggestions()
+  })
 }
 
 // ──── App Version ────
@@ -1428,13 +1456,14 @@ const groupedActivities = computed(() => {
                 </span>
                 <div @click.stop>
                   <div v-if="editingField === 'module'" class="flex items-center gap-2">
-                    <input
+                    <SearchableStringCombobox
+                      ref="moduleComboboxRef"
                       v-model="editModule"
-                      class="text-sm text-gray-700 border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-[#4857FE] w-48"
+                      :suggestions="moduleSuggestions"
+                      :loading="moduleSuggestionsLoading"
                       placeholder="Module name..."
-                      autofocus
-                      @keydown.enter="saveModule"
-                      @keydown.escape="editingField = null"
+                      @enter="saveModule"
+                      @escape="editingField = null"
                     />
                     <button @click="saveModule" class="text-green-500 hover:text-green-600"><Check :size="14" /></button>
                     <button @click="editingField = null" class="text-gray-400 hover:text-gray-600"><X :size="14" /></button>

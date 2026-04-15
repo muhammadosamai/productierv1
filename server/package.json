@@ -7,6 +7,7 @@
     "dev": "bun --watch src/index.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:migrate-with-backfill": "sh scripts/run-migrations-with-backfill.sh",
     "db:push": "drizzle-kit push",
     "db:seed": "bun src/db/seed.ts",
     "db:backfill-project-keys": "bun scripts/backfill-product-project-keys.ts",

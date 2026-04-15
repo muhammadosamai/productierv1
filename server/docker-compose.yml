@@ -3,16 +3,16 @@ version: '3.8'
 services:
   postgres:
     image: postgres:16
-    container_name: productier-postgres
+    container_name: dev-productier-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: sarimalavi
-      POSTGRES_DB: productier
+      POSTGRES_DB: dev-productier
       POSTGRES_HOST_AUTH_METHOD: trust   # no password, matches your .env
     volumes:
-      - productier_pgdata:/var/lib/postgresql/data
+      - dev-productier_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sarimalavi -d productier"]
+      test: ["CMD-SHELL", "pg_isready -U sarimalavi -d dev-productier"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -21,16 +21,16 @@ services:
  
   backend:
     build: .
-    container_name: productier-backend
+    container_name: dev-productier-backend
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://sarimalavi@postgres:5432/productier
+      DATABASE_URL: postgresql://sarimalavi@postgres:5432/dev-productier
       RUN_DB_MIGRATIONS: "true"
     volumes:
-      - productier_uploads:/app/uploads
+      - dev-productier_uploads:/app/uploads
     ports:
       - "3002:3001"
 
@@ -38,13 +38,13 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.frontend
-    container_name: productier-frontend
+    container_name: dev-productier-frontend
     restart: unless-stopped
     depends_on:
-      - backend
+      - dev-productier-backend
     ports:
       - "3050:80"
 
 volumes:
-  productier_pgdata:
-  productier_uploads:
+  dev-productier_pgdata:
+  dev-productier_uploads:

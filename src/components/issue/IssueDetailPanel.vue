@@ -820,11 +820,25 @@ const filteredStories = computed(() => {
   return backlogStore.stories.filter(s => !q || s.title.toLowerCase().includes(q))
 })
 
-async function startStoryEdit() {
+async function toggleStoryDropdown() {
   if (!props.issue) return
-  closeAllDropdowns()
-  showStoryDropdown.value = true
-  if (backlogStore.stories.length === 0 && props.issue.product) {
+  const next = !showStoryDropdown.value
+  showReportedByDropdown.value = false
+  reporterSearchQuery.value = ''
+  showStatusDropdown.value = false
+  showSeverityDropdown.value = false
+  showPriorityDropdown.value = false
+  showTypeDropdown.value = false
+  showAssigneeDropdown.value = false
+  assigneeSearchQuery.value = ''
+  showReproducibilityDropdown.value = false
+  showEnvironmentDropdown.value = false
+  showBrowserDropdown.value = false
+  showOsDropdown.value = false
+  showStoryDropdown.value = next
+  storySearchQuery.value = ''
+  editingField.value = next ? 'storyId' : null
+  if (next && props.issue.product && backlogStore.stories.length === 0) {
     await backlogStore.fetchStories(props.issue.product)
   }
 }
@@ -1660,29 +1674,47 @@ const groupedActivities = computed(() => {
                 </div>
               </div>
 
-              <!-- Linked Story -->
-              <div class="flex items-center gap-3">
-                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
+              <!-- Linked Story (same control style as Assigned To) -->
+              <div class="flex items-start gap-3">
+                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5 pt-1">
                   <FileText :size="13" class="text-gray-400" /> Story
                 </span>
-                <div class="relative" @click.stop>
-                  <button
-                    class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer hover:opacity-80 transition-opacity"
-                    :class="issue.storyId ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-400'"
-                    @click="startStoryEdit"
-                  >
-                    <FileText :size="12" />
-                    <span class="max-w-[140px] truncate">{{ issue.story?.title || (issue.storyId ? 'STY-' + issue.storyId.slice(-5).toUpperCase() : 'Not linked') }}</span>
-                    <ChevronDown :size="12" />
-                  </button>
+                <div class="flex-1 relative" @click.stop>
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <template v-if="issue.storyId">
+                      <div class="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/storylink">
+                        <div class="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
+                          <FileText :size="12" class="text-indigo-600" />
+                        </div>
+                        <span class="text-xs font-medium text-gray-700 max-w-[160px] truncate">{{
+                          issue.story?.title || 'STY-' + issue.storyId.slice(-5).toUpperCase()
+                        }}</span>
+                        <button
+                          type="button"
+                          class="text-gray-300 hover:text-red-500 opacity-0 group-hover/storylink:opacity-100 transition-all ml-0.5"
+                          title="Remove story link"
+                          @click.stop="clearStory"
+                        >
+                          <X :size="10" />
+                        </button>
+                      </div>
+                    </template>
+                    <span v-else class="text-xs text-gray-400">Not linked</span>
+                    <button
+                      type="button"
+                      class="w-5 h-5 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
+                      @click="toggleStoryDropdown"
+                    >
+                      <span class="text-xs">+</span>
+                    </button>
+                  </div>
                   <div
                     v-if="showStoryDropdown"
-                    class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1 w-[240px]"
+                    class="absolute top-full left-0 z-30 mt-1 w-full max-w-[280px] rounded-lg border border-gray-200 bg-white shadow-lg"
                   >
-                    <!-- Search -->
-                    <div class="px-2 pt-1.5 pb-1 border-b border-gray-100">
+                    <div class="p-2 border-b border-gray-100">
                       <div class="flex items-center gap-1.5 bg-gray-50 rounded-md px-2 py-1.5">
-                        <Search :size="11" class="text-gray-400 shrink-0" />
+                        <Search :size="12" class="text-gray-400" />
                         <input
                           v-model="storySearchQuery"
                           class="text-xs bg-transparent outline-none w-full placeholder-gray-400"
@@ -1693,16 +1725,22 @@ const groupedActivities = computed(() => {
                       </div>
                     </div>
                     <div class="max-h-[200px] overflow-auto py-1">
-                      <!-- Navigate to current story -->
                       <button
                         v-if="issue.storyId"
-                        class="w-full flex items-center gap-2 px-3 py-2 text-xs text-[#4857FE] hover:bg-indigo-50 transition-colors border-b border-gray-100"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-50 transition-colors border-b border-gray-100"
+                        @click="clearStory"
+                      >
+                        <X :size="14" />
+                        Remove story link
+                      </button>
+                      <button
+                        v-if="issue.storyId"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#4857FE] hover:bg-indigo-50 transition-colors border-b border-gray-100"
                         @click="showStoryDropdown = false; emit('close'); router.push({ path: '/stories', query: { story: issue.storyId } })"
                       >
-                        <ExternalLink :size="12" />
+                        <ExternalLink :size="14" />
                         Open story
                       </button>
-                      <!-- Story options -->
                       <button
                         v-for="story in filteredStories"
                         :key="story.id"
@@ -1715,16 +1753,6 @@ const groupedActivities = computed(() => {
                         <Check v-if="issue.storyId === story.id" :size="14" class="ml-auto text-[#4857FE] shrink-0" />
                       </button>
                       <p v-if="filteredStories.length === 0" class="text-xs text-gray-400 text-center py-3">No stories found</p>
-                    </div>
-                    <!-- Remove link -->
-                    <div v-if="issue.storyId" class="border-t border-gray-100 pt-1">
-                      <button
-                        class="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-500 hover:bg-red-50 transition-colors"
-                        @click="clearStory"
-                      >
-                        <X :size="12" />
-                        Remove story link
-                      </button>
                     </div>
                   </div>
                 </div>

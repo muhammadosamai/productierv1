@@ -178,6 +178,13 @@ export function getVisibleCustomIssueFields(merged: FormConfigJson): FormFieldCo
   return merged.fields.filter(f => f.isBuiltIn !== true && f.visible !== false)
 }
 
+/** Built-in (and any) issue form field: show in create/detail UIs unless explicitly hidden in merged config. */
+export function isIssueFormFieldVisible(merged: FormConfigJson, key: string): boolean {
+  const f = merged.fields.find(x => x.key === key)
+  if (!f) return true
+  return f.visible !== false
+}
+
 export function defaultCustomFieldValue(f: FormFieldConfig): unknown {
   if (f.type === 'multi_select' || f.type === 'user_picker') return []
   return ''

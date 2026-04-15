@@ -45,7 +45,7 @@ const issueFields: FormFieldConfig[] = [
   { key: 'environment', label: 'Environment', type: 'select', required: false, visible: true, isBuiltIn: true, order: 13, options: ['production', 'staging', 'development', 'testing'] },
   { key: 'browser', label: 'Browser', type: 'select', required: false, visible: false, isBuiltIn: true, order: 14, options: ['chrome', 'firefox', 'safari', 'edge', 'other'] },
   { key: 'operatingSystem', label: 'Operating System', type: 'select', required: false, visible: false, isBuiltIn: true, order: 15, options: ['windows', 'macos', 'linux', 'ios', 'android', 'other'] },
-  { key: 'testCycleId', label: 'Testing Cycle', type: 'select', required: false, visible: false, isBuiltIn: true, order: 16 },
+  { key: 'testCycleId', label: 'Testing Cycle', type: 'select', required: false, visible: true, isBuiltIn: true, order: 16 },
   { key: 'estimateValue', label: 'Estimate (hours)', type: 'number', required: false, visible: true, isBuiltIn: true, order: 17 },
   { key: 'startDate', label: 'Start date', type: 'date', required: false, visible: true, isBuiltIn: true, order: 18 },
   { key: 'endDate', label: 'End date', type: 'date', required: false, visible: true, isBuiltIn: true, order: 19 },

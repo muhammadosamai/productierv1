@@ -4,6 +4,7 @@ import { useIssuesStore } from '@/stores/issues'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { useFormConfigsStore } from '@/stores/formConfigs'
+import { useTestCyclesStore } from '@/stores/testCycles'
 import {
   mergeIssueFormConfig,
   getVisibleCustomIssueFields,
@@ -35,6 +36,7 @@ import {
   Loader2, Bug, RotateCcw, Send,
   AlertTriangle, Monitor, Paperclip,
   ChevronLeft, ChevronRight, Check, Link, Link2, CalendarDays, X, Search, Tags,
+  FlaskConical,
 } from 'lucide-vue-next'
 import type { IssueType, IssueSeverity, IssuePriority, IssueReproducibility, IssueEnvironment, IssueBrowser, IssueOs } from '@/types/issue'
 import {
@@ -53,6 +55,7 @@ const issuesStore = useIssuesStore()
 const productStore = useProductStore()
 const authStore = useAuthStore()
 const formConfigsStore = useFormConfigsStore()
+const testCyclesStore = useTestCyclesStore()
 
 const mergedIssueForm = computed(() => {
   const p = productStore.activeProduct?.name
@@ -160,7 +163,11 @@ watch(open, async isOpen => {
   if (!isOpen) return
   const p = productStore.activeProduct?.name
   if (p && authStore.token) {
-    await Promise.all([formConfigsStore.fetchConfig(p, 'issue'), loadModuleSuggestions()])
+    await Promise.all([
+      formConfigsStore.fetchConfig(p, 'issue'),
+      loadModuleSuggestions(),
+      testCyclesStore.fetchCycles(p),
+    ])
   }
 })
 
@@ -221,6 +228,19 @@ const linkedTaskId = ref<string | null>(null)
 const linkedTaskTitle = ref('')
 let linkSearchTimeout: ReturnType<typeof setTimeout> | null = null
 
+// Linked testing cycle
+const linkedTestCycleId = ref<string | null>(null)
+const linkedTestCycleTitle = ref('')
+const testCycleSearch = ref('')
+
+const filteredTestCycles = computed(() => {
+  const q = testCycleSearch.value.trim().toLowerCase()
+  if (!q) return []
+  return testCyclesStore.cycles
+    .filter(c => c.status !== 'archived' && c.title.toLowerCase().includes(q))
+    .slice(0, 25)
+})
+
 async function searchLinks(q: string) {
   if (!q.trim()) { linkResults.value = []; return }
   linkSearchLoading.value = true
@@ -264,6 +284,18 @@ function selectLink(item: { type: 'story' | 'task'; id: string; title: string })
 function removeStoryLink() { linkedStoryId.value = null; linkedStoryTitle.value = '' }
 function removeTaskLink() { linkedTaskId.value = null; linkedTaskTitle.value = '' }
 
+function selectTestCycle(c: { id: string; title: string }) {
+  linkedTestCycleId.value = c.id
+  linkedTestCycleTitle.value = c.title
+  testCycleSearch.value = ''
+}
+
+function removeTestCycleLink() {
+  linkedTestCycleId.value = null
+  linkedTestCycleTitle.value = ''
+  testCycleSearch.value = ''
+}
+
 function clearForm() {
   step.value = 1
   title.value = ''; description.value = ''; type.value = 'bug'; module_.value = ''
@@ -278,6 +310,9 @@ function clearForm() {
   linkedStoryId.value = props.storyId || null
   linkedStoryTitle.value = props.storyId ? linkedStoryTitle.value : ''
   linkedTaskId.value = null; linkedTaskTitle.value = ''
+  linkedTestCycleId.value = null
+  linkedTestCycleTitle.value = ''
+  testCycleSearch.value = ''
   resetCustomFieldValues()
 }
 
@@ -409,6 +444,7 @@ async function handleSubmit() {
     product: productStore.activeProduct?.name,
     storyId: linkedStoryId.value,
     taskId: linkedTaskId.value,
+    ...(linkedTestCycleId.value ? { testCycleId: linkedTestCycleId.value } : {}),
     ...(estimatePayload !== undefined ? { estimateValue: estimatePayload } : {}),
     ...(startWire ? { startDate: startWire } : {}),
     ...(endWire ? { endDate: endWire } : {}),
@@ -795,6 +831,54 @@ async function handleSubmit() {
             <p class="text-xs text-gray-400">Optional — link this issue to a related story or task.</p>
           </fieldset>
 
+          <!-- Link to Testing Cycle (always shown; form-builder visibility is not applied here so linking stays discoverable) -->
+          <fieldset class="border border-gray-200 rounded-xl p-4 space-y-3">
+            <legend class="text-sm font-semibold text-gray-700 px-2 flex items-center gap-1.5">
+              <FlaskConical :size="14" class="text-gray-400" /> Link to Testing Cycle
+            </legend>
+
+            <div v-if="linkedTestCycleId" class="flex items-center justify-between bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <FlaskConical :size="14" class="text-violet-600 shrink-0" />
+                <span class="text-[10px] font-bold text-violet-700 bg-violet-100 rounded px-1.5 py-0.5 shrink-0">CYCLE</span>
+                <span class="text-sm text-violet-900 truncate">{{ linkedTestCycleTitle }}</span>
+              </div>
+              <button type="button" class="text-violet-400 hover:text-violet-700 shrink-0" title="Remove link" @click="removeTestCycleLink">
+                <X :size="14" />
+              </button>
+            </div>
+
+            <div class="relative">
+              <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white">
+                <Search :size="14" class="text-gray-400 shrink-0" />
+                <input
+                  v-model="testCycleSearch"
+                  class="text-sm text-gray-700 bg-transparent outline-none w-full placeholder-gray-400"
+                  placeholder="Search testing cycles by title..."
+                />
+              </div>
+
+              <div
+                v-if="filteredTestCycles.length > 0"
+                class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[200px] overflow-auto z-50"
+                @mousedown.prevent
+              >
+                <button
+                  v-for="c in filteredTestCycles"
+                  :key="c.id"
+                  type="button"
+                  class="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 text-sm"
+                  @click="selectTestCycle(c)"
+                >
+                  <FlaskConical :size="14" class="text-violet-500 shrink-0" />
+                  <span class="text-gray-800 truncate">{{ c.title }}</span>
+                </button>
+              </div>
+            </div>
+
+            <p class="text-xs text-gray-400">Optional — link this issue to a testing cycle (archived cycles are hidden).</p>
+          </fieldset>
+
           <!-- Custom fields from form builder -->
           <fieldset
             v-if="customIssueFields.length > 0"
@@ -901,6 +985,10 @@ async function handleSubmit() {
               <div v-if="linkedTaskTitle">
                 <p class="text-[10px] text-gray-400 uppercase tracking-wider">Linked Task</p>
                 <p class="text-sm text-gray-700 truncate">{{ linkedTaskTitle }}</p>
+              </div>
+              <div v-if="linkedTestCycleTitle">
+                <p class="text-[10px] text-gray-400 uppercase tracking-wider">Testing Cycle</p>
+                <p class="text-sm text-gray-700 truncate">{{ linkedTestCycleTitle }}</p>
               </div>
               <div v-if="pendingFiles.length > 0">
                 <p class="text-[10px] text-gray-400 uppercase tracking-wider">Attachments</p>

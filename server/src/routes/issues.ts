@@ -384,7 +384,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       with: {
         reportedBy: { columns: { id: true, name: true, email: true, avatar: true } },
         assignedTo: { columns: { id: true, name: true, email: true, avatar: true } },
-        testCycle: { columns: { id: true, name: true } },
+        testCycle: { columns: { id: true, title: true } },
         story: { columns: { id: true, title: true, status: true } },
       },
       orderBy: (items, { desc }) => [desc(items.createdAt)],
@@ -497,6 +497,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       with: {
         reportedBy: { columns: { id: true, name: true, email: true, avatar: true } },
         assignedTo: { columns: { id: true, name: true, email: true, avatar: true } },
+        testCycle: { columns: { id: true, title: true } },
         story: { columns: { id: true, title: true, status: true } },
       },
     })
@@ -555,7 +556,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       with: {
         reportedBy: { columns: { id: true, name: true, email: true, avatar: true } },
         assignedTo: { columns: { id: true, name: true, email: true, avatar: true } },
-        testCycle: { columns: { id: true, name: true } },
+        testCycle: { columns: { id: true, title: true } },
         story: { columns: { id: true, title: true, status: true } },
         comments: { with: { user: true }, orderBy: (c, { desc }) => [desc(c.createdAt)] },
       },
@@ -722,6 +723,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       with: {
         reportedBy: { columns: { id: true, name: true, email: true, avatar: true } },
         assignedTo: { columns: { id: true, name: true, email: true, avatar: true } },
+        testCycle: { columns: { id: true, title: true } },
         story: { columns: { id: true, title: true, status: true } },
       },
     })

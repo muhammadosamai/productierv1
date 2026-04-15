@@ -10,10 +10,11 @@ import {
   MessageSquare, Send, Trash2,
   Upload, Download, ImageIcon, FileIcon, Paperclip,
   AlertTriangle, Eye, Monitor, Smartphone, Globe, Zap, Database, LayoutDashboard, Lock,
-  Archive, RotateCcw, ExternalLink, Pencil,
+  Archive, RotateCcw, ExternalLink, Pencil, FlaskConical,
 } from 'lucide-vue-next'
 import { useIssuesStore } from '@/stores/issues'
 import { useBacklogStore } from '@/stores/backlog'
+import { useTestCyclesStore } from '@/stores/testCycles'
 import { useAuthStore } from '@/stores/auth'
 import { useProductMembersStore } from '@/stores/productMembers'
 import type {
@@ -89,6 +90,7 @@ const emit = defineEmits<{
 
 const issuesStore = useIssuesStore()
 const backlogStore = useBacklogStore()
+const testCyclesStore = useTestCyclesStore()
 const authStore = useAuthStore()
 const productMembersStore = useProductMembersStore()
 const formConfigsStore = useFormConfigsStore()
@@ -170,9 +172,11 @@ const showEnvironmentDropdown = ref(false)
 const showBrowserDropdown = ref(false)
 const showOsDropdown = ref(false)
 const showStoryDropdown = ref(false)
+const showTestCycleDropdown = ref(false)
 const assigneeSearchQuery = ref('')
 const reporterSearchQuery = ref('')
 const storySearchQuery = ref('')
+const testCycleSearchQuery = ref('')
 
 // Edit fields
 const editDescription = ref('')
@@ -808,9 +812,11 @@ function closeAllDropdowns() {
   showBrowserDropdown.value = false
   showOsDropdown.value = false
   showStoryDropdown.value = false
+  showTestCycleDropdown.value = false
   assigneeSearchQuery.value = ''
   reporterSearchQuery.value = ''
   storySearchQuery.value = ''
+  testCycleSearchQuery.value = ''
 }
 
 // ──── Linked Story ────
@@ -835,12 +841,62 @@ async function toggleStoryDropdown() {
   showEnvironmentDropdown.value = false
   showBrowserDropdown.value = false
   showOsDropdown.value = false
+  showTestCycleDropdown.value = false
+  testCycleSearchQuery.value = ''
   showStoryDropdown.value = next
   storySearchQuery.value = ''
   editingField.value = next ? 'storyId' : null
   if (next && props.issue.product && backlogStore.stories.length === 0) {
     await backlogStore.fetchStories(props.issue.product)
   }
+}
+
+const filteredTestCycles = computed(() => {
+  const q = testCycleSearchQuery.value.toLowerCase().trim()
+  return testCyclesStore.cycles.filter(
+    c => c.status !== 'archived' && (!q || c.title.toLowerCase().includes(q)),
+  )
+})
+
+function cycleDisplayTitle(issue: Issue): string {
+  return issue.testCycle?.title || (issue.testCycleId ? `Cycle ${issue.testCycleId.slice(0, 8)}…` : '')
+}
+
+async function toggleTestCycleDropdown() {
+  if (!props.issue) return
+  const next = !showTestCycleDropdown.value
+  showReportedByDropdown.value = false
+  reporterSearchQuery.value = ''
+  showStatusDropdown.value = false
+  showSeverityDropdown.value = false
+  showPriorityDropdown.value = false
+  showTypeDropdown.value = false
+  showAssigneeDropdown.value = false
+  assigneeSearchQuery.value = ''
+  showReproducibilityDropdown.value = false
+  showEnvironmentDropdown.value = false
+  showBrowserDropdown.value = false
+  showOsDropdown.value = false
+  showStoryDropdown.value = false
+  storySearchQuery.value = ''
+  showTestCycleDropdown.value = next
+  testCycleSearchQuery.value = ''
+  editingField.value = next ? 'testCycleId' : null
+  if (next && props.issue.product && testCyclesStore.cycles.length === 0) {
+    await testCyclesStore.fetchCycles(props.issue.product)
+  }
+}
+
+async function selectTestCycle(c: { id: string; title: string }) {
+  showTestCycleDropdown.value = false
+  testCycleSearchQuery.value = ''
+  await updateField('testCycleId', c.id)
+}
+
+async function clearTestCycle() {
+  showTestCycleDropdown.value = false
+  testCycleSearchQuery.value = ''
+  await updateField('testCycleId', null)
 }
 
 async function selectStory(story: { id: string; title: string }) {
@@ -990,6 +1046,8 @@ function toggleReportedByDropdown() {
   showBrowserDropdown.value = false
   showOsDropdown.value = false
   showStoryDropdown.value = false
+  showTestCycleDropdown.value = false
+  testCycleSearchQuery.value = ''
   assigneeSearchQuery.value = ''
   storySearchQuery.value = ''
   reporterSearchQuery.value = ''
@@ -1758,6 +1816,88 @@ const groupedActivities = computed(() => {
                 </div>
               </div>
 
+              <!-- Testing cycle (same control style as Story) -->
+              <div class="flex items-start gap-3">
+                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5 pt-1">
+                  <FlaskConical :size="13" class="text-gray-400" /> Testing Cycle
+                </span>
+                <div class="flex-1 relative" @click.stop>
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <template v-if="issue.testCycleId">
+                      <div class="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/cyclelink">
+                        <div class="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center shrink-0">
+                          <FlaskConical :size="12" class="text-violet-600" />
+                        </div>
+                        <span class="text-xs font-medium text-gray-700 max-w-[160px] truncate">{{ cycleDisplayTitle(issue) }}</span>
+                        <button
+                          type="button"
+                          class="text-gray-300 hover:text-red-500 opacity-0 group-hover/cyclelink:opacity-100 transition-all ml-0.5"
+                          title="Remove testing cycle link"
+                          @click.stop="clearTestCycle"
+                        >
+                          <X :size="10" />
+                        </button>
+                      </div>
+                    </template>
+                    <span v-else class="text-xs text-gray-400">Not linked</span>
+                    <button
+                      type="button"
+                      class="w-5 h-5 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
+                      @click="toggleTestCycleDropdown"
+                    >
+                      <span class="text-xs">+</span>
+                    </button>
+                  </div>
+                  <div
+                    v-if="showTestCycleDropdown"
+                    class="absolute top-full left-0 z-30 mt-1 w-full max-w-[360px] rounded-lg border border-gray-200 bg-white shadow-lg"
+                  >
+                    <div class="p-2 border-b border-gray-100">
+                      <div class="flex items-center gap-1.5 bg-gray-50 rounded-md px-2 py-1.5">
+                        <Search :size="12" class="text-gray-400" />
+                        <input
+                          v-model="testCycleSearchQuery"
+                          class="text-xs bg-transparent outline-none w-full placeholder-gray-400"
+                          placeholder="Search testing cycles..."
+                          autofocus
+                          @keydown.escape="showTestCycleDropdown = false; testCycleSearchQuery = ''"
+                        />
+                      </div>
+                    </div>
+                    <div class="max-h-[200px] overflow-auto py-1">
+                      <button
+                        v-if="issue.testCycleId"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-50 transition-colors border-b border-gray-100"
+                        @click="clearTestCycle"
+                      >
+                        <X :size="14" />
+                        Remove testing cycle link
+                      </button>
+                      <button
+                        v-if="issue.testCycleId"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#4857FE] hover:bg-indigo-50 transition-colors border-b border-gray-100"
+                        @click="showTestCycleDropdown = false; emit('close'); router.push(`/test-cycles/${issue.testCycleId}`)"
+                      >
+                        <ExternalLink :size="14" />
+                        Open testing cycle
+                      </button>
+                      <button
+                        v-for="c in filteredTestCycles"
+                        :key="c.id"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
+                        :class="issue.testCycleId === c.id ? 'text-[#4857FE] font-medium' : 'text-gray-600'"
+                        @click="selectTestCycle(c)"
+                      >
+                        <FlaskConical :size="14" class="shrink-0 text-violet-500" />
+                        <span class="truncate flex-1 text-left">{{ c.title }}</span>
+                        <Check v-if="issue.testCycleId === c.id" :size="14" class="ml-auto text-[#4857FE] shrink-0" />
+                      </button>
+                      <p v-if="filteredTestCycles.length === 0" class="text-xs text-gray-400 text-center py-3">No testing cycles found</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <!-- Assigned To (searchable user dropdown) -->
               <div class="flex items-start gap-3">
                 <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5 pt-1">
@@ -1784,7 +1924,7 @@ const groupedActivities = computed(() => {
                     <span v-else class="text-xs text-gray-400">Unassigned</span>
                     <button
                       class="w-5 h-5 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
-                      @click="showAssigneeDropdown = !showAssigneeDropdown; showReportedByDropdown = false; reporterSearchQuery = ''; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false; assigneeSearchQuery = ''; editingField = 'assignedTo'"
+                      @click="showAssigneeDropdown = !showAssigneeDropdown; showReportedByDropdown = false; reporterSearchQuery = ''; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false; showStoryDropdown = false; storySearchQuery = ''; showTestCycleDropdown = false; testCycleSearchQuery = ''; assigneeSearchQuery = ''; editingField = 'assignedTo'"
                     >
                       <span class="text-xs">+</span>
                     </button>

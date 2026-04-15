@@ -10,10 +10,12 @@ import {
   MessageSquare, Send, Trash2,
   Upload, Download, ImageIcon, FileIcon, Paperclip,
   AlertTriangle, Eye, Monitor, Smartphone, Globe, Zap, Database, LayoutDashboard, Lock,
-  Archive, RotateCcw, ExternalLink, Pencil,
+  Sparkles, Lightbulb,
+  Archive, RotateCcw, ExternalLink, Pencil, FlaskConical,
 } from 'lucide-vue-next'
 import { useIssuesStore } from '@/stores/issues'
 import { useBacklogStore } from '@/stores/backlog'
+import { useTestCyclesStore } from '@/stores/testCycles'
 import { useAuthStore } from '@/stores/auth'
 import { useProductMembersStore } from '@/stores/productMembers'
 import type {
@@ -21,6 +23,7 @@ import type {
   IssueReproducibility, IssueEnvironment, IssueBrowser, IssueOs,
   IssueComment, IssueAttachment,
 } from '@/types/issue'
+import { ISSUE_TYPES, ISSUE_TYPE_UI_LABELS } from '@shared/issueTypes'
 import { resolveApiPath } from '@/utils/uploadAssetUrl'
 import {
   partitionAllowedAttachmentFiles,
@@ -89,6 +92,7 @@ const emit = defineEmits<{
 
 const issuesStore = useIssuesStore()
 const backlogStore = useBacklogStore()
+const testCyclesStore = useTestCyclesStore()
 const authStore = useAuthStore()
 const productMembersStore = useProductMembersStore()
 const formConfigsStore = useFormConfigsStore()
@@ -170,9 +174,11 @@ const showEnvironmentDropdown = ref(false)
 const showBrowserDropdown = ref(false)
 const showOsDropdown = ref(false)
 const showStoryDropdown = ref(false)
+const showTestCycleDropdown = ref(false)
 const assigneeSearchQuery = ref('')
 const reporterSearchQuery = ref('')
 const storySearchQuery = ref('')
+const testCycleSearchQuery = ref('')
 
 // Edit fields
 const editDescription = ref('')
@@ -278,15 +284,23 @@ const issueMentionUsersForDisplay = computed<MentionUser[]>(() => {
 
 // ──── Options ────
 
-const typeOptions: { value: IssueType; label: string; icon: any }[] = [
-  { value: 'bug', label: 'Bug', icon: Bug },
-  { value: 'ui_issue', label: 'UI Issue', icon: LayoutDashboard },
-  { value: 'performance', label: 'Performance', icon: Zap },
-  { value: 'crash', label: 'Crash', icon: AlertTriangle },
-  { value: 'security', label: 'Security', icon: Lock },
-  { value: 'data_loss', label: 'Data Loss', icon: Database },
-  { value: 'other', label: 'Other', icon: Circle },
-]
+const typeIconByIssueType: Record<IssueType, any> = {
+  bug: Bug,
+  ui_issue: LayoutDashboard,
+  performance: Zap,
+  crash: AlertTriangle,
+  security: Lock,
+  data_loss: Database,
+  other: Circle,
+  feature: Sparkles,
+  enhancement: Lightbulb,
+}
+
+const typeOptions: { value: IssueType; label: string; icon: any }[] = ISSUE_TYPES.map(value => ({
+  value,
+  label: ISSUE_TYPE_UI_LABELS[value],
+  icon: typeIconByIssueType[value],
+}))
 
 const statusMerged = computed(() => mergeIssueFormConfig(props.statusFormConfig ?? undefined))
 
@@ -538,14 +552,10 @@ const osOptions: { value: IssueOs; label: string }[] = [
   { value: 'other', label: 'Other' },
 ]
 
-const typeIcons: Record<string, any> = {
-  bug: Bug,
-  ui_issue: LayoutDashboard,
-  performance: Zap,
-  crash: AlertTriangle,
-  security: Lock,
-  data_loss: Database,
-  other: Circle,
+function issueTypeIconComponent(t: string | undefined) {
+  if (!t) return Circle
+  const icon = typeIconByIssueType[t as IssueType]
+  return icon ?? Circle
 }
 
 const filteredAssigneeMembers = computed(() => {
@@ -808,9 +818,11 @@ function closeAllDropdowns() {
   showBrowserDropdown.value = false
   showOsDropdown.value = false
   showStoryDropdown.value = false
+  showTestCycleDropdown.value = false
   assigneeSearchQuery.value = ''
   reporterSearchQuery.value = ''
   storySearchQuery.value = ''
+  testCycleSearchQuery.value = ''
 }
 
 // ──── Linked Story ────
@@ -820,13 +832,77 @@ const filteredStories = computed(() => {
   return backlogStore.stories.filter(s => !q || s.title.toLowerCase().includes(q))
 })
 
-async function startStoryEdit() {
+async function toggleStoryDropdown() {
   if (!props.issue) return
-  closeAllDropdowns()
-  showStoryDropdown.value = true
-  if (backlogStore.stories.length === 0 && props.issue.product) {
+  const next = !showStoryDropdown.value
+  showReportedByDropdown.value = false
+  reporterSearchQuery.value = ''
+  showStatusDropdown.value = false
+  showSeverityDropdown.value = false
+  showPriorityDropdown.value = false
+  showTypeDropdown.value = false
+  showAssigneeDropdown.value = false
+  assigneeSearchQuery.value = ''
+  showReproducibilityDropdown.value = false
+  showEnvironmentDropdown.value = false
+  showBrowserDropdown.value = false
+  showOsDropdown.value = false
+  showTestCycleDropdown.value = false
+  testCycleSearchQuery.value = ''
+  showStoryDropdown.value = next
+  storySearchQuery.value = ''
+  editingField.value = next ? 'storyId' : null
+  if (next && props.issue.product && backlogStore.stories.length === 0) {
     await backlogStore.fetchStories(props.issue.product)
   }
+}
+
+const filteredTestCycles = computed(() => {
+  const q = testCycleSearchQuery.value.toLowerCase().trim()
+  return testCyclesStore.cycles.filter(
+    c => c.status !== 'archived' && (!q || c.title.toLowerCase().includes(q)),
+  )
+})
+
+function cycleDisplayTitle(issue: Issue): string {
+  return issue.testCycle?.title || (issue.testCycleId ? `Cycle ${issue.testCycleId.slice(0, 8)}…` : '')
+}
+
+async function toggleTestCycleDropdown() {
+  if (!props.issue) return
+  const next = !showTestCycleDropdown.value
+  showReportedByDropdown.value = false
+  reporterSearchQuery.value = ''
+  showStatusDropdown.value = false
+  showSeverityDropdown.value = false
+  showPriorityDropdown.value = false
+  showTypeDropdown.value = false
+  showAssigneeDropdown.value = false
+  assigneeSearchQuery.value = ''
+  showReproducibilityDropdown.value = false
+  showEnvironmentDropdown.value = false
+  showBrowserDropdown.value = false
+  showOsDropdown.value = false
+  showStoryDropdown.value = false
+  storySearchQuery.value = ''
+  showTestCycleDropdown.value = next
+  testCycleSearchQuery.value = ''
+  editingField.value = next ? 'testCycleId' : null
+  if (next && props.issue.product && testCyclesStore.cycles.length === 0) {
+    await testCyclesStore.fetchCycles(props.issue.product)
+  }
+}
+
+async function selectTestCycle(c: { id: string; title: string }) {
+  showTestCycleDropdown.value = false
+  testCycleSearchQuery.value = ''
+  await updateField('testCycleId', c.id)
+}
+
+async function clearTestCycle() {
+  showTestCycleDropdown.value = false
+  testCycleSearchQuery.value = ''
+  await updateField('testCycleId', null)
 }
 
 async function selectStory(story: { id: string; title: string }) {
@@ -976,6 +1052,8 @@ function toggleReportedByDropdown() {
   showBrowserDropdown.value = false
   showOsDropdown.value = false
   showStoryDropdown.value = false
+  showTestCycleDropdown.value = false
+  testCycleSearchQuery.value = ''
   assigneeSearchQuery.value = ''
   storySearchQuery.value = ''
   reporterSearchQuery.value = ''
@@ -1284,6 +1362,8 @@ function typeBadgeStyle(type: string) {
     case 'security': return 'bg-orange-50/80 text-orange-600'
     case 'data_loss': return 'bg-pink-50/80 text-pink-600'
     case 'other': return 'bg-gray-50/80 text-gray-500'
+    case 'feature': return 'bg-violet-50/80 text-violet-600'
+    case 'enhancement': return 'bg-sky-50/80 text-sky-600'
     default: return 'bg-gray-50/80 text-gray-500'
   }
 }
@@ -1297,6 +1377,8 @@ function typeIconColor(type: string) {
     case 'security': return 'text-orange-500'
     case 'data_loss': return 'text-pink-500'
     case 'other': return 'text-gray-400'
+    case 'feature': return 'text-violet-500'
+    case 'enhancement': return 'text-sky-500'
     default: return 'text-gray-400'
   }
 }
@@ -1637,7 +1719,7 @@ const groupedActivities = computed(() => {
                     :class="typeBadgeStyle(issue.type)"
                     @click="showTypeDropdown = !showTypeDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
                   >
-                    <component :is="typeIcons[issue.type] || Circle" :size="12" />
+                    <component :is="issueTypeIconComponent(issue.type)" :size="12" />
                     {{ label(issue.type) }}
                     <ChevronDown :size="12" />
                   </button>
@@ -1660,29 +1742,47 @@ const groupedActivities = computed(() => {
                 </div>
               </div>
 
-              <!-- Linked Story -->
-              <div class="flex items-center gap-3">
-                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
+              <!-- Linked Story (same control style as Assigned To) -->
+              <div class="flex items-start gap-3">
+                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5 pt-1">
                   <FileText :size="13" class="text-gray-400" /> Story
                 </span>
-                <div class="relative" @click.stop>
-                  <button
-                    class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer hover:opacity-80 transition-opacity"
-                    :class="issue.storyId ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-400'"
-                    @click="startStoryEdit"
-                  >
-                    <FileText :size="12" />
-                    <span class="max-w-[140px] truncate">{{ issue.story?.title || (issue.storyId ? 'STY-' + issue.storyId.slice(-5).toUpperCase() : 'Not linked') }}</span>
-                    <ChevronDown :size="12" />
-                  </button>
+                <div class="flex-1 relative min-w-0" @click.stop>
+                  <div class="flex min-w-0 items-center gap-2">
+                    <template v-if="issue.storyId">
+                      <div class="inline-flex min-w-0 max-w-[calc(100%-1.75rem)] items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/storylink">
+                        <div class="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
+                          <FileText :size="12" class="text-indigo-600" />
+                        </div>
+                        <span class="min-w-0 flex-1 truncate text-xs font-medium text-gray-700">{{
+                          issue.story?.title || 'STY-' + issue.storyId.slice(-5).toUpperCase()
+                        }}</span>
+                        <button
+                          type="button"
+                          class="text-gray-300 hover:text-red-500 opacity-0 group-hover/storylink:opacity-100 transition-all ml-0.5"
+                          title="Remove story link"
+                          @click.stop="clearStory"
+                        >
+                          <X :size="10" />
+                        </button>
+                      </div>
+                    </template>
+                    <span v-else class="shrink-0 text-xs text-gray-400">Not linked</span>
+                    <button
+                      type="button"
+                      class="w-5 h-5 shrink-0 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
+                      @click="toggleStoryDropdown"
+                    >
+                      <span class="text-xs">+</span>
+                    </button>
+                  </div>
                   <div
                     v-if="showStoryDropdown"
-                    class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1 w-[240px]"
+                    class="absolute top-full left-0 z-30 mt-1 w-full max-w-[360px] rounded-lg border border-gray-200 bg-white shadow-lg"
                   >
-                    <!-- Search -->
-                    <div class="px-2 pt-1.5 pb-1 border-b border-gray-100">
+                    <div class="p-2 border-b border-gray-100">
                       <div class="flex items-center gap-1.5 bg-gray-50 rounded-md px-2 py-1.5">
-                        <Search :size="11" class="text-gray-400 shrink-0" />
+                        <Search :size="12" class="text-gray-400" />
                         <input
                           v-model="storySearchQuery"
                           class="text-xs bg-transparent outline-none w-full placeholder-gray-400"
@@ -1693,16 +1793,22 @@ const groupedActivities = computed(() => {
                       </div>
                     </div>
                     <div class="max-h-[200px] overflow-auto py-1">
-                      <!-- Navigate to current story -->
                       <button
                         v-if="issue.storyId"
-                        class="w-full flex items-center gap-2 px-3 py-2 text-xs text-[#4857FE] hover:bg-indigo-50 transition-colors border-b border-gray-100"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-50 transition-colors border-b border-gray-100"
+                        @click="clearStory"
+                      >
+                        <X :size="14" />
+                        Remove story link
+                      </button>
+                      <button
+                        v-if="issue.storyId"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#4857FE] hover:bg-indigo-50 transition-colors border-b border-gray-100"
                         @click="showStoryDropdown = false; emit('close'); router.push({ path: '/stories', query: { story: issue.storyId } })"
                       >
-                        <ExternalLink :size="12" />
+                        <ExternalLink :size="14" />
                         Open story
                       </button>
-                      <!-- Story options -->
                       <button
                         v-for="story in filteredStories"
                         :key="story.id"
@@ -1716,15 +1822,87 @@ const groupedActivities = computed(() => {
                       </button>
                       <p v-if="filteredStories.length === 0" class="text-xs text-gray-400 text-center py-3">No stories found</p>
                     </div>
-                    <!-- Remove link -->
-                    <div v-if="issue.storyId" class="border-t border-gray-100 pt-1">
+                  </div>
+                </div>
+              </div>
+
+              <!-- Testing cycle (same control style as Story) -->
+              <div class="flex items-start gap-3">
+                <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5 pt-1">
+                  <FlaskConical :size="13" class="text-gray-400" /> Testing Cycle
+                </span>
+                <div class="flex-1 relative min-w-0" @click.stop>
+                  <div class="flex min-w-0 items-center gap-2">
+                    <template v-if="issue.testCycleId">
+                      <div class="inline-flex min-w-0 max-w-[calc(100%-1.75rem)] items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/cyclelink">
+                        <div class="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center shrink-0">
+                          <FlaskConical :size="12" class="text-violet-600" />
+                        </div>
+                        <span class="min-w-0 flex-1 truncate text-xs font-medium text-gray-700">{{ cycleDisplayTitle(issue) }}</span>
+                        <button
+                          type="button"
+                          class="text-gray-300 hover:text-red-500 opacity-0 group-hover/cyclelink:opacity-100 transition-all ml-0.5"
+                          title="Remove testing cycle link"
+                          @click.stop="clearTestCycle"
+                        >
+                          <X :size="10" />
+                        </button>
+                      </div>
+                    </template>
+                    <span v-else class="shrink-0 text-xs text-gray-400">Not linked</span>
+                    <button
+                      type="button"
+                      class="w-5 h-5 shrink-0 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
+                      @click="toggleTestCycleDropdown"
+                    >
+                      <span class="text-xs">+</span>
+                    </button>
+                  </div>
+                  <div
+                    v-if="showTestCycleDropdown"
+                    class="absolute top-full left-0 z-30 mt-1 w-full max-w-[360px] rounded-lg border border-gray-200 bg-white shadow-lg"
+                  >
+                    <div class="p-2 border-b border-gray-100">
+                      <div class="flex items-center gap-1.5 bg-gray-50 rounded-md px-2 py-1.5">
+                        <Search :size="12" class="text-gray-400" />
+                        <input
+                          v-model="testCycleSearchQuery"
+                          class="text-xs bg-transparent outline-none w-full placeholder-gray-400"
+                          placeholder="Search testing cycles..."
+                          autofocus
+                          @keydown.escape="showTestCycleDropdown = false; testCycleSearchQuery = ''"
+                        />
+                      </div>
+                    </div>
+                    <div class="max-h-[200px] overflow-auto py-1">
                       <button
-                        class="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-500 hover:bg-red-50 transition-colors"
-                        @click="clearStory"
+                        v-if="issue.testCycleId"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-50 transition-colors border-b border-gray-100"
+                        @click="clearTestCycle"
                       >
-                        <X :size="12" />
-                        Remove story link
+                        <X :size="14" />
+                        Remove testing cycle link
                       </button>
+                      <button
+                        v-if="issue.testCycleId"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#4857FE] hover:bg-indigo-50 transition-colors border-b border-gray-100"
+                        @click="showTestCycleDropdown = false; emit('close'); router.push(`/test-cycles/${issue.testCycleId}`)"
+                      >
+                        <ExternalLink :size="14" />
+                        Open testing cycle
+                      </button>
+                      <button
+                        v-for="c in filteredTestCycles"
+                        :key="c.id"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
+                        :class="issue.testCycleId === c.id ? 'text-[#4857FE] font-medium' : 'text-gray-600'"
+                        @click="selectTestCycle(c)"
+                      >
+                        <FlaskConical :size="14" class="shrink-0 text-violet-500" />
+                        <span class="truncate flex-1 text-left">{{ c.title }}</span>
+                        <Check v-if="issue.testCycleId === c.id" :size="14" class="ml-auto text-[#4857FE] shrink-0" />
+                      </button>
+                      <p v-if="filteredTestCycles.length === 0" class="text-xs text-gray-400 text-center py-3">No testing cycles found</p>
                     </div>
                   </div>
                 </div>
@@ -1735,15 +1913,15 @@ const groupedActivities = computed(() => {
                 <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5 pt-1">
                   <User :size="13" class="text-gray-400" /> Assigned To
                 </span>
-                <div class="flex-1 relative" @click.stop>
-                  <div class="flex items-center gap-2 flex-wrap">
+                <div class="flex-1 relative min-w-0" @click.stop>
+                  <div class="flex min-w-0 items-center gap-2">
                     <template v-if="issue.assignedTo">
-                      <div class="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/assignee">
+                      <div class="inline-flex min-w-0 max-w-[calc(100%-1.75rem)] items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/assignee">
                         <div class="w-5 h-5 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
                           <UploadAssetImg v-if="issue.assignedTo.avatar" :src="issue.assignedTo.avatar" class="w-5 h-5 rounded-full object-cover" />
                           <span v-else>{{ issue.assignedTo.name[0] }}</span>
                         </div>
-                        <span class="text-xs font-medium text-gray-700">{{ issue.assignedTo.name }}</span>
+                        <span class="min-w-0 flex-1 truncate text-xs font-medium text-gray-700">{{ issue.assignedTo.name }}</span>
                         <button
                           class="text-gray-300 hover:text-red-500 opacity-0 group-hover/assignee:opacity-100 transition-all ml-0.5"
                           @click="clearAssignee"
@@ -1753,10 +1931,10 @@ const groupedActivities = computed(() => {
                         </button>
                       </div>
                     </template>
-                    <span v-else class="text-xs text-gray-400">Unassigned</span>
+                    <span v-else class="text-xs text-gray-400 shrink-0">Unassigned</span>
                     <button
-                      class="w-5 h-5 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
-                      @click="showAssigneeDropdown = !showAssigneeDropdown; showReportedByDropdown = false; reporterSearchQuery = ''; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false; assigneeSearchQuery = ''; editingField = 'assignedTo'"
+                      class="w-5 h-5 shrink-0 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
+                      @click="showAssigneeDropdown = !showAssigneeDropdown; showReportedByDropdown = false; reporterSearchQuery = ''; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false; showStoryDropdown = false; storySearchQuery = ''; showTestCycleDropdown = false; testCycleSearchQuery = ''; assigneeSearchQuery = ''; editingField = 'assignedTo'"
                     >
                       <span class="text-xs">+</span>
                     </button>
@@ -1764,7 +1942,7 @@ const groupedActivities = computed(() => {
                   <!-- Assignee dropdown -->
                   <div
                     v-if="showAssigneeDropdown"
-                    class="absolute top-full left-0 z-30 mt-1 w-full max-w-[280px] rounded-lg border border-gray-200 bg-white shadow-lg"
+                    class="absolute top-full left-0 z-30 mt-1 w-full max-w-[360px] rounded-lg border border-gray-200 bg-white shadow-lg"
                   >
                     <div class="p-2 border-b border-gray-100">
                       <div class="flex items-center gap-1.5 bg-gray-50 rounded-md px-2 py-1.5">

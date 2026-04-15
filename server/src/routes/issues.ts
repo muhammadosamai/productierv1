@@ -2,6 +2,7 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { issues, issueComments, issueAttachments, users, productMembers } from '../db/schema'
 import { eq, sql, and, asc, isNotNull, ne } from 'drizzle-orm'
+import { ISSUE_TYPES, issueTypesPgEnumList } from '@shared/issueTypes'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
@@ -80,7 +81,7 @@ async function ensureIssueSchema() {
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_type') THEN
-    CREATE TYPE issue_type AS ENUM ('bug', 'ui_issue', 'performance', 'crash', 'security', 'data_loss', 'other');
+    CREATE TYPE issue_type AS ENUM (${sql.raw(issueTypesPgEnumList())});
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'issue_severity') THEN
@@ -247,10 +248,7 @@ function issueStoredDateToComparable(v: unknown): string | null {
 
 const issueBodyShared = {
   description: t.Optional(t.Nullable(t.String())),
-  type: t.Optional(t.Union([
-    t.Literal('bug'), t.Literal('ui_issue'), t.Literal('performance'),
-    t.Literal('crash'), t.Literal('security'), t.Literal('data_loss'), t.Literal('other'),
-  ])),
+  type: t.Optional(t.Union(ISSUE_TYPES.map(v => t.Literal(v)) as [ReturnType<typeof t.Literal>, ReturnType<typeof t.Literal>, ...ReturnType<typeof t.Literal>[]])),
   module: t.Optional(t.Nullable(t.String())),
   stepsToReproduce: t.Optional(t.Nullable(t.String())),
   expectedBehavior: t.Optional(t.Nullable(t.String())),
@@ -384,7 +382,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       with: {
         reportedBy: { columns: { id: true, name: true, email: true, avatar: true } },
         assignedTo: { columns: { id: true, name: true, email: true, avatar: true } },
-        testCycle: { columns: { id: true, name: true } },
+        testCycle: { columns: { id: true, title: true } },
         story: { columns: { id: true, title: true, status: true } },
       },
       orderBy: (items, { desc }) => [desc(items.createdAt)],
@@ -497,6 +495,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       with: {
         reportedBy: { columns: { id: true, name: true, email: true, avatar: true } },
         assignedTo: { columns: { id: true, name: true, email: true, avatar: true } },
+        testCycle: { columns: { id: true, title: true } },
         story: { columns: { id: true, title: true, status: true } },
       },
     })
@@ -555,7 +554,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       with: {
         reportedBy: { columns: { id: true, name: true, email: true, avatar: true } },
         assignedTo: { columns: { id: true, name: true, email: true, avatar: true } },
-        testCycle: { columns: { id: true, name: true } },
+        testCycle: { columns: { id: true, title: true } },
         story: { columns: { id: true, title: true, status: true } },
         comments: { with: { user: true }, orderBy: (c, { desc }) => [desc(c.createdAt)] },
       },
@@ -722,6 +721,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       with: {
         reportedBy: { columns: { id: true, name: true, email: true, avatar: true } },
         assignedTo: { columns: { id: true, name: true, email: true, avatar: true } },
+        testCycle: { columns: { id: true, title: true } },
         story: { columns: { id: true, title: true, status: true } },
       },
     })

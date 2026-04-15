@@ -4,13 +4,17 @@ import { useIssuesStore } from '@/stores/issues'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { useFormConfigsStore } from '@/stores/formConfigs'
+import { useTestCyclesStore } from '@/stores/testCycles'
 import {
   mergeIssueFormConfig,
   getVisibleCustomIssueFields,
   defaultCustomFieldValue,
   isCustomFieldValueEmpty,
+  isIssueFormFieldVisible,
 } from '@/lib/issueFormConfig'
 import DynamicField from '@/components/forms/DynamicField.vue'
+import SearchableStringCombobox from '@/components/shared/SearchableStringCombobox.vue'
+import { fetchDistinctIssueModules } from '@/lib/issueModulesApi'
 import {
   Dialog,
   DialogContent,
@@ -32,8 +36,10 @@ import {
   Loader2, Bug, RotateCcw, Send,
   AlertTriangle, Monitor, Paperclip,
   ChevronLeft, ChevronRight, Check, Link, Link2, CalendarDays, X, Search, Tags,
+  FlaskConical,
 } from 'lucide-vue-next'
 import type { IssueType, IssueSeverity, IssuePriority, IssueReproducibility, IssueEnvironment, IssueBrowser, IssueOs } from '@/types/issue'
+import { ISSUE_TYPES, ISSUE_TYPE_UI_LABELS } from '@shared/issueTypes'
 import {
   partitionAllowedAttachmentFiles,
   ATTACHMENT_FILE_ACCEPT,
@@ -50,6 +56,7 @@ const issuesStore = useIssuesStore()
 const productStore = useProductStore()
 const authStore = useAuthStore()
 const formConfigsStore = useFormConfigsStore()
+const testCyclesStore = useTestCyclesStore()
 
 const mergedIssueForm = computed(() => {
   const p = productStore.activeProduct?.name
@@ -58,6 +65,40 @@ const mergedIssueForm = computed(() => {
 })
 
 const customIssueFields = computed(() => getVisibleCustomIssueFields(mergedIssueForm.value))
+
+function issueFieldVisible(key: string): boolean {
+  return isIssueFormFieldVisible(mergedIssueForm.value, key)
+}
+
+const showCreateReproductionBlock = computed(
+  () =>
+    issueFieldVisible('stepsToReproduce') ||
+    issueFieldVisible('expectedBehavior') ||
+    issueFieldVisible('actualBehavior') ||
+    issueFieldVisible('reproducibility'),
+)
+
+const showCreateEstimateDatesBlock = computed(
+  () =>
+    issueFieldVisible('estimateValue') ||
+    issueFieldVisible('startDate') ||
+    issueFieldVisible('endDate'),
+)
+
+const showCreateEnvironmentBlock = computed(
+  () =>
+    issueFieldVisible('environment') ||
+    issueFieldVisible('browser') ||
+    issueFieldVisible('operatingSystem'),
+)
+
+const showCreateSeverityPriorityBlock = computed(
+  () =>
+    issueFieldVisible('severity') ||
+    issueFieldVisible('priority') ||
+    issueFieldVisible('assignedToUserId') ||
+    issueFieldVisible('appVersion'),
+)
 
 const customFieldValues = reactive<Record<string, unknown>>({})
 
@@ -76,12 +117,6 @@ watch(
   { immediate: true },
 )
 
-watch(open, async isOpen => {
-  if (!isOpen) return
-  const p = productStore.activeProduct?.name
-  if (p && authStore.token) await formConfigsStore.fetchConfig(p, 'issue')
-})
-
 // Wizard step
 const step = ref(1)
 const totalSteps = 3
@@ -91,6 +126,8 @@ const title = ref('')
 const description = ref('')
 const type = ref<IssueType>('bug')
 const module_ = ref('')
+const moduleSuggestions = ref<string[]>([])
+const moduleSuggestionsLoading = ref(false)
 const stepsToReproduce = ref('')
 const expectedBehavior = ref('')
 const actualBehavior = ref('')
@@ -111,6 +148,30 @@ const issueEndDate = ref('')
 const submitting = ref(false)
 const error = ref('')
 
+async function loadModuleSuggestions() {
+  const p = productStore.activeProduct?.name
+  if (!p) return
+  moduleSuggestionsLoading.value = true
+  try {
+    const list = await fetchDistinctIssueModules(p, authStore.token)
+    moduleSuggestions.value = [...new Set(list)]
+  } finally {
+    moduleSuggestionsLoading.value = false
+  }
+}
+
+watch(open, async isOpen => {
+  if (!isOpen) return
+  const p = productStore.activeProduct?.name
+  if (p && authStore.token) {
+    await Promise.all([
+      formConfigsStore.fetchConfig(p, 'issue'),
+      loadModuleSuggestions(),
+      testCyclesStore.fetchCycles(p),
+    ])
+  }
+})
+
 // Attachments
 const pendingFiles = ref<File[]>([])
 const isDragging = ref(false)
@@ -123,7 +184,13 @@ let searchTimeout: ReturnType<typeof setTimeout> | null = null
 
 // Step validation
 const canProceedStep1 = computed(() => title.value.trim().length > 0)
-const canProceedStep2 = computed(() => true) // all optional
+const canProceedStep2 = computed(() => {
+  for (const f of customIssueFields.value) {
+    if (!f.required) continue
+    if (isCustomFieldValueEmpty(customFieldValues[f.key], f.type)) return false
+  }
+  return true
+})
 
 const stepLabels = ['Bug Details', 'Priority & Environment', 'Attachments & Submit']
 
@@ -161,6 +228,19 @@ const linkedStoryTitle = ref('')
 const linkedTaskId = ref<string | null>(null)
 const linkedTaskTitle = ref('')
 let linkSearchTimeout: ReturnType<typeof setTimeout> | null = null
+
+// Linked testing cycle
+const linkedTestCycleId = ref<string | null>(null)
+const linkedTestCycleTitle = ref('')
+const testCycleSearch = ref('')
+
+const filteredTestCycles = computed(() => {
+  const q = testCycleSearch.value.trim().toLowerCase()
+  if (!q) return []
+  return testCyclesStore.cycles
+    .filter(c => c.status !== 'archived' && c.title.toLowerCase().includes(q))
+    .slice(0, 25)
+})
 
 async function searchLinks(q: string) {
   if (!q.trim()) { linkResults.value = []; return }
@@ -205,6 +285,18 @@ function selectLink(item: { type: 'story' | 'task'; id: string; title: string })
 function removeStoryLink() { linkedStoryId.value = null; linkedStoryTitle.value = '' }
 function removeTaskLink() { linkedTaskId.value = null; linkedTaskTitle.value = '' }
 
+function selectTestCycle(c: { id: string; title: string }) {
+  linkedTestCycleId.value = c.id
+  linkedTestCycleTitle.value = c.title
+  testCycleSearch.value = ''
+}
+
+function removeTestCycleLink() {
+  linkedTestCycleId.value = null
+  linkedTestCycleTitle.value = ''
+  testCycleSearch.value = ''
+}
+
 function clearForm() {
   step.value = 1
   title.value = ''; description.value = ''; type.value = 'bug'; module_.value = ''
@@ -219,6 +311,9 @@ function clearForm() {
   linkedStoryId.value = props.storyId || null
   linkedStoryTitle.value = props.storyId ? linkedStoryTitle.value : ''
   linkedTaskId.value = null; linkedTaskTitle.value = ''
+  linkedTestCycleId.value = null
+  linkedTestCycleTitle.value = ''
+  testCycleSearch.value = ''
   resetCustomFieldValues()
 }
 
@@ -240,6 +335,7 @@ watch(open, (val) => { if (!val) clearForm() })
 
 function nextStep() {
   if (step.value === 1 && !canProceedStep1.value) return
+  if (step.value === 2 && !validateCustomFields()) return
   if (step.value < totalSteps) step.value++
 }
 
@@ -292,6 +388,7 @@ function validateCustomFields(): boolean {
       return false
     }
   }
+  error.value = ''
   return true
 }
 
@@ -348,6 +445,7 @@ async function handleSubmit() {
     product: productStore.activeProduct?.name,
     storyId: linkedStoryId.value,
     taskId: linkedTaskId.value,
+    ...(linkedTestCycleId.value ? { testCycleId: linkedTestCycleId.value } : {}),
     ...(estimatePayload !== undefined ? { estimateValue: estimatePayload } : {}),
     ...(startWire ? { startDate: startWire } : {}),
     ...(endWire ? { endDate: endWire } : {}),
@@ -437,57 +535,69 @@ async function handleSubmit() {
               <Input v-model="title" placeholder="e.g. Login button not responding on mobile" autofocus />
             </div>
 
-            <div class="space-y-1.5">
+            <div v-if="issueFieldVisible('description')" class="space-y-1.5">
               <label class="text-sm font-medium text-gray-700">Description</label>
               <Textarea v-model="description" placeholder="Describe the bug in detail..." :rows="3" />
             </div>
 
-            <div class="grid grid-cols-2 gap-3">
-              <div class="space-y-1.5">
+            <div
+              v-if="issueFieldVisible('type') || issueFieldVisible('module')"
+              class="grid grid-cols-2 gap-3"
+            >
+              <div v-if="issueFieldVisible('type')" class="space-y-1.5">
                 <label class="text-sm font-medium text-gray-700">Type</label>
                 <Select v-model="type">
                   <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="bug">Bug</SelectItem>
-                    <SelectItem value="ui_issue">UI Issue</SelectItem>
-                    <SelectItem value="performance">Performance</SelectItem>
-                    <SelectItem value="crash">Crash</SelectItem>
-                    <SelectItem value="security">Security</SelectItem>
-                    <SelectItem value="data_loss">Data Loss</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
+                    <SelectItem v-for="opt in ISSUE_TYPES" :key="opt" :value="opt">
+                      {{ ISSUE_TYPE_UI_LABELS[opt] }}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div class="space-y-1.5">
+              <div v-if="issueFieldVisible('module')" class="space-y-1.5 min-w-0">
                 <label class="text-sm font-medium text-gray-700">Module / Feature</label>
-                <Input v-model="module_" placeholder="e.g. Authentication" />
+                <SearchableStringCombobox
+                  v-model="module_"
+                  :suggestions="moduleSuggestions"
+                  :loading="moduleSuggestionsLoading"
+                  placeholder="Search Modules"
+                  show-trailing-edit-icon
+                  input-class="w-full min-w-0"
+                />
               </div>
             </div>
           </fieldset>
 
           <!-- Reproduction Details -->
-          <fieldset class="border border-gray-200 rounded-xl p-4 space-y-3">
+          <fieldset
+            v-if="showCreateReproductionBlock"
+            class="border border-gray-200 rounded-xl p-4 space-y-3"
+          >
             <legend class="text-sm font-semibold text-gray-700 px-2 flex items-center gap-1.5">
               <RotateCcw :size="14" class="text-gray-400" /> Reproduction Details
             </legend>
 
-            <div class="space-y-1.5">
+            <div v-if="issueFieldVisible('stepsToReproduce')" class="space-y-1.5">
               <label class="text-sm font-medium text-gray-700">Steps to Reproduce</label>
               <Textarea v-model="stepsToReproduce" placeholder="1. Go to '...'&#10;2. Click on '...'&#10;3. Scroll to '...'&#10;4. See error" :rows="4" />
             </div>
 
-            <div class="grid grid-cols-2 gap-3">
-              <div class="space-y-1.5">
+            <div
+              v-if="issueFieldVisible('expectedBehavior') || issueFieldVisible('actualBehavior')"
+              class="grid grid-cols-2 gap-3"
+            >
+              <div v-if="issueFieldVisible('expectedBehavior')" class="space-y-1.5">
                 <label class="text-sm font-medium text-gray-700">Expected Behavior</label>
                 <Textarea v-model="expectedBehavior" placeholder="What should have happened..." :rows="3" />
               </div>
-              <div class="space-y-1.5">
+              <div v-if="issueFieldVisible('actualBehavior')" class="space-y-1.5">
                 <label class="text-sm font-medium text-gray-700">Actual Behavior</label>
                 <Textarea v-model="actualBehavior" placeholder="What actually happened..." :rows="3" />
               </div>
             </div>
 
-            <div class="space-y-1.5 max-w-[50%]">
+            <div v-if="issueFieldVisible('reproducibility')" class="space-y-1.5 max-w-[50%]">
               <label class="text-sm font-medium text-gray-700">Reproducibility</label>
               <Select v-model="reproducibility">
                 <SelectTrigger><SelectValue placeholder="How often?" /></SelectTrigger>
@@ -506,13 +616,19 @@ async function handleSubmit() {
         <!-- ============ STEP 2: Priority & Environment ============ -->
         <template v-if="step === 2">
           <!-- Severity & Priority -->
-          <fieldset class="border border-gray-200 rounded-xl p-4 space-y-3">
+          <fieldset
+            v-if="showCreateSeverityPriorityBlock"
+            class="border border-gray-200 rounded-xl p-4 space-y-3"
+          >
             <legend class="text-sm font-semibold text-gray-700 px-2 flex items-center gap-1.5">
               <AlertTriangle :size="14" class="text-gray-400" /> Severity & Priority
             </legend>
 
-            <div class="grid grid-cols-2 gap-3">
-              <div class="space-y-1.5">
+            <div
+              v-if="issueFieldVisible('severity') || issueFieldVisible('priority')"
+              class="grid grid-cols-2 gap-3"
+            >
+              <div v-if="issueFieldVisible('severity')" class="space-y-1.5">
                 <label class="text-sm font-medium text-gray-700">Severity *</label>
                 <Select v-model="severity">
                   <SelectTrigger><SelectValue placeholder="Select severity" /></SelectTrigger>
@@ -525,7 +641,7 @@ async function handleSubmit() {
                   </SelectContent>
                 </Select>
               </div>
-              <div class="space-y-1.5">
+              <div v-if="issueFieldVisible('priority')" class="space-y-1.5">
                 <label class="text-sm font-medium text-gray-700">Priority *</label>
                 <Select v-model="priority">
                   <SelectTrigger><SelectValue placeholder="Select priority" /></SelectTrigger>
@@ -538,8 +654,11 @@ async function handleSubmit() {
               </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-3">
-              <div class="space-y-1.5">
+            <div
+              v-if="issueFieldVisible('assignedToUserId') || issueFieldVisible('appVersion')"
+              class="grid grid-cols-2 gap-3"
+            >
+              <div v-if="issueFieldVisible('assignedToUserId')" class="space-y-1.5">
                 <label class="text-sm font-medium text-gray-700">Assign To</label>
                 <div class="relative">
                   <Input v-model="assigneeSearch" placeholder="Search team member..." @input="onAssigneeInput" />
@@ -555,7 +674,7 @@ async function handleSubmit() {
                   </div>
                 </div>
               </div>
-              <div class="space-y-1.5">
+              <div v-if="issueFieldVisible('appVersion')" class="space-y-1.5">
                 <label class="text-sm font-medium text-gray-700">App Version</label>
                 <Input v-model="appVersion" placeholder="e.g. v2.4.1" />
               </div>
@@ -563,12 +682,15 @@ async function handleSubmit() {
           </fieldset>
 
           <!-- Estimate & dates -->
-          <fieldset class="border border-gray-200 rounded-xl p-4 space-y-3">
+          <fieldset
+            v-if="showCreateEstimateDatesBlock"
+            class="border border-gray-200 rounded-xl p-4 space-y-3"
+          >
             <legend class="text-sm font-semibold text-gray-700 px-2 flex items-center gap-1.5">
               <CalendarDays :size="14" class="text-gray-400" /> Estimate & dates
             </legend>
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div class="space-y-1.5">
+              <div v-if="issueFieldVisible('estimateValue')" class="space-y-1.5">
                 <label class="text-sm font-medium text-gray-700 flex items-center gap-1.5">
                   <Link2 :size="14" class="text-gray-400" /> Estimate (hours)
                 </label>
@@ -580,11 +702,11 @@ async function handleSubmit() {
                   placeholder="e.g. 4"
                 />
               </div>
-              <div class="space-y-1.5">
+              <div v-if="issueFieldVisible('startDate')" class="space-y-1.5">
                 <label class="text-sm font-medium text-gray-700">Start date</label>
                 <Input v-model="issueStartDate" type="date" />
               </div>
-              <div class="space-y-1.5">
+              <div v-if="issueFieldVisible('endDate')" class="space-y-1.5">
                 <label class="text-sm font-medium text-gray-700">End date</label>
                 <Input v-model="issueEndDate" type="date" />
               </div>
@@ -592,13 +714,19 @@ async function handleSubmit() {
           </fieldset>
 
           <!-- Environment -->
-          <fieldset class="border border-gray-200 rounded-xl p-4 space-y-3">
+          <fieldset
+            v-if="showCreateEnvironmentBlock"
+            class="border border-gray-200 rounded-xl p-4 space-y-3"
+          >
             <legend class="text-sm font-semibold text-gray-700 px-2 flex items-center gap-1.5">
               <Monitor :size="14" class="text-gray-400" /> Environment
             </legend>
 
-            <div class="grid grid-cols-2 gap-3">
-              <div class="space-y-1.5">
+            <div
+              v-if="issueFieldVisible('environment') || issueFieldVisible('browser')"
+              class="grid grid-cols-2 gap-3"
+            >
+              <div v-if="issueFieldVisible('environment')" class="space-y-1.5">
                 <label class="text-sm font-medium text-gray-700">Environment</label>
                 <Select v-model="environment">
                   <SelectTrigger><SelectValue placeholder="Select environment" /></SelectTrigger>
@@ -610,7 +738,7 @@ async function handleSubmit() {
                   </SelectContent>
                 </Select>
               </div>
-              <div class="space-y-1.5">
+              <div v-if="issueFieldVisible('browser')" class="space-y-1.5">
                 <label class="text-sm font-medium text-gray-700">Browser</label>
                 <Select v-model="browser">
                   <SelectTrigger><SelectValue placeholder="Select browser" /></SelectTrigger>
@@ -625,7 +753,7 @@ async function handleSubmit() {
               </div>
             </div>
 
-            <div class="max-w-[50%] space-y-1.5">
+            <div v-if="issueFieldVisible('operatingSystem')" class="max-w-[50%] space-y-1.5">
               <label class="text-sm font-medium text-gray-700">Operating System</label>
               <Select v-model="operatingSystem">
                 <SelectTrigger><SelectValue placeholder="Select OS" /></SelectTrigger>
@@ -700,6 +828,54 @@ async function handleSubmit() {
             <p class="text-xs text-gray-400">Optional — link this issue to a related story or task.</p>
           </fieldset>
 
+          <!-- Link to Testing Cycle (always shown; form-builder visibility is not applied here so linking stays discoverable) -->
+          <fieldset class="border border-gray-200 rounded-xl p-4 space-y-3">
+            <legend class="text-sm font-semibold text-gray-700 px-2 flex items-center gap-1.5">
+              <FlaskConical :size="14" class="text-gray-400" /> Link to Testing Cycle
+            </legend>
+
+            <div v-if="linkedTestCycleId" class="flex items-center justify-between bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <FlaskConical :size="14" class="text-violet-600 shrink-0" />
+                <span class="text-[10px] font-bold text-violet-700 bg-violet-100 rounded px-1.5 py-0.5 shrink-0">CYCLE</span>
+                <span class="text-sm text-violet-900 truncate">{{ linkedTestCycleTitle }}</span>
+              </div>
+              <button type="button" class="text-violet-400 hover:text-violet-700 shrink-0" title="Remove link" @click="removeTestCycleLink">
+                <X :size="14" />
+              </button>
+            </div>
+
+            <div class="relative">
+              <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white">
+                <Search :size="14" class="text-gray-400 shrink-0" />
+                <input
+                  v-model="testCycleSearch"
+                  class="text-sm text-gray-700 bg-transparent outline-none w-full placeholder-gray-400"
+                  placeholder="Search testing cycles by title..."
+                />
+              </div>
+
+              <div
+                v-if="filteredTestCycles.length > 0"
+                class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[200px] overflow-auto z-50"
+                @mousedown.prevent
+              >
+                <button
+                  v-for="c in filteredTestCycles"
+                  :key="c.id"
+                  type="button"
+                  class="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 text-sm"
+                  @click="selectTestCycle(c)"
+                >
+                  <FlaskConical :size="14" class="text-violet-500 shrink-0" />
+                  <span class="text-gray-800 truncate">{{ c.title }}</span>
+                </button>
+              </div>
+            </div>
+
+            <p class="text-xs text-gray-400">Optional — link this issue to a testing cycle (archived cycles are hidden).</p>
+          </fieldset>
+
           <!-- Custom fields from form builder -->
           <fieldset
             v-if="customIssueFields.length > 0"
@@ -771,31 +947,31 @@ async function handleSubmit() {
                 <p class="text-[10px] text-gray-400 uppercase tracking-wider">Title</p>
                 <p class="text-sm text-gray-800 font-medium truncate">{{ title || '—' }}</p>
               </div>
-              <div>
+              <div v-if="issueFieldVisible('type')">
                 <p class="text-[10px] text-gray-400 uppercase tracking-wider">Type</p>
                 <p class="text-sm text-gray-700">{{ typeLabel(type) }}</p>
               </div>
-              <div>
+              <div v-if="issueFieldVisible('severity')">
                 <p class="text-[10px] text-gray-400 uppercase tracking-wider">Severity</p>
                 <span class="text-xs font-medium px-2 py-0.5 rounded-full"
                   :class="severity === 'blocker' ? 'bg-rose-950 text-white' : severity === 'critical' ? 'bg-red-100 text-red-700' : severity === 'major' ? 'bg-orange-100 text-orange-700' : severity === 'minor' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'"
                 >{{ severity }}</span>
               </div>
-              <div>
+              <div v-if="issueFieldVisible('priority')">
                 <p class="text-[10px] text-gray-400 uppercase tracking-wider">Priority</p>
                 <span class="text-xs font-medium capitalize"
                   :class="priority === 'high' ? 'text-red-600' : priority === 'medium' ? 'text-yellow-600' : 'text-gray-500'"
                 >{{ priority }}</span>
               </div>
-              <div v-if="assigneeName">
+              <div v-if="issueFieldVisible('assignedToUserId') && assigneeName">
                 <p class="text-[10px] text-gray-400 uppercase tracking-wider">Assigned To</p>
                 <p class="text-sm text-gray-700">{{ assigneeName }}</p>
               </div>
-              <div v-if="module_">
+              <div v-if="issueFieldVisible('module') && module_">
                 <p class="text-[10px] text-gray-400 uppercase tracking-wider">Module</p>
                 <p class="text-sm text-gray-700">{{ module_ }}</p>
               </div>
-              <div v-if="environment">
+              <div v-if="issueFieldVisible('environment') && environment">
                 <p class="text-[10px] text-gray-400 uppercase tracking-wider">Environment</p>
                 <p class="text-sm text-gray-700 capitalize">{{ environment }}</p>
               </div>
@@ -806,6 +982,10 @@ async function handleSubmit() {
               <div v-if="linkedTaskTitle">
                 <p class="text-[10px] text-gray-400 uppercase tracking-wider">Linked Task</p>
                 <p class="text-sm text-gray-700 truncate">{{ linkedTaskTitle }}</p>
+              </div>
+              <div v-if="linkedTestCycleTitle">
+                <p class="text-[10px] text-gray-400 uppercase tracking-wider">Testing Cycle</p>
+                <p class="text-sm text-gray-700 truncate">{{ linkedTestCycleTitle }}</p>
               </div>
               <div v-if="pendingFiles.length > 0">
                 <p class="text-[10px] text-gray-400 uppercase tracking-wider">Attachments</p>
@@ -829,7 +1009,14 @@ async function handleSubmit() {
         </div>
 
         <div class="flex items-center gap-2">
-          <Button v-if="step < totalSteps" type="button" size="sm" class="bg-[#4857FE] hover:bg-[#3E4BDE]" :disabled="step === 1 && !canProceedStep1" @click="nextStep">
+          <Button
+            v-if="step < totalSteps"
+            type="button"
+            size="sm"
+            class="bg-[#4857FE] hover:bg-[#3E4BDE]"
+            :disabled="(step === 1 && !canProceedStep1) || (step === 2 && !canProceedStep2)"
+            @click="nextStep"
+          >
             Next
             <ChevronRight :size="14" class="ml-1" />
           </Button>

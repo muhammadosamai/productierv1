@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, varchar, timestamp, date, pgEnum, json, unique, integer, boolean, doublePrecision } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
+import { ISSUE_TYPES, type IssueType } from '@shared/issueTypes'
 
 // Enums (PG enum names kept unchanged for DB compatibility)
 export const storyTypeEnum = pgEnum('item_type', [
@@ -62,9 +63,7 @@ export const issueSeverityEnum = pgEnum('issue_severity', [
   'blocker', 'critical', 'major', 'minor', 'trivial'
 ])
 
-export const issueTypeEnum = pgEnum('issue_type', [
-  'bug', 'ui_issue', 'performance', 'crash', 'security', 'data_loss', 'other'
-])
+export const issueTypeEnum = pgEnum('issue_type', [...ISSUE_TYPES] as [IssueType, ...IssueType[]])
 
 export const issueReproducibilityEnum = pgEnum('issue_reproducibility', [
   'always', 'sometimes', 'rarely', 'once', 'unable_to_reproduce'

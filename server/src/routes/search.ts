@@ -4,6 +4,7 @@ import { and, arrayContains, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 import { issueStatusSearchDbValues } from '../lib/issueStatusId'
 import { db } from '../db'
 import { assets, initiatives, issues, productMembers, products, stories, tasks, users } from '../db/schema'
+import { ISSUE_TYPES } from '@shared/issueTypes'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -163,7 +164,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
     // Valid type values per entity
     const storyTypes = ['feature', 'bug', 'improvement', 'technical_debt', 'research', 'infrastructure', 'testing', 'documentation']
     const taskTypes  = ['design', 'development', 'testing', 'review', 'research', 'fix', 'documentation', 'deployment']
-    const issueTypes = ['bug', 'ui_issue', 'performance', 'crash', 'security', 'data_loss', 'other']
+    const issueTypes = [...ISSUE_TYPES]
     // Initiatives and wiki have no type field
 
     // When a status token is present, an entity whose status enum doesn't include

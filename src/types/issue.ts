@@ -1,4 +1,5 @@
-export type IssueType = 'bug' | 'ui_issue' | 'performance' | 'crash' | 'security' | 'data_loss' | 'other'
+import type { IssueType } from '@shared/issueTypes'
+export type { IssueType }
 export type IssueSeverity = 'blocker' | 'critical' | 'major' | 'minor' | 'trivial'
 export type IssuePriority = 'high' | 'medium' | 'low'
 /** Stored issue status; allowed set is defined per product in the issue form config. */
@@ -40,7 +41,7 @@ export interface Issue {
   updatedAt: string
   reportedBy?: { id: string; name: string; email: string; avatar: string | null }
   assignedTo?: { id: string; name: string; email: string; avatar: string | null } | null
-  testCycle?: { id: string; name: string } | null
+  testCycle?: { id: string; title: string } | null
   story?: { id: string; title: string; status: string } | null
   comments?: IssueComment[]
   attachments?: IssueAttachment[]

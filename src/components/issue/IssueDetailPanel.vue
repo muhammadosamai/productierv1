@@ -1710,7 +1710,7 @@ const groupedActivities = computed(() => {
                   </div>
                   <div
                     v-if="showStoryDropdown"
-                    class="absolute top-full left-0 z-30 mt-1 w-full max-w-[280px] rounded-lg border border-gray-200 bg-white shadow-lg"
+                    class="absolute top-full left-0 z-30 mt-1 w-full max-w-[360px] rounded-lg border border-gray-200 bg-white shadow-lg"
                   >
                     <div class="p-2 border-b border-gray-100">
                       <div class="flex items-center gap-1.5 bg-gray-50 rounded-md px-2 py-1.5">
@@ -1792,7 +1792,7 @@ const groupedActivities = computed(() => {
                   <!-- Assignee dropdown -->
                   <div
                     v-if="showAssigneeDropdown"
-                    class="absolute top-full left-0 z-30 mt-1 w-full max-w-[280px] rounded-lg border border-gray-200 bg-white shadow-lg"
+                    class="absolute top-full left-0 z-30 mt-1 w-full max-w-[360px] rounded-lg border border-gray-200 bg-white shadow-lg"
                   >
                     <div class="p-2 border-b border-gray-100">
                       <div class="flex items-center gap-1.5 bg-gray-50 rounded-md px-2 py-1.5">

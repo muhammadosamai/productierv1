@@ -433,6 +433,16 @@ function formatDate(d: string | null) {
   return new Date(d).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+/** Effort (estimate hours) for list/kanban; matches 0.5h rounding used on issues. */
+function formatIssueEffortHours(v: number | null | undefined): string {
+  if (v == null) return '—'
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '—'
+  const r = Math.round(n * 2) / 2
+  const s = r % 1 === 0 ? String(r) : r.toFixed(1)
+  return `${s}h`
+}
+
 const issueStatuses = computed(() => issueStatusTabs.value)
 
 const totalIssues = computed(() => cycleIssues.value?.length || 0)
@@ -722,6 +732,15 @@ const resolvedIssues = computed(
                     <!-- Title -->
                     <p class="text-sm font-medium text-gray-900 leading-snug mb-2">{{ issue.title }}</p>
 
+                    <!-- Effort + issue fixed date (endDate) -->
+                    <div class="mb-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500">
+                      <span class="tabular-nums text-gray-600" title="Effort (hours)">{{ formatIssueEffortHours(issue.estimateValue) }}</span>
+                      <span class="inline-flex min-w-0 items-center gap-0.5" title="Issue fixed date">
+                        <CalendarDays :size="10" class="shrink-0 text-gray-400" />
+                        <span class="truncate">{{ formatDate(issue.endDate) }}</span>
+                      </span>
+                    </div>
+
                     <!-- Story tag -->
                     <div v-if="issue.storyId" class="mb-2">
                       <span class="text-[10px] text-[#4857FE] bg-[#4857FE]/8 px-1.5 py-0.5 rounded truncate inline-block max-w-full">{{ issue.storyId }}</span>
@@ -769,7 +788,9 @@ const resolvedIssues = computed(
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Issue</th>
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Severity</th>
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned</th>
+                <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Assignee</th>
+                <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Issue fixed date</th>
+                <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Effort</th>
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Reported By</th>
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Story</th>
                 <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
@@ -809,6 +830,12 @@ const resolvedIssues = computed(
                     <span class="text-sm text-gray-600 truncate">{{ issue.assignedTo.name }}</span>
                   </div>
                   <span v-else class="text-sm text-gray-400">—</span>
+                </td>
+                <td class="px-5 py-3.5">
+                  <span class="text-sm text-gray-500">{{ formatDate(issue.endDate) }}</span>
+                </td>
+                <td class="px-5 py-3.5">
+                  <span class="text-sm text-gray-600 tabular-nums">{{ formatIssueEffortHours(issue.estimateValue) }}</span>
                 </td>
                 <td class="px-5 py-3.5">
                   <div v-if="issue.reportedBy" class="flex items-center gap-2">

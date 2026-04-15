@@ -11,6 +11,8 @@ import {
   isCustomFieldValueEmpty,
 } from '@/lib/issueFormConfig'
 import DynamicField from '@/components/forms/DynamicField.vue'
+import SearchableStringCombobox from '@/components/shared/SearchableStringCombobox.vue'
+import { fetchDistinctIssueModules } from '@/lib/issueModulesApi'
 import {
   Dialog,
   DialogContent,
@@ -76,12 +78,6 @@ watch(
   { immediate: true },
 )
 
-watch(open, async isOpen => {
-  if (!isOpen) return
-  const p = productStore.activeProduct?.name
-  if (p && authStore.token) await formConfigsStore.fetchConfig(p, 'issue')
-})
-
 // Wizard step
 const step = ref(1)
 const totalSteps = 3
@@ -91,6 +87,8 @@ const title = ref('')
 const description = ref('')
 const type = ref<IssueType>('bug')
 const module_ = ref('')
+const moduleSuggestions = ref<string[]>([])
+const moduleSuggestionsLoading = ref(false)
 const stepsToReproduce = ref('')
 const expectedBehavior = ref('')
 const actualBehavior = ref('')
@@ -110,6 +108,26 @@ const issueEndDate = ref('')
 
 const submitting = ref(false)
 const error = ref('')
+
+async function loadModuleSuggestions() {
+  const p = productStore.activeProduct?.name
+  if (!p) return
+  moduleSuggestionsLoading.value = true
+  try {
+    const list = await fetchDistinctIssueModules(p, authStore.token)
+    moduleSuggestions.value = [...new Set(list)]
+  } finally {
+    moduleSuggestionsLoading.value = false
+  }
+}
+
+watch(open, async isOpen => {
+  if (!isOpen) return
+  const p = productStore.activeProduct?.name
+  if (p && authStore.token) {
+    await Promise.all([formConfigsStore.fetchConfig(p, 'issue'), loadModuleSuggestions()])
+  }
+})
 
 // Attachments
 const pendingFiles = ref<File[]>([])
@@ -458,9 +476,16 @@ async function handleSubmit() {
                   </SelectContent>
                 </Select>
               </div>
-              <div class="space-y-1.5">
+              <div class="space-y-1.5 min-w-0">
                 <label class="text-sm font-medium text-gray-700">Module / Feature</label>
-                <Input v-model="module_" placeholder="e.g. Authentication" />
+                <SearchableStringCombobox
+                  v-model="module_"
+                  :suggestions="moduleSuggestions"
+                  :loading="moduleSuggestionsLoading"
+                  placeholder="Search Modules"
+                  show-trailing-edit-icon
+                  input-class="w-full min-w-0"
+                />
               </div>
             </div>
           </fieldset>

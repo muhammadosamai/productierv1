@@ -41,7 +41,7 @@ services:
     container_name: dev-productier-frontend
     restart: unless-stopped
     depends_on:
-      - dev-productier-backend
+      - backend
     ports:
       - "3050:80"
 

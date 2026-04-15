@@ -4,7 +4,7 @@ import { and, arrayContains, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 import { issueStatusSearchDbValues } from '../lib/issueStatusId'
 import { db } from '../db'
 import { assets, initiatives, issues, productMembers, products, stories, tasks, users } from '../db/schema'
-import { ISSUE_TYPES } from '@shared/issueTypes'
+import { ISSUE_TYPES } from '../../../shared/issueTypes'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 

@@ -1,4 +1,4 @@
-import { ISSUE_TYPES } from '@shared/issueTypes'
+import { ISSUE_TYPES } from '../../../shared/issueTypes'
 
 interface FormFieldConfig {
   key: string

@@ -1,6 +1,6 @@
 import { pgTable, uuid, text, varchar, timestamp, date, pgEnum, json, unique, integer, boolean, doublePrecision } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
-import { ISSUE_TYPES, type IssueType } from '@shared/issueTypes'
+import { ISSUE_TYPES, type IssueType } from '../../../shared/issueTypes'
 
 // Enums (PG enum names kept unchanged for DB compatibility)
 export const storyTypeEnum = pgEnum('item_type', [

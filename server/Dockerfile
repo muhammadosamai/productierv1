@@ -4,11 +4,13 @@ WORKDIR /app
 # Install curl for healthcheck (oven/bun:1 is Debian-based); done early for layer caching
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
-# Install all deps (including devDependencies so drizzle-kit is available for migrations)
-COPY package.json bun.lock ./
+# Install all deps (including devDependencies so drizzle-kit is available for migrations).
+# Build with repo root as context: `docker build -f server/Dockerfile ..` (see server/docker-compose.yml).
+COPY server/package.json server/bun.lock ./
 RUN bun install --frozen-lockfile
 
-COPY . .
+COPY server/ ./
+COPY shared/ ../shared/
 
 # uploads/ tree is copied from the repo (.gitkeep); ensure non-root can write
 RUN chown -R bun:bun /app/uploads

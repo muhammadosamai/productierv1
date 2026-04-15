@@ -20,7 +20,9 @@ services:
       - "6000:6000"
  
   backend:
-    build: .
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
     container_name: productier-backend
     restart: unless-stopped
     depends_on:

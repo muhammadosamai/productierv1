@@ -39,6 +39,7 @@ import {
   FlaskConical,
 } from 'lucide-vue-next'
 import type { IssueType, IssueSeverity, IssuePriority, IssueReproducibility, IssueEnvironment, IssueBrowser, IssueOs } from '@/types/issue'
+import { ISSUE_TYPES, ISSUE_TYPE_UI_LABELS } from '@shared/issueTypes'
 import {
   partitionAllowedAttachmentFiles,
   ATTACHMENT_FILE_ACCEPT,
@@ -548,13 +549,9 @@ async function handleSubmit() {
                 <Select v-model="type">
                   <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="bug">Bug</SelectItem>
-                    <SelectItem value="ui_issue">UI Issue</SelectItem>
-                    <SelectItem value="performance">Performance</SelectItem>
-                    <SelectItem value="crash">Crash</SelectItem>
-                    <SelectItem value="security">Security</SelectItem>
-                    <SelectItem value="data_loss">Data Loss</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
+                    <SelectItem v-for="opt in ISSUE_TYPES" :key="opt" :value="opt">
+                      {{ ISSUE_TYPE_UI_LABELS[opt] }}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>

@@ -1,3 +1,5 @@
+import { ISSUE_TYPES } from '@shared/issueTypes'
+
 interface FormFieldConfig {
   key: string
   label: string
@@ -41,7 +43,7 @@ const taskFields: FormFieldConfig[] = [
 const issueFields: FormFieldConfig[] = [
   { key: 'title', label: 'Title', type: 'text', required: true, visible: true, isBuiltIn: true, locked: true, order: 0 },
   { key: 'description', label: 'Description', type: 'textarea', required: false, visible: true, isBuiltIn: true, order: 1 },
-  { key: 'type', label: 'Type', type: 'select', required: true, visible: true, isBuiltIn: true, order: 2, options: ['bug', 'ui_issue', 'performance', 'crash', 'security', 'data_loss', 'other'] },
+  { key: 'type', label: 'Type', type: 'select', required: true, visible: true, isBuiltIn: true, order: 2, options: [...ISSUE_TYPES] },
   { key: 'module', label: 'Module / Feature', type: 'text', required: false, visible: true, isBuiltIn: true, order: 3 },
   { key: 'stepsToReproduce', label: 'Steps to Reproduce', type: 'textarea', required: false, visible: true, isBuiltIn: true, order: 4 },
   { key: 'expectedBehavior', label: 'Expected Behavior', type: 'textarea', required: false, visible: true, isBuiltIn: true, order: 5 },

@@ -10,6 +10,7 @@ import {
   MessageSquare, Send, Trash2,
   Upload, Download, ImageIcon, FileIcon, Paperclip,
   AlertTriangle, Eye, Monitor, Smartphone, Globe, Zap, Database, LayoutDashboard, Lock,
+  Sparkles, Lightbulb,
   Archive, RotateCcw, ExternalLink, Pencil, FlaskConical,
 } from 'lucide-vue-next'
 import { useIssuesStore } from '@/stores/issues'
@@ -22,6 +23,7 @@ import type {
   IssueReproducibility, IssueEnvironment, IssueBrowser, IssueOs,
   IssueComment, IssueAttachment,
 } from '@/types/issue'
+import { ISSUE_TYPES, ISSUE_TYPE_UI_LABELS } from '@shared/issueTypes'
 import { resolveApiPath } from '@/utils/uploadAssetUrl'
 import {
   partitionAllowedAttachmentFiles,
@@ -282,15 +284,23 @@ const issueMentionUsersForDisplay = computed<MentionUser[]>(() => {
 
 // ──── Options ────
 
-const typeOptions: { value: IssueType; label: string; icon: any }[] = [
-  { value: 'bug', label: 'Bug', icon: Bug },
-  { value: 'ui_issue', label: 'UI Issue', icon: LayoutDashboard },
-  { value: 'performance', label: 'Performance', icon: Zap },
-  { value: 'crash', label: 'Crash', icon: AlertTriangle },
-  { value: 'security', label: 'Security', icon: Lock },
-  { value: 'data_loss', label: 'Data Loss', icon: Database },
-  { value: 'other', label: 'Other', icon: Circle },
-]
+const typeIconByIssueType: Record<IssueType, any> = {
+  bug: Bug,
+  ui_issue: LayoutDashboard,
+  performance: Zap,
+  crash: AlertTriangle,
+  security: Lock,
+  data_loss: Database,
+  other: Circle,
+  feature: Sparkles,
+  enhancement: Lightbulb,
+}
+
+const typeOptions: { value: IssueType; label: string; icon: any }[] = ISSUE_TYPES.map(value => ({
+  value,
+  label: ISSUE_TYPE_UI_LABELS[value],
+  icon: typeIconByIssueType[value],
+}))
 
 const statusMerged = computed(() => mergeIssueFormConfig(props.statusFormConfig ?? undefined))
 
@@ -542,14 +552,10 @@ const osOptions: { value: IssueOs; label: string }[] = [
   { value: 'other', label: 'Other' },
 ]
 
-const typeIcons: Record<string, any> = {
-  bug: Bug,
-  ui_issue: LayoutDashboard,
-  performance: Zap,
-  crash: AlertTriangle,
-  security: Lock,
-  data_loss: Database,
-  other: Circle,
+function issueTypeIconComponent(t: string | undefined) {
+  if (!t) return Circle
+  const icon = typeIconByIssueType[t as IssueType]
+  return icon ?? Circle
 }
 
 const filteredAssigneeMembers = computed(() => {
@@ -1356,6 +1362,8 @@ function typeBadgeStyle(type: string) {
     case 'security': return 'bg-orange-50/80 text-orange-600'
     case 'data_loss': return 'bg-pink-50/80 text-pink-600'
     case 'other': return 'bg-gray-50/80 text-gray-500'
+    case 'feature': return 'bg-violet-50/80 text-violet-600'
+    case 'enhancement': return 'bg-sky-50/80 text-sky-600'
     default: return 'bg-gray-50/80 text-gray-500'
   }
 }
@@ -1369,6 +1377,8 @@ function typeIconColor(type: string) {
     case 'security': return 'text-orange-500'
     case 'data_loss': return 'text-pink-500'
     case 'other': return 'text-gray-400'
+    case 'feature': return 'text-violet-500'
+    case 'enhancement': return 'text-sky-500'
     default: return 'text-gray-400'
   }
 }
@@ -1709,7 +1719,7 @@ const groupedActivities = computed(() => {
                     :class="typeBadgeStyle(issue.type)"
                     @click="showTypeDropdown = !showTypeDropdown; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showAssigneeDropdown = false; showReportedByDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false"
                   >
-                    <component :is="typeIcons[issue.type] || Circle" :size="12" />
+                    <component :is="issueTypeIconComponent(issue.type)" :size="12" />
                     {{ label(issue.type) }}
                     <ChevronDown :size="12" />
                   </button>
@@ -1737,14 +1747,14 @@ const groupedActivities = computed(() => {
                 <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5 pt-1">
                   <FileText :size="13" class="text-gray-400" /> Story
                 </span>
-                <div class="flex-1 relative" @click.stop>
-                  <div class="flex items-center gap-2 flex-wrap">
+                <div class="flex-1 relative min-w-0" @click.stop>
+                  <div class="flex min-w-0 items-center gap-2">
                     <template v-if="issue.storyId">
-                      <div class="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/storylink">
+                      <div class="inline-flex min-w-0 max-w-[calc(100%-1.75rem)] items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/storylink">
                         <div class="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
                           <FileText :size="12" class="text-indigo-600" />
                         </div>
-                        <span class="text-xs font-medium text-gray-700 max-w-[160px] truncate">{{
+                        <span class="min-w-0 flex-1 truncate text-xs font-medium text-gray-700">{{
                           issue.story?.title || 'STY-' + issue.storyId.slice(-5).toUpperCase()
                         }}</span>
                         <button
@@ -1757,10 +1767,10 @@ const groupedActivities = computed(() => {
                         </button>
                       </div>
                     </template>
-                    <span v-else class="text-xs text-gray-400">Not linked</span>
+                    <span v-else class="shrink-0 text-xs text-gray-400">Not linked</span>
                     <button
                       type="button"
-                      class="w-5 h-5 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
+                      class="w-5 h-5 shrink-0 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
                       @click="toggleStoryDropdown"
                     >
                       <span class="text-xs">+</span>
@@ -1821,14 +1831,14 @@ const groupedActivities = computed(() => {
                 <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5 pt-1">
                   <FlaskConical :size="13" class="text-gray-400" /> Testing Cycle
                 </span>
-                <div class="flex-1 relative" @click.stop>
-                  <div class="flex items-center gap-2 flex-wrap">
+                <div class="flex-1 relative min-w-0" @click.stop>
+                  <div class="flex min-w-0 items-center gap-2">
                     <template v-if="issue.testCycleId">
-                      <div class="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/cyclelink">
+                      <div class="inline-flex min-w-0 max-w-[calc(100%-1.75rem)] items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/cyclelink">
                         <div class="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center shrink-0">
                           <FlaskConical :size="12" class="text-violet-600" />
                         </div>
-                        <span class="text-xs font-medium text-gray-700 max-w-[160px] truncate">{{ cycleDisplayTitle(issue) }}</span>
+                        <span class="min-w-0 flex-1 truncate text-xs font-medium text-gray-700">{{ cycleDisplayTitle(issue) }}</span>
                         <button
                           type="button"
                           class="text-gray-300 hover:text-red-500 opacity-0 group-hover/cyclelink:opacity-100 transition-all ml-0.5"
@@ -1839,10 +1849,10 @@ const groupedActivities = computed(() => {
                         </button>
                       </div>
                     </template>
-                    <span v-else class="text-xs text-gray-400">Not linked</span>
+                    <span v-else class="shrink-0 text-xs text-gray-400">Not linked</span>
                     <button
                       type="button"
-                      class="w-5 h-5 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
+                      class="w-5 h-5 shrink-0 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
                       @click="toggleTestCycleDropdown"
                     >
                       <span class="text-xs">+</span>
@@ -1903,15 +1913,15 @@ const groupedActivities = computed(() => {
                 <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5 pt-1">
                   <User :size="13" class="text-gray-400" /> Assigned To
                 </span>
-                <div class="flex-1 relative" @click.stop>
-                  <div class="flex items-center gap-2 flex-wrap">
+                <div class="flex-1 relative min-w-0" @click.stop>
+                  <div class="flex min-w-0 items-center gap-2">
                     <template v-if="issue.assignedTo">
-                      <div class="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/assignee">
+                      <div class="inline-flex min-w-0 max-w-[calc(100%-1.75rem)] items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1 group/assignee">
                         <div class="w-5 h-5 rounded-full overflow-hidden bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-bold shrink-0">
                           <UploadAssetImg v-if="issue.assignedTo.avatar" :src="issue.assignedTo.avatar" class="w-5 h-5 rounded-full object-cover" />
                           <span v-else>{{ issue.assignedTo.name[0] }}</span>
                         </div>
-                        <span class="text-xs font-medium text-gray-700">{{ issue.assignedTo.name }}</span>
+                        <span class="min-w-0 flex-1 truncate text-xs font-medium text-gray-700">{{ issue.assignedTo.name }}</span>
                         <button
                           class="text-gray-300 hover:text-red-500 opacity-0 group-hover/assignee:opacity-100 transition-all ml-0.5"
                           @click="clearAssignee"
@@ -1921,9 +1931,9 @@ const groupedActivities = computed(() => {
                         </button>
                       </div>
                     </template>
-                    <span v-else class="text-xs text-gray-400">Unassigned</span>
+                    <span v-else class="text-xs text-gray-400 shrink-0">Unassigned</span>
                     <button
-                      class="w-5 h-5 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
+                      class="w-5 h-5 shrink-0 rounded-full border border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-[#4857FE] hover:text-[#4857FE] transition-colors"
                       @click="showAssigneeDropdown = !showAssigneeDropdown; showReportedByDropdown = false; reporterSearchQuery = ''; showStatusDropdown = false; showSeverityDropdown = false; showPriorityDropdown = false; showTypeDropdown = false; showReproducibilityDropdown = false; showEnvironmentDropdown = false; showBrowserDropdown = false; showOsDropdown = false; showStoryDropdown = false; storySearchQuery = ''; showTestCycleDropdown = false; testCycleSearchQuery = ''; assigneeSearchQuery = ''; editingField = 'assignedTo'"
                     >
                       <span class="text-xs">+</span>

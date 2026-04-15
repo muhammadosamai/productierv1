@@ -7,7 +7,11 @@
     "esModuleInterop": true,
     "outDir": "./dist",
     "rootDir": "./src",
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["../shared/*"]
+    }
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "../shared/**/*.ts"]
 }

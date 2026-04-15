@@ -8,7 +8,7 @@ import {
   GripVertical, Check, RotateCcw,
   FileText, Type, Tag, CalendarClock, Link,
   Users, User, UserCheck, Hourglass, Archive, RotateCw, Trash2, X,
-  Shield, AlertTriangle, Zap, Database, Eye, Monitor,
+  Shield, AlertTriangle, Zap, Database, Eye, Monitor, Sparkles, Lightbulb,
   PencilLine, Wrench, Server, TestTube2,
   Columns3Cog,
   Filter,
@@ -35,6 +35,7 @@ import {
 } from '@/lib/issueFormConfig'
 import { ISSUE_STATUS_ID_CLOSED, ISSUE_STATUS_ID_OPEN, issueStatusSemanticTone } from '@/lib/issueStatusId'
 import type { Issue, IssueStatus } from '@/types/issue'
+import { ISSUE_TYPES, ISSUE_TYPE_ORDER } from '@shared/issueTypes'
 
 interface TeamUser {
   id: string
@@ -106,7 +107,7 @@ const issueStatusFormConfigRaw = computed(() => {
   return formConfigsStore.getConfig(p, 'issue')
 })
 const issuePriorityOptions = ['high', 'medium', 'low'] as const
-const issueTypeOptions = ['bug', 'ui_issue', 'performance', 'crash', 'security', 'data_loss', 'other'] as const
+const issueTypeOptions = ISSUE_TYPES
 const issueSeverityOptions = ['blocker', 'critical', 'major', 'minor', 'trivial'] as const
 
 const editableFields = new Set(['title', 'priority', 'severity', 'type', 'module', 'assignedTo', 'status'])
@@ -507,7 +508,7 @@ const statusOrder = computed(() => {
 })
 const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
 const severityOrder: Record<string, number> = { blocker: 0, critical: 1, major: 2, minor: 3, trivial: 4 }
-const typeOrder: Record<string, number> = { bug: 0, ui_issue: 1, performance: 2, crash: 3, security: 4, data_loss: 5, other: 6 }
+const typeOrder: Record<string, number> = ISSUE_TYPE_ORDER
 
 function compareStr(a: string | null | undefined, b: string | null | undefined): number {
   return (a || '').localeCompare(b || '')
@@ -1080,6 +1081,8 @@ function typeIcon(type: string) {
     case 'security': return Shield
     case 'data_loss': return Database
     case 'other': return Bug
+    case 'feature': return Sparkles
+    case 'enhancement': return Lightbulb
     default: return Bug
   }
 }
@@ -1093,6 +1096,8 @@ function typeStyle(type: string | null) {
     case 'security': return 'bg-orange-50/80 text-orange-600'
     case 'data_loss': return 'bg-rose-50/80 text-rose-600'
     case 'other': return 'bg-gray-50/80 text-gray-500'
+    case 'feature': return 'bg-violet-50/80 text-violet-600'
+    case 'enhancement': return 'bg-sky-50/80 text-sky-600'
     default: return 'bg-gray-50/80 text-gray-500'
   }
 }

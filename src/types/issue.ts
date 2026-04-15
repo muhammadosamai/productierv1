@@ -1,4 +1,5 @@
-export type IssueType = 'bug' | 'ui_issue' | 'performance' | 'crash' | 'security' | 'data_loss' | 'other'
+import type { IssueType } from '@shared/issueTypes'
+export type { IssueType }
 export type IssueSeverity = 'blocker' | 'critical' | 'major' | 'minor' | 'trivial'
 export type IssuePriority = 'high' | 'medium' | 'low'
 /** Stored issue status; allowed set is defined per product in the issue form config. */

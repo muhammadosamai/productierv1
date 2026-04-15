@@ -164,8 +164,8 @@ function removeProductLogo() {
 
 async function uploadProductLogo(): Promise<string> {
   if (!productLogoFile.value) throw new Error('No file selected')
-  const productName = productStore.activeProductName
-  const qs = productName ? `?product=${encodeURIComponent(productName)}` : ''
+  const scope = productStore.activeProductScopeForApi
+  const qs = scope ? `?product=${encodeURIComponent(scope)}` : ''
   const formData = new FormData()
   formData.append('file', productLogoFile.value)
   const res = await fetch(`/api/products/upload-logo${qs}`, {
@@ -204,9 +204,9 @@ async function handleProductSave() {
       logoUrl = null // Logo was removed
     }
 
-    const currentName = productStore.activeProductName
+    const currentScope = productStore.activeProductScopeForApi
     const updates: Record<string, any> = {}
-    if (productName.value.trim() !== currentName) updates.name = productName.value.trim()
+    if (productName.value.trim() !== productStore.activeProduct?.name) updates.name = productName.value.trim()
     if (productDescription.value !== (productStore.activeProduct.description || '')) updates.description = productDescription.value || null
     if (logoUrl !== undefined) updates.logo = logoUrl
 
@@ -216,7 +216,7 @@ async function handleProductSave() {
       return
     }
 
-    const result = await productStore.updateProduct(currentName, updates)
+    const result = await productStore.updateProduct(currentScope, updates)
     if (result.success) {
       productSaved.value = true
       setTimeout(() => productSaved.value = false, 3000)

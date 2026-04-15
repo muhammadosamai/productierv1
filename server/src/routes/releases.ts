@@ -2,6 +2,7 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { releases, releaseDeliveries, releaseDeployments, deploymentTargets, users } from '../db/schema'
 import { eq, count } from 'drizzle-orm'
+import { resolveProductByScope, whereDenormProductMatches, denormalizedProductScopeValue } from '../lib/resolveProductScope'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 
@@ -100,9 +101,10 @@ export const releaseRoutes = new Elysia({ prefix: '/api/releases' })
 
   // GET /api/releases?product=X
   .get('/', async ({ query }) => {
-    const product = query.product
+    const product = query.product?.trim()
+    const scopeRow = product ? await resolveProductByScope(product) : null
     const results = await db.query.releases.findMany({
-      where: product ? eq(releases.productId, product) : undefined,
+      where: scopeRow ? whereDenormProductMatches(releases.productId, scopeRow) : undefined,
       orderBy: (r, { desc }) => [desc(r.createdAt)],
       with: {
         createdByUser: {
@@ -179,15 +181,25 @@ export const releaseRoutes = new Elysia({ prefix: '/api/releases' })
   })
 
   // POST /api/releases
-  .post('/', async ({ body, jwt: jwtInstance, headers }) => {
+  .post('/', async ({ body, jwt: jwtInstance, headers, set }) => {
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) return { error: 'Unauthorized' }
 
     const { deliveryIds, ...releaseData } = body
-    const productId = releaseData.productId || ''
+    const rawPid = releaseData.productId?.trim()
+    if (!rawPid) {
+      set.status = 400
+      return { error: 'productId is required' }
+    }
+    const sr = await resolveProductByScope(rawPid)
+    if (!sr) {
+      set.status = 404
+      return { error: 'Product not found' }
+    }
+    const productId = denormalizedProductScopeValue(sr)
 
     // Auto-generate code R-N
-    const [countResult] = await db.select({ total: count() }).from(releases).where(eq(releases.productId, productId))
+    const [countResult] = await db.select({ total: count() }).from(releases).where(whereDenormProductMatches(releases.productId, sr))
     const nextNumber = (countResult?.total || 0) + 1
     const code = `R-${nextNumber}`
 

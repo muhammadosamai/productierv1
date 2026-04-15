@@ -4,6 +4,11 @@ import { stories, storyComments, storyAttachments, users, productMembers } from 
 import { eq, sql, and } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
+import {
+  resolveProductByScope,
+  whereDenormProductMatches,
+  denormalizedProductScopeValue,
+} from '../lib/resolveProductScope'
 import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
 import { randomUUID } from 'node:crypto'
@@ -64,8 +69,10 @@ async function userCanAccessStoryProduct(
 ): Promise<boolean> {
   if (!user) return false
   if (user.role === 'super_admin') return true
+  const scopeRow = await resolveProductByScope(storyProduct)
+  if (!scopeRow) return false
   const member = await db.query.productMembers.findFirst({
-    where: and(eq(productMembers.product, storyProduct), eq(productMembers.userId, user.id)),
+    where: and(whereDenormProductMatches(productMembers.product, scopeRow), eq(productMembers.userId, user.id)),
   })
   return !!member
 }
@@ -75,9 +82,10 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
 
   // GET /api/stories
   .get('/', async ({ query }) => {
-    const product = query.product
+    const raw = query.product
+    const scopeRow = raw ? await resolveProductByScope(raw) : null
     return db.query.stories.findMany({
-      where: product ? eq(stories.product, product) : undefined,
+      where: scopeRow ? whereDenormProductMatches(stories.product, scopeRow) : undefined,
       orderBy: (s, { desc }) => [desc(s.createdAt)],
       with: {
         tasks: {
@@ -111,7 +119,9 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
   // POST /api/stories
   .post('/', async ({ body, jwt, headers }) => {
     await bootstrapStorySchema()
-    const product = body.product || 'Product'
+    const raw = body.product || 'Product'
+    const scopeRow = await resolveProductByScope(raw)
+    const product = scopeRow ? denormalizedProductScopeValue(scopeRow) : raw
 
     const [story] = await db.insert(stories).values({
       ...body,
@@ -206,8 +216,13 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
 
     // Strip estimate & delivery — these are computed from child tasks
     const { estimate: _est, delivery: _del, ...updateFields } = body
+    const patch: Record<string, unknown> = { ...updateFields, updatedAt: new Date() }
+    if (body.product !== undefined && body.product !== null && body.product !== '') {
+      const sr = await resolveProductByScope(String(body.product))
+      if (sr) patch.product = denormalizedProductScopeValue(sr)
+    }
     const [updated] = await db.update(stories)
-      .set({ ...updateFields, updatedAt: new Date() })
+      .set(patch as typeof updateFields & { updatedAt: Date })
       .where(eq(stories.id, id))
       .returning()
 

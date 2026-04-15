@@ -109,7 +109,7 @@ async function handleSubmit() {
         Authorization: `Bearer ${authStore.token}`,
       },
       body: JSON.stringify({
-        product: productStore.activeProductName,
+        product: productStore.activeProductScopeForApi,
         email: email.value.trim(),
         role: role.value,
       }),

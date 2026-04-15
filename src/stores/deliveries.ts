@@ -22,7 +22,7 @@ export const useDeliveriesStore = defineStore('deliveries', () => {
   const deliveryCount = computed(() => deliveries.value.length)
 
   async function fetchDeliveries(productName?: string) {
-    const product = productName || useProductStore().activeProductName
+    const product = productName || useProductStore().activeProductScopeForApi
     loading.value = true
     error.value = null
     try {

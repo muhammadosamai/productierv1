@@ -73,7 +73,7 @@ async function addNewServer() {
   if (!newServerName.value.trim() || addingServer.value) return
   addingServer.value = true
   try {
-    const pid = productStore.activeProductName
+    const pid = productStore.activeProductScopeForApi
     if (!pid) return
     const result = await serversStore.createServer({
       name: newServerName.value.trim(),

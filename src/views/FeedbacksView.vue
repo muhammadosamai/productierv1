@@ -46,12 +46,12 @@ const submitting = ref(false)
 watch(viewMode, (v) => localStorage.setItem('cf-view-mode', v))
 
 onMounted(() => {
-  store.fetchAll(productStore.activeProductName)
+  store.fetchAll(productStore.activeProductScopeForApi)
   syncCreateDialogWithRoute()
 })
 
-watch(() => productStore.activeProductName, (p) => {
-  store.fetchAll(p)
+watch(() => productStore.activeProductId, () => {
+  store.fetchAll(productStore.activeProductScopeForApi)
 })
 
 watch(() => route.query.create, () => {
@@ -135,7 +135,7 @@ async function handleCreate() {
   if (!newTitle.value.trim()) return
   submitting.value = true
   await store.create({
-    productId: productStore.activeProductName,
+    productId: productStore.activeProductScopeForApi,
     title: newTitle.value.trim(),
     description: newDescription.value.trim() || null,
     type: newType.value,
@@ -326,7 +326,7 @@ function timeAgo(dateStr: string) {
           <tbody>
             <tr v-for="item in filteredItems" :key="item.id" class="border-b border-gray-50 hover:bg-gray-50/50 transition-colors group">
               <td class="px-5 py-3.5">
-                <FavoriteStar entity-type="consumer_feedback" :entity-id="item.id" :product-id="productStore.activeProductName" />
+                <FavoriteStar entity-type="consumer_feedback" :entity-id="item.id" :product-id="productStore.activeProductScopeForApi" />
               </td>
               <td class="px-5 py-3.5">
                 <div class="flex items-center gap-2 min-w-0">

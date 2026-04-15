@@ -6,6 +6,7 @@ import TaskStatusIcon from '@/components/shared/TaskStatusIcon.vue'
 import { useInitiativesStore } from '@/stores/initiatives'
 import { useBacklogStore } from '@/stores/backlog'
 import { useProductStore } from '@/stores/products'
+import { findProductRowByDenormRef } from '@/utils/productDeepLink'
 import { useAuthStore } from '@/stores/auth'
 import { DateRangePicker } from '@/components/ui/date-range-picker'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
@@ -23,7 +24,7 @@ const authStore = useAuthStore()
 // Find the product info (logo, name) for the initiative
 const initiativeProduct = computed(() => {
   if (!initiative.value) return null
-  return productStore.products.find(p => p.name === initiative.value!.product) || null
+  return findProductRowByDenormRef(productStore.products, initiative.value.product) ?? null
 })
 
 const initiative = ref<Initiative | null>(null)

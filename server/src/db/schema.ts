@@ -416,7 +416,9 @@ export const activities = pgTable('activities', {
 
 export const products = pgTable('products', {
   id: uuid('id').primaryKey().defaultRandom(),
-  name: varchar('name', { length: 255 }).notNull().unique(),
+  /** Display label; unique constraint dropped in DB by migration 0017 (duplicate names allowed). */
+  name: varchar('name', { length: 255 }).notNull(),
+  /** Stable scope key; NOT NULL + unique in DB after migrations 0014–0015 (see drizzle SQL). */
   projectKey: varchar('project_key', { length: 16 }),
   logo: varchar('logo', { length: 500 }),
   description: text('description'),

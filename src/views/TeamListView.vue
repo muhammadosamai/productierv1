@@ -10,6 +10,8 @@ import {
 } from 'lucide-vue-next'
 import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
+import { toast } from 'vue-sonner'
+import { applyProductDeepLinkFromQuery } from '@/utils/productDeepLink'
 import TeamMemberDetailPanel from '@/components/team/TeamMemberDetailPanel.vue'
 import InviteMemberDialog from '@/components/team/InviteMemberDialog.vue'
 
@@ -59,7 +61,7 @@ function closeDetailPanel() {
 async function fetchTeamMembers() {
   loading.value = true
   try {
-    const productName = productStore.activeProduct?.name
+    const productName = productStore.activeProductScopeForApi
     if (!productName) {
       teamMembers.value = []
       return
@@ -134,21 +136,26 @@ watch(() => route.query.member, (memberId) => {
   }
 })
 
-watch(() => productStore.activeProduct?.name, () => {
+watch(() => productStore.activeProductId, () => {
   fetchTeamMembers()
 })
 
-/** Deep-link from email: /team?product=ProductName */
+/** Deep-link: `projectKey` or legacy `product` (exact product name), e.g. /team?product=Name */
 function applyProductFromQuery() {
-  const raw = route.query.product
-  if (raw == null || Array.isArray(raw)) return
-  const name = String(raw).trim()
-  if (!name) return
-  productStore.selectProductByName(name)
+  const r = applyProductDeepLinkFromQuery(
+    productStore.products,
+    productStore.activeProductId,
+    productStore.selectProductById,
+    productStore.selectProductByName,
+    route.query as Record<string, unknown>,
+  )
+  if (r.unknownProjectKey && productStore.products.length > 0) {
+    toast.error('Unknown project key in this link. Your product selection was not changed.')
+  }
 }
 
 watch(
-  () => [route.query.product, productStore.products.map(p => p.name).join('\0')] as const,
+  () => [route.query.product, route.query.projectKey, productStore.products.map(p => `${p.name}::${p.projectKey ?? ''}`).join('|')] as const,
   () => applyProductFromQuery(),
   { immediate: true },
 )
@@ -232,7 +239,7 @@ function canChangeRoleFor(member: TeamUser): boolean {
 
 async function onMemberRoleChange(member: TeamUser, newRole: string) {
   if (member.role === newRole) return
-  const productName = productStore.activeProduct?.name
+  const productName = productStore.activeProductScopeForApi
   if (!productName) return
   roleUpdateError.value = ''
   roleUpdatingId.value = member.id

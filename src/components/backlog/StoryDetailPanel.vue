@@ -11,6 +11,7 @@ import {
 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useBacklogStore } from '@/stores/backlog'
+import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { useIssuesStore } from '@/stores/issues'
 import type { Story, StoryType, StoryStatus, StoryPriority, StoryAttachment } from '@/types/backlog'
@@ -42,6 +43,7 @@ import {
 } from '@/utils/allowedAttachments'
 import { toast } from 'vue-sonner'
 import { useCopyLink } from '@/utils/useCopyLink'
+import { buildEntityShareUrl, productShareContextFromProductName } from '@/utils/productDeepLink'
 import { useFormConfigsStore } from '@/stores/formConfigs'
 import { mergeIssueFormConfig, resolveIssueStatusDisplayLabel, issueStatusCustomPillStyle } from '@/lib/issueFormConfig'
 import { issueStatusSemanticTone } from '@/lib/issueStatusId'
@@ -81,6 +83,7 @@ const emit = defineEmits<{
 const router = useRouter()
 const { copied, copyLink } = useCopyLink()
 const backlogStore = useBacklogStore()
+const productStore = useProductStore()
 const authStore = useAuthStore()
 const formConfigsStore = useFormConfigsStore()
 
@@ -99,6 +102,17 @@ watch(
 )
 
 const origin = typeof window !== 'undefined' ? window.location.origin : ''
+
+function copyStoryShareLink() {
+  const s = props.story
+  if (!s) return
+  const ctx = productShareContextFromProductName(
+    productStore.products,
+    s.product,
+    productStore.activeProduct || { name: s.product, projectKey: null },
+  )
+  copyLink(buildEntityShareUrl(origin, '/stories', { story: s.id }, ctx))
+}
 
 // Active tab
 const activeTab = ref<'description' | 'tasks' | 'issues' | 'comments' | 'activities' | 'attachments'>('description')
@@ -1056,7 +1070,7 @@ async function deleteComment(comment: UnifiedComment) {
               class="p-1 rounded-md hover:bg-gray-100 transition-colors"
               :class="copied ? 'text-green-600 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'"
               title="Copy link"
-              @click="copyLink(`${origin}/stories?story=${story.id}`)"
+              @click="copyStoryShareLink()"
             >
               <Check v-if="copied" :size="14" />
               <Copy v-else :size="14" />

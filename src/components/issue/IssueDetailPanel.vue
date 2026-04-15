@@ -14,6 +14,7 @@ import {
 } from 'lucide-vue-next'
 import { useIssuesStore } from '@/stores/issues'
 import { useBacklogStore } from '@/stores/backlog'
+import { useProductStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
 import { useProductMembersStore } from '@/stores/productMembers'
 import type {
@@ -29,6 +30,7 @@ import {
 } from '@/utils/allowedAttachments'
 import { toast } from 'vue-sonner'
 import { useCopyLink } from '@/utils/useCopyLink'
+import { buildEntityShareUrl, mergeProductIntoShareQuery, productShareContextFromProductName } from '@/utils/productDeepLink'
 import MentionTextarea from '@/components/comments/MentionTextarea.vue'
 import FormattedCommentContent from '@/components/comments/FormattedCommentContent.vue'
 import type { MentionUser } from '@/lib/commentMentions'
@@ -50,10 +52,29 @@ import SearchableStringCombobox from '@/components/shared/SearchableStringCombob
 
 const router = useRouter()
 const { copied, copyLink } = useCopyLink()
+const productStore = useProductStore()
 
 function copyIssueLink(issueId: string) {
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
-  copyLink(`${origin}/issues?issue=${issueId}`)
+  const iss = props.issue
+  if (!iss) return
+  const ctx = productShareContextFromProductName(
+    productStore.products,
+    iss.product,
+    productStore.activeProduct || { name: iss.product, projectKey: null },
+  )
+  copyLink(buildEntityShareUrl(origin, '/issues', { issue: issueId }, ctx))
+}
+
+function storyDeepLinkQuery(storyId: string) {
+  const iss = props.issue
+  if (!iss) return { story: storyId }
+  const ctx = productShareContextFromProductName(
+    productStore.products,
+    iss.product,
+    productStore.activeProduct || { name: iss.product, projectKey: null },
+  )
+  return mergeProductIntoShareQuery({ story: storyId }, ctx)
 }
 
 interface TeamUser {
@@ -1697,7 +1718,7 @@ const groupedActivities = computed(() => {
                       <button
                         v-if="issue.storyId"
                         class="w-full flex items-center gap-2 px-3 py-2 text-xs text-[#4857FE] hover:bg-indigo-50 transition-colors border-b border-gray-100"
-                        @click="showStoryDropdown = false; emit('close'); router.push({ path: '/stories', query: { story: issue.storyId } })"
+                        @click="showStoryDropdown = false; emit('close'); router.push({ path: '/stories', query: storyDeepLinkQuery(issue.storyId!) })"
                       >
                         <ExternalLink :size="12" />
                         Open story

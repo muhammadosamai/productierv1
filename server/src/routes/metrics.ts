@@ -1,6 +1,13 @@
 import { Elysia } from 'elysia'
 import { db } from '../db'
 import { users, tasks, stories, initiatives, deliveries, productMembers, taskStatusHistory } from '../db/schema'
+import { resolveProductByScope, denormMatchValues, type ProductScopeRow } from '../lib/resolveProductScope'
+
+function matchesProductDenorm(value: string | null | undefined, scopeRow: ProductScopeRow | null): boolean {
+  if (!scopeRow) return true
+  if (value == null) return false
+  return denormMatchValues(scopeRow).includes(String(value))
+}
 
 // Helper: get date N days ago
 function daysAgo(n: number) { return new Date(Date.now() - n * 86400000) }
@@ -51,7 +58,9 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
 
   // ==================== OVERVIEW ====================
   .get('/dashboard', async ({ query }) => {
-    const product = query.product || ''
+    const scopeRow = (query.product || '').trim()
+      ? await resolveProductByScope((query.product || '').trim())
+      : null
     const period = parseInt(query.period as string || '30')
     const since = daysAgo(period)
     const prevSince = daysAgo(period * 2)
@@ -62,20 +71,20 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
     const allDeliveries = await db.select().from(deliveries)
     const allUsers = await db.select().from(users)
 
-    const ft = product ? allTasks.filter(t => t.productId === product) : allTasks
-    const fs = product ? allStories.filter(s => s.product === product) : allStories
-    const fi = product ? allInitiatives.filter(i => i.product === product) : allInitiatives
-    const fd = product ? allDeliveries.filter(d => d.productId === product) : allDeliveries
+    const ft = allTasks.filter(t => matchesProductDenorm(t.productId, scopeRow))
+    const fs = allStories.filter(s => matchesProductDenorm(s.product, scopeRow))
+    const fi = allInitiatives.filter(i => matchesProductDenorm(i.product, scopeRow))
+    const fd = allDeliveries.filter(d => matchesProductDenorm(d.productId, scopeRow))
 
     // Current period
     const tasksCompletedCurr = ft.filter(t => t.completedAt && new Date(t.completedAt) >= since).length
-    const storiesCompletedCurr = fs.filter(s => s.status === 'done').length
+    const storiesCompletedCurr = fs.filter(s => s.status === 'completed').length
     const tasksDoneCurr = ft.filter(t => t.status === 'done').length
     const tasksCompletedPrev = ft.filter(t => t.completedAt && new Date(t.completedAt) >= prevSince && new Date(t.completedAt) < since).length
 
     // Completion rates
     const taskCompletionRate = ft.length > 0 ? Math.round((tasksDoneCurr / ft.length) * 100) : 0
-    const storyCompletionRate = fs.length > 0 ? Math.round((fs.filter(s => s.status === 'done').length / fs.length) * 100) : 0
+    const storyCompletionRate = fs.length > 0 ? Math.round((fs.filter(s => s.status === 'completed').length / fs.length) * 100) : 0
     const initCompletionRate = fi.length > 0 ? Math.round((fi.filter(i => i.status === 'completed').length / fi.length) * 100) : 0
     const delivCompletionRate = fd.length > 0 ? Math.round((fd.filter(d => d.status === 'completed').length / fd.length) * 100) : 0
 
@@ -132,14 +141,16 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
 
   // ==================== THROUGHPUT ====================
   .get('/throughput', async ({ query }) => {
-    const product = query.product || ''
+    const scopeRow = (query.product || '').trim()
+      ? await resolveProductByScope((query.product || '').trim())
+      : null
     const period = parseInt(query.period as string || '90')
     const granularity = (query.granularity as string) || 'week'
     const since = daysAgo(period)
 
     const allTasks = await db.select().from(tasks)
     const allUsers = await db.select().from(users)
-    const ft = product ? allTasks.filter(t => t.productId === product) : allTasks
+    const ft = allTasks.filter(t => matchesProductDenorm(t.productId, scopeRow))
 
     // Completed over time
     const completedByPeriod: Record<string, number> = {}
@@ -183,14 +194,16 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
 
   // ==================== FLOW ====================
   .get('/flow', async ({ query }) => {
-    const product = query.product || ''
+    const scopeRow = (query.product || '').trim()
+      ? await resolveProductByScope((query.product || '').trim())
+      : null
     const period = parseInt(query.period as string || '90')
     const since = daysAgo(period)
 
     const allTasks = await db.select().from(tasks)
-    const ft = product ? allTasks.filter(t => t.productId === product) : allTasks
+    const ft = allTasks.filter(t => matchesProductDenorm(t.productId, scopeRow))
     const history = await db.select().from(taskStatusHistory)
-    const fh = product ? history.filter(h => h.productId === product) : history
+    const fh = history.filter(h => matchesProductDenorm(h.productId, scopeRow))
 
     // Cycle time scatter (completed tasks)
     const completedWithStart = ft.filter(t => t.completedAt && t.startedAt && new Date(t.completedAt) >= since)
@@ -265,14 +278,16 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
 
   // ==================== QUALITY ====================
   .get('/quality', async ({ query }) => {
-    const product = query.product || ''
+    const scopeRow = (query.product || '').trim()
+      ? await resolveProductByScope((query.product || '').trim())
+      : null
     const period = parseInt(query.period as string || '90')
     const since = daysAgo(period)
 
     const allTasks = await db.select().from(tasks)
-    const ft = product ? allTasks.filter(t => t.productId === product) : allTasks
+    const ft = allTasks.filter(t => matchesProductDenorm(t.productId, scopeRow))
     const history = await db.select().from(taskStatusHistory)
-    const fh = product ? history.filter(h => h.productId === product) : history
+    const fh = history.filter(h => matchesProductDenorm(h.productId, scopeRow))
 
     // Rework: tasks that went from in_review/done back to in_progress
     const reworkTransitions = fh.filter(h =>
@@ -289,7 +304,7 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
     const reworkRate = completedInPeriod.length > 0 ? Math.round((reworkTaskIds.size / completedInPeriod.length) * 100) : 0
 
     // Bug rate
-    const completedBugs = completedInPeriod.filter(t => t.type === 'bug').length
+    const completedBugs = completedInPeriod.filter(t => t.type === 'fix').length
     const bugRate = completedInPeriod.length > 0 ? Math.round((completedBugs / completedInPeriod.length) * 100) : 0
 
     // Review load by reviewer
@@ -332,15 +347,17 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
 
   // ==================== BLOCKERS ====================
   .get('/blockers', async ({ query }) => {
-    const product = query.product || ''
+    const scopeRow = (query.product || '').trim()
+      ? await resolveProductByScope((query.product || '').trim())
+      : null
     const period = parseInt(query.period as string || '90')
     const since = daysAgo(period)
 
     const allTasks = await db.select().from(tasks)
     const allUsers = await db.select().from(users)
-    const ft = product ? allTasks.filter(t => t.productId === product) : allTasks
+    const ft = allTasks.filter(t => matchesProductDenorm(t.productId, scopeRow))
     const history = await db.select().from(taskStatusHistory)
-    const fh = product ? history.filter(h => h.productId === product) : history
+    const fh = history.filter(h => matchesProductDenorm(h.productId, scopeRow))
 
     // Currently blocked
     const now = Date.now()
@@ -407,14 +424,16 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
 
   // ==================== PREDICTABILITY ====================
   .get('/predictability', async ({ query }) => {
-    const product = query.product || ''
+    const scopeRow = (query.product || '').trim()
+      ? await resolveProductByScope((query.product || '').trim())
+      : null
     const period = parseInt(query.period as string || '90')
     const since = daysAgo(period)
 
     const allTasks = await db.select().from(tasks)
     const allDeliveries = await db.select().from(deliveries)
-    const ft = product ? allTasks.filter(t => t.productId === product) : allTasks
-    const fd = product ? allDeliveries.filter(d => d.productId === product) : allDeliveries
+    const ft = allTasks.filter(t => matchesProductDenorm(t.productId, scopeRow))
+    const fd = allDeliveries.filter(d => matchesProductDenorm(d.productId, scopeRow))
 
     // Per-delivery planned vs completed
     const deliveryMetrics = fd.map(d => {
@@ -472,11 +491,13 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
 
   // ==================== WORKLOAD ====================
   .get('/workload', async ({ query }) => {
-    const product = query.product || ''
+    const scopeRow = (query.product || '').trim()
+      ? await resolveProductByScope((query.product || '').trim())
+      : null
 
     const allTasks = await db.select().from(tasks)
     const allUsers = await db.select().from(users)
-    const ft = product ? allTasks.filter(t => t.productId === product) : allTasks
+    const ft = allTasks.filter(t => matchesProductDenorm(t.productId, scopeRow))
 
     const memberWorkload = allUsers.map(u => {
       const userTasks = ft.filter(t => t.ownerUserId === u.id || (t.assigneeUserIds && t.assigneeUserIds.includes(u.id)))
@@ -515,12 +536,14 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
 
   // ==================== DELIVERIES METRICS ====================
   .get('/deliveries-metrics', async ({ query }) => {
-    const product = query.product || ''
+    const scopeRow = (query.product || '').trim()
+      ? await resolveProductByScope((query.product || '').trim())
+      : null
 
     const allTasks = await db.select().from(tasks)
     const allDeliveries = await db.select().from(deliveries)
-    const ft = product ? allTasks.filter(t => t.productId === product) : allTasks
-    const fd = product ? allDeliveries.filter(d => d.productId === product) : allDeliveries
+    const ft = allTasks.filter(t => matchesProductDenorm(t.productId, scopeRow))
+    const fd = allDeliveries.filter(d => matchesProductDenorm(d.productId, scopeRow))
 
     const now = Date.now()
     const deliveryDetails = fd.map(d => {

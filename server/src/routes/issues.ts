@@ -2,6 +2,11 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { issues, issueComments, issueAttachments, users, productMembers } from '../db/schema'
 import { eq, sql, and, asc, isNotNull, ne } from 'drizzle-orm'
+import {
+  resolveProductByScope,
+  whereDenormProductMatches,
+  denormalizedProductScopeValue,
+} from '../lib/resolveProductScope'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
@@ -26,9 +31,11 @@ function optionalUuid(value: string | null | undefined) {
   return UUID_REGEX.test(value) ? value : null
 }
 
-async function isProductAdmin(userId: string, product: string): Promise<boolean> {
+async function isProductAdmin(userId: string, productRef: string): Promise<boolean> {
+  const scopeRow = await resolveProductByScope(productRef)
+  if (!scopeRow) return false
   const member = await db.query.productMembers.findFirst({
-    where: and(eq(productMembers.product, product), eq(productMembers.userId, userId)),
+    where: and(whereDenormProductMatches(productMembers.product, scopeRow), eq(productMembers.userId, userId)),
   })
   return member?.role === 'admin'
 }
@@ -67,8 +74,10 @@ async function userCanAccessIssueAttachments(
   if (!row) return false
   if (row.archived && !(await canManageIssueArchive(user, row.product))) return false
   if (user.role === 'super_admin') return true
+  const scopeRow = await resolveProductByScope(row.product)
+  if (!scopeRow) return false
   const member = await db.query.productMembers.findFirst({
-    where: and(eq(productMembers.product, row.product), eq(productMembers.userId, user.id)),
+    where: and(whereDenormProductMatches(productMembers.product, scopeRow), eq(productMembers.userId, user.id)),
   })
   return !!member
 }
@@ -375,7 +384,11 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     }
 
     const conditions = []
-    if (productFilter) conditions.push(eq(issues.product, productFilter))
+    if (productFilter) {
+      const scopeRow = await resolveProductByScope(productFilter)
+      if (!scopeRow) conditions.push(sql`false`)
+      else conditions.push(whereDenormProductMatches(issues.product, scopeRow))
+    }
     if (query.testCycleId) conditions.push(eq(issues.testCycleId, query.testCycleId))
     if (!includeArchived) conditions.push(eq(issues.archived, false))
 
@@ -397,8 +410,10 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
-    const product = body.product || 'Product'
-    const merged = await mergeIssueFormConfigForProduct(product)
+    const rawProduct = body.product || 'Product'
+    const scopeRow = await resolveProductByScope(rawProduct)
+    const product = scopeRow ? denormalizedProductScopeValue(scopeRow) : rawProduct
+    const merged = await mergeIssueFormConfigForProduct(rawProduct)
     const allowedList = getAllowedIssueStatusStoredValues(merged)
     const allowedSet = new Set(allowedList)
 
@@ -526,17 +541,22 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       set.status = 401
       return { error: 'Unauthorized' }
     }
-    const product = query.product?.trim()
-    if (!product) {
+    const productRef = query.product?.trim()
+    if (!productRef) {
       set.status = 400
       return { error: 'product query parameter is required' }
+    }
+    const scopeRow = await resolveProductByScope(productRef)
+    if (!scopeRow) {
+      set.status = 400
+      return { error: 'Unknown product' }
     }
     const rows = await db
       .select({ module: issues.module })
       .from(issues)
       .where(
         and(
-          eq(issues.product, product),
+          whereDenormProductMatches(issues.product, scopeRow),
           eq(issues.archived, false),
           isNotNull(issues.module),
           ne(sql`trim(${issues.module})`, ''),
@@ -619,8 +639,13 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
         return { error: 'reportedByUserId must be a valid user id' }
       }
       if (user.role !== 'super_admin') {
+        const scopeRow = await resolveProductByScope(existing.product)
+        if (!scopeRow) {
+          set.status = 400
+          return { error: 'Invalid issue product scope' }
+        }
         const mem = await db.query.productMembers.findFirst({
-          where: and(eq(productMembers.product, existing.product), eq(productMembers.userId, rid)),
+          where: and(whereDenormProductMatches(productMembers.product, scopeRow), eq(productMembers.userId, rid)),
         })
         if (!mem) {
           set.status = 400

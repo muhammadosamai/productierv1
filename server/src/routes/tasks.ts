@@ -1,12 +1,17 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
-import { tasks, taskComments, taskAttachments, taskSubtasks, stories, users, deliveries, taskStatusHistory, products, productMembers } from '../db/schema'
+import { tasks, taskComments, taskAttachments, taskSubtasks, stories, users, deliveries, taskStatusHistory, productMembers } from '../db/schema'
 import { recomputeStoryStatus } from '../lib/storyStatus'
 import { randomUUID } from 'crypto'
 import path from 'path'
 import { eq, and, type InferSelectModel } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
+import {
+  resolveProductByScope,
+  whereDenormProductMatches,
+  denormalizedProductScopeValue,
+} from '../lib/resolveProductScope'
 import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
 
@@ -39,8 +44,10 @@ async function userCanAccessTaskAttachment(
     columns: { product: true },
   })
   if (!story) return false
+  const scopeRow = await resolveProductByScope(story.product)
+  if (!scopeRow) return false
   const member = await db.query.productMembers.findFirst({
-    where: and(eq(productMembers.product, story.product), eq(productMembers.userId, user.id)),
+    where: and(whereDenormProductMatches(productMembers.product, scopeRow), eq(productMembers.userId, user.id)),
   })
   return !!member
 }
@@ -277,11 +284,12 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     // Auto-transition: if any role is assigned at creation, set status to 'assigned'
     const effectiveStatus = hasAnyRoleAssigned(rest) ? 'assigned' : 'created'
 
-    const product = await db.query.products.findFirst({
-      where: eq(products.name, story.product),
-      columns: { id: true },
-    })
-    const normalizedProductId = product?.id || story.product
+    const scopeRow = await resolveProductByScope(story.product)
+    if (!scopeRow) {
+      set.status = 400
+      return { error: 'Could not resolve product for this story' }
+    }
+    const normalizedProductId = denormalizedProductScopeValue(scopeRow)
 
     const [task] = await db.insert(tasks)
       .values({
@@ -302,7 +310,7 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     }
 
     logActivity({
-      product: story.product,
+      product: normalizedProductId,
       userName: user.name,
       userAvatar: user.avatar,
       userId: user.id,

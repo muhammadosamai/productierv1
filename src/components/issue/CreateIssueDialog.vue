@@ -52,7 +52,7 @@ const authStore = useAuthStore()
 const formConfigsStore = useFormConfigsStore()
 
 const mergedIssueForm = computed(() => {
-  const p = productStore.activeProduct?.name
+  const p = productStore.activeProductScopeForApi
   const raw = p ? formConfigsStore.getConfig(p, 'issue') : null
   return mergeIssueFormConfig(raw ?? undefined)
 })
@@ -78,7 +78,7 @@ watch(
 
 watch(open, async isOpen => {
   if (!isOpen) return
-  const p = productStore.activeProduct?.name
+  const p = productStore.activeProductScopeForApi
   if (p && authStore.token) await formConfigsStore.fetchConfig(p, 'issue')
 })
 
@@ -166,7 +166,7 @@ async function searchLinks(q: string) {
   if (!q.trim()) { linkResults.value = []; return }
   linkSearchLoading.value = true
   try {
-    const product = productStore.activeProduct?.name
+    const product = productStore.activeProductScopeForApi
     const [storiesRes, tasksRes] = await Promise.all([
       fetch(`/api/stories?product=${encodeURIComponent(product || '')}`),
       fetch(`/api/tasks?product=${encodeURIComponent(product || '')}`),
@@ -345,7 +345,7 @@ async function handleSubmit() {
     environment: environment.value || null,
     browser: browser.value || null,
     operatingSystem: operatingSystem.value || null,
-    product: productStore.activeProduct?.name,
+    product: productStore.activeProductScopeForApi,
     storyId: linkedStoryId.value,
     taskId: linkedTaskId.value,
     ...(estimatePayload !== undefined ? { estimateValue: estimatePayload } : {}),

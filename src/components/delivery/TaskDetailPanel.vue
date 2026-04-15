@@ -13,6 +13,7 @@ import {
 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useBacklogStore } from '@/stores/backlog'
+import { useProductStore } from '@/stores/products'
 import TaskStatusIcon from '@/components/shared/TaskStatusIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import type { Task, TaskSubtask, TaskStatus, TaskType, TaskPriority, TaskComment, TaskAttachment } from '@/types/backlog'
@@ -25,6 +26,7 @@ import {
 } from '@/utils/allowedAttachments'
 import { toast } from 'vue-sonner'
 import { useCopyLink } from '@/utils/useCopyLink'
+import { buildEntityShareUrl, mergeProductIntoShareQuery, productShareContextFromProductName } from '@/utils/productDeepLink'
 import MentionTextarea from '@/components/comments/MentionTextarea.vue'
 import FormattedCommentContent from '@/components/comments/FormattedCommentContent.vue'
 import type { MentionUser } from '@/lib/commentMentions'
@@ -62,16 +64,32 @@ const emit = defineEmits<{
 const router = useRouter()
 const { copied, copyLink } = useCopyLink()
 const backlogStore = useBacklogStore()
+const productStore = useProductStore()
 const authStore = useAuthStore()
 
 function copyTaskLink(taskId: string) {
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
-  copyLink(`${origin}/tasks?task=${taskId}`)
+  const pname = productStore.activeProductScopeForApi || productStore.activeProduct?.name || ''
+  const ctx = productShareContextFromProductName(
+    productStore.products,
+    pname,
+    productStore.activeProduct || { name: pname || 'Product', projectKey: null },
+  )
+  copyLink(buildEntityShareUrl(origin, '/tasks', { task: taskId }, ctx))
 }
 
 function goBackToStory() {
   emit('close')
-  router.push({ path: '/stories', query: { story: props.fromStoryId! } })
+  const sid = props.fromStoryId
+  if (!sid) return
+  const story = backlogStore.stories.find(s => s.id === sid)
+  const pname = story?.product || productStore.activeProductScopeForApi || productStore.activeProduct?.name || ''
+  const ctx = productShareContextFromProductName(
+    productStore.products,
+    pname,
+    productStore.activeProduct || { name: pname || 'Product', projectKey: null },
+  )
+  router.push({ path: '/stories', query: mergeProductIntoShareQuery({ story: sid }, ctx) })
 }
 
 // Active tab

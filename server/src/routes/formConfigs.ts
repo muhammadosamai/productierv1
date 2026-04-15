@@ -2,6 +2,11 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { formConfigs, customFieldValues, users, issues, productMembers } from '../db/schema'
 import { eq, and, count } from 'drizzle-orm'
+import {
+  resolveProductByScope,
+  whereDenormProductMatches,
+  denormalizedProductScopeValue,
+} from '../lib/resolveProductScope'
 import { jwt } from '@elysiajs/jwt'
 import { getDefaultConfig } from '../lib/builtInFields'
 import {
@@ -26,9 +31,11 @@ async function getUserFromHeader(jwtVerify: any, headers: Record<string, string 
   return user || null
 }
 
-async function isProductAdmin(userId: string, product: string): Promise<boolean> {
+async function isProductAdmin(userId: string, productRef: string): Promise<boolean> {
+  const scopeRow = await resolveProductByScope(productRef)
+  if (!scopeRow) return false
   const member = await db.query.productMembers.findFirst({
-    where: and(eq(productMembers.product, product), eq(productMembers.userId, userId)),
+    where: and(whereDenormProductMatches(productMembers.product, scopeRow), eq(productMembers.userId, userId)),
   })
   return member?.role === 'admin'
 }
@@ -46,10 +53,16 @@ export const formConfigRoutes = new Elysia({ prefix: '/api/form-configs' })
   })
 
   // GET /api/form-configs/:product/:entityType
-  .get('/:product/:entityType', async ({ params: { product, entityType } }) => {
+  .get('/:product/:entityType', async ({ params: { product, entityType }, set }) => {
+    const scopeRow = await resolveProductByScope(product)
+    if (!scopeRow) {
+      set.status = 404
+      return { error: 'Product not found' }
+    }
+
     const existing = await db.query.formConfigs.findFirst({
       where: and(
-        eq(formConfigs.product, product),
+        whereDenormProductMatches(formConfigs.product, scopeRow),
         eq(formConfigs.entityType, entityType),
       ),
     })
@@ -72,6 +85,13 @@ export const formConfigRoutes = new Elysia({ prefix: '/api/form-configs' })
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
+    const scopeRow = await resolveProductByScope(product)
+    if (!scopeRow) {
+      set.status = 404
+      return { error: 'Product not found' }
+    }
+    const formProductScope = denormalizedProductScopeValue(scopeRow)
+
     if (!(await canModifyFormConfig(user, product))) {
       set.status = 403
       return { error: 'Only product admins or staff can modify form configurations' }
@@ -80,7 +100,7 @@ export const formConfigRoutes = new Elysia({ prefix: '/api/form-configs' })
     // Upsert
     const existing = await db.query.formConfigs.findFirst({
       where: and(
-        eq(formConfigs.product, product),
+        whereDenormProductMatches(formConfigs.product, scopeRow),
         eq(formConfigs.entityType, entityType),
       ),
     })
@@ -111,7 +131,7 @@ export const formConfigRoutes = new Elysia({ prefix: '/api/form-configs' })
             cnt: count(),
           })
           .from(issues)
-          .where(and(eq(issues.product, product), eq(issues.archived, false)))
+          .where(and(whereDenormProductMatches(issues.product, scopeRow), eq(issues.archived, false)))
           .groupBy(issues.status)
         for (const row of rows) {
           const canon = normalizeIssueStatusToCanonicalId(prevMerged, row.status) ?? row.status
@@ -137,7 +157,7 @@ export const formConfigRoutes = new Elysia({ prefix: '/api/form-configs' })
     }
 
     const [created] = await db.insert(formConfigs).values({
-      product,
+      product: formProductScope,
       entityType,
       config: configToSave,
       updatedByUserId: user.id,

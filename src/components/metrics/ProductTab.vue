@@ -34,12 +34,12 @@ onMounted(() => {
   loadData()
 })
 
-watch(activeProductName, () => {
+watch(() => productStore.activeProductScopeForApi, () => {
   loadData()
 })
 
 function loadData() {
-  const product = activeProductName.value
+  const product = productStore.activeProductScopeForApi
   if (!product) return
   backlogStore.fetchStories(product)
   initiativesStore.fetchInitiatives()
@@ -205,7 +205,7 @@ function onMemberSearchInput() {
 }
 
 async function addMember(user: { id: string; name: string }) {
-  const product = activeProductName.value
+  const product = productStore.activeProductScopeForApi
   if (!product) return
   await membersStore.addMember(product, user.id)
   memberSearch.value = ''
@@ -214,7 +214,7 @@ async function addMember(user: { id: string; name: string }) {
 }
 
 async function removeMember(userId: string) {
-  const product = activeProductName.value
+  const product = productStore.activeProductScopeForApi
   if (!product) return
   await membersStore.removeMember(product, userId)
 }

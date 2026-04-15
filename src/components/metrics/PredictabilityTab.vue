@@ -17,7 +17,7 @@ const selectedDelivery = ref<string>('')
 async function fetchData() {
   loading.value = true
   try {
-    const product = productStore.activeProduct?.name || ''
+    const product = productStore.activeProductScopeForApi || ''
     const res = await fetch(`/api/metrics/predictability?product=${encodeURIComponent(product)}&period=${props.period}`)
     data.value = await res.json()
     if (data.value.deliveryMetrics.length > 0 && !selectedDelivery.value) {
@@ -27,7 +27,7 @@ async function fetchData() {
   loading.value = false
 }
 
-watch(() => [props.period, productStore.activeProduct?.name], fetchData, { immediate: true })
+watch(() => [props.period, productStore.activeProductScopeForApi], fetchData, { immediate: true })
 </script>
 
 <template>

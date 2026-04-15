@@ -15,14 +15,14 @@ const loading = ref(true)
 async function fetchData() {
   loading.value = true
   try {
-    const product = productStore.activeProduct?.name || ''
+    const product = productStore.activeProductScopeForApi || ''
     const res = await fetch(`/api/metrics/quality?product=${encodeURIComponent(product)}&period=${props.period}`)
     data.value = await res.json()
   } catch (e) { console.error('Failed to load quality metrics', e) }
   loading.value = false
 }
 
-watch(() => [props.period, productStore.activeProduct?.name], fetchData, { immediate: true })
+watch(() => [props.period, productStore.activeProductScopeForApi], fetchData, { immediate: true })
 </script>
 
 <template>

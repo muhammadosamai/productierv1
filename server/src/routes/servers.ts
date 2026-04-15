@@ -2,6 +2,7 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { servers, users } from '../db/schema'
 import { eq, and } from 'drizzle-orm'
+import { resolveProductByScope, whereDenormProductMatches, denormalizedProductScopeValue } from '../lib/resolveProductScope'
 import { jwt } from '@elysiajs/jwt'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
@@ -34,7 +35,10 @@ export const serverRoutes = new Elysia({ prefix: '/api/servers' })
   // GET /api/servers?product=X&environment=Y
   .get('/', async ({ query }) => {
     const conditions = []
-    if (query.product) conditions.push(eq(servers.productId, query.product))
+    if (query.product?.trim()) {
+      const scopeRow = await resolveProductByScope(query.product.trim())
+      if (scopeRow) conditions.push(whereDenormProductMatches(servers.productId, scopeRow))
+    }
     if (query.environment) {
       const env = query.environment as 'dev' | 'stage' | 'prod'
       conditions.push(eq(servers.environment, env))
@@ -52,6 +56,9 @@ export const serverRoutes = new Elysia({ prefix: '/api/servers' })
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) return { error: 'Unauthorized' }
 
+    const sr = await resolveProductByScope(body.productId)
+    const productId = sr ? denormalizedProductScopeValue(sr) : body.productId
+
     const [server] = await db.insert(servers).values({
       name: body.name,
       environment: body.environment,
@@ -61,7 +68,7 @@ export const serverRoutes = new Elysia({ prefix: '/api/servers' })
       region: body.region || null,
       provider: body.provider || null,
       instanceId: body.instanceId || null,
-      productId: body.productId,
+      productId,
     }).returning()
 
     return server

@@ -278,7 +278,7 @@ watch(
     showAssigneeDropdown.value = false
     showDepPicker.value = false
     depSearch.value = ''
-    await deliveriesStore.fetchDeliveries(productStore.activeProductName)
+    await deliveriesStore.fetchDeliveries(productStore.activeProductScopeForApi)
     loadFormFromSources()
   },
   { immediate: true }

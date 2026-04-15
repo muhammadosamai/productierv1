@@ -15,7 +15,7 @@ const loading = ref(true)
 async function fetchData() {
   loading.value = true
   try {
-    const product = productStore.activeProduct?.name || ''
+    const product = productStore.activeProductScopeForApi || ''
     const granularity = props.period <= 14 ? 'day' : props.period <= 90 ? 'week' : 'month'
     const res = await fetch(`/api/metrics/throughput?product=${encodeURIComponent(product)}&period=${props.period}&granularity=${granularity}`)
     data.value = await res.json()
@@ -23,7 +23,7 @@ async function fetchData() {
   loading.value = false
 }
 
-watch(() => [props.period, productStore.activeProduct?.name], fetchData, { immediate: true })
+watch(() => [props.period, productStore.activeProductScopeForApi], fetchData, { immediate: true })
 </script>
 
 <template>

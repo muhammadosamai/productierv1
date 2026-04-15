@@ -33,7 +33,7 @@ function onProductCreated(name: string) {
     <!-- Draggable product icons -->
     <draggable
       v-model="productStore.products"
-      item-key="name"
+      item-key="id"
       :animation="200"
       ghost-class="opacity-30"
       drag-class="scale-110"
@@ -43,7 +43,7 @@ function onProductCreated(name: string) {
         <button
           class="relative flex items-center justify-center w-10 h-10 rounded-xl overflow-hidden transition-all shadow-md shadow-black/20 cursor-grab active:cursor-grabbing"
           :class="[
-            productStore.activeProductName === element.name
+            productStore.activeProduct?.id === element.id
               ? 'ring-2 ring-white shadow-lg shadow-black/30'
               : 'opacity-80 hover:opacity-100 hover:shadow-lg hover:shadow-black/30'
           ]"

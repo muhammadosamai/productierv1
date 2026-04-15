@@ -2,6 +2,7 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { featureRequests, featureRequestUpvotes, featureRequestComments, featureRequestAttachments, users } from '../db/schema'
 import { eq, desc, and, count, sql } from 'drizzle-orm'
+import { resolveProductByScope, whereDenormProductMatches, denormalizedProductScopeValue } from '../lib/resolveProductScope'
 import { jwt } from '@elysiajs/jwt'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
@@ -21,11 +22,12 @@ export const featureRequestRoutes = new Elysia({ prefix: '/api/feature-requests'
 
   // GET /api/feature-requests?product=X&sort=votes|newest|oldest
   .get('/', async ({ query }) => {
-    const product = query.product
+    const product = query.product?.trim()
+    const scopeRow = product ? await resolveProductByScope(product) : null
     const sort = query.sort || 'votes'
 
     const items = await db.query.featureRequests.findMany({
-      where: product ? eq(featureRequests.productId, product) : undefined,
+      where: scopeRow ? whereDenormProductMatches(featureRequests.productId, scopeRow) : undefined,
       orderBy: sort === 'votes'
         ? [desc(featureRequests.upvoteCount), desc(featureRequests.createdAt)]
         : sort === 'oldest'
@@ -100,8 +102,11 @@ export const featureRequestRoutes = new Elysia({ prefix: '/api/feature-requests'
       return { error: 'Unauthorized' }
     }
 
+    const sr = await resolveProductByScope(body.productId)
+    const productId = sr ? denormalizedProductScopeValue(sr) : body.productId
+
     const [created] = await db.insert(featureRequests).values({
-      productId: body.productId,
+      productId,
       title: body.title,
       description: body.description || null,
       status: (body.status as any) || 'open',

@@ -5,6 +5,11 @@ import { eq, and } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { randomBytes } from 'node:crypto'
 import { sendInviteEmail, getAppUrl } from '../services/email'
+import {
+  resolveProductByScope,
+  whereDenormProductMatches,
+  denormalizedProductScopeValue,
+} from '../lib/resolveProductScope'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -18,10 +23,12 @@ async function getUserFromHeader(jwtVerify: any, headers: Record<string, string 
   return user || null
 }
 
-async function isProductAdmin(userId: string, product: string): Promise<boolean> {
+async function isProductAdmin(userId: string, productRef: string): Promise<boolean> {
+  const scopeRow = await resolveProductByScope(productRef)
+  if (!scopeRow) return false
   const member = await db.query.productMembers.findFirst({
     where: and(
-      eq(productMembers.product, product),
+      whereDenormProductMatches(productMembers.product, scopeRow),
       eq(productMembers.userId, userId),
     ),
   })
@@ -38,6 +45,13 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
       set.status = 401
       return { error: 'Unauthorized' }
     }
+
+    const scopeRow = await resolveProductByScope(body.product)
+    if (!scopeRow) {
+      set.status = 404
+      return { error: 'Product not found' }
+    }
+    const inviteProductScope = denormalizedProductScopeValue(scopeRow)
 
     // Check if user is admin of the product (or super_admin)
     if (user.role !== 'super_admin' && !(await isProductAdmin(user.id, body.product))) {
@@ -56,7 +70,7 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
       // Check if already a member
       const existingMember = await db.query.productMembers.findFirst({
         where: and(
-          eq(productMembers.product, body.product),
+          whereDenormProductMatches(productMembers.product, scopeRow),
           eq(productMembers.userId, existingUser.id),
         ),
       })
@@ -68,7 +82,7 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
 
       // Add directly to product members
       await db.insert(productMembers).values({
-        product: body.product,
+        product: inviteProductScope,
         userId: existingUser.id,
         role: body.role || 'member',
       })
@@ -81,7 +95,7 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
           email: existingUser.email,
           avatar: existingUser.avatar,
         },
-        product: body.product,
+        product: inviteProductScope,
         role: body.role || 'member',
       }
     }
@@ -90,7 +104,7 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
     const existingInvite = await db.query.productInvites.findFirst({
       where: and(
         eq(productInvites.email, email),
-        eq(productInvites.product, body.product),
+        whereDenormProductMatches(productInvites.product, scopeRow),
         eq(productInvites.status, 'pending'),
       ),
     })
@@ -104,7 +118,7 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
     const token = randomBytes(32).toString('hex')
 
     const [invite] = await db.insert(productInvites).values({
-      product: body.product,
+      product: inviteProductScope,
       email,
       role: body.role || 'member',
       token,
@@ -113,7 +127,7 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
 
     sendInviteEmail({
       email,
-      productName: body.product,
+      productName: scopeRow.name,
       inviterName: user.name,
       role: body.role || 'member',
       token,
@@ -146,6 +160,12 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
       return { error: 'Unauthorized' }
     }
 
+    const scopeRow = await resolveProductByScope(name)
+    if (!scopeRow) {
+      set.status = 404
+      return { error: 'Product not found' }
+    }
+
     if (user.role !== 'super_admin' && !(await isProductAdmin(user.id, name))) {
       set.status = 403
       return { error: 'Only admins can view invites' }
@@ -161,7 +181,7 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
     })
       .from(productInvites)
       .where(and(
-        eq(productInvites.product, name),
+        whereDenormProductMatches(productInvites.product, scopeRow),
         eq(productInvites.status, 'pending'),
       ))
 

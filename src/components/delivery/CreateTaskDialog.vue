@@ -279,13 +279,13 @@ const draftParentTask = computed((): Task | null => {
 })
 
 async function fetchSubtaskTeamMembers() {
-  const name = productStore.activeProduct?.name
-  if (!name) {
+  const scope = productStore.activeProductScopeForApi
+  if (!scope) {
     subtaskTeamMembers.value = []
     return
   }
   try {
-    const res = await fetch(`/api/products/${encodeURIComponent(name)}/members`, {
+    const res = await fetch(`/api/products/${encodeURIComponent(scope)}/members`, {
       headers: { Authorization: `Bearer ${authStore.token}` },
     })
     if (res.ok) {

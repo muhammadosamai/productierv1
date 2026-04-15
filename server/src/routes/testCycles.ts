@@ -2,6 +2,7 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { testCycles, testCycleIssues, users } from '../db/schema'
 import { eq, count } from 'drizzle-orm'
+import { resolveProductByScope, whereDenormProductMatches, denormalizedProductScopeValue } from '../lib/resolveProductScope'
 import {
   getAllowedIssueStatusStoredValues,
   mergeIssueFormConfigForProduct,
@@ -37,9 +38,10 @@ export const testCycleRoutes = new Elysia({ prefix: '/api/test-cycles' })
 
   // GET /api/test-cycles?product=X
   .get('/', async ({ query }) => {
-    const product = query.product
+    const product = query.product?.trim()
+    const scopeRow = product ? await resolveProductByScope(product) : null
     return db.query.testCycles.findMany({
-      where: product ? eq(testCycles.productId, product) : undefined,
+      where: scopeRow ? whereDenormProductMatches(testCycles.productId, scopeRow) : undefined,
       orderBy: (c, { desc }) => [desc(c.createdAt)],
       with: {
         createdByUser: true,
@@ -75,8 +77,15 @@ export const testCycleRoutes = new Elysia({ prefix: '/api/test-cycles' })
     const user = await getUserFromHeader(jwt.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
+    const sr = await resolveProductByScope(body.productId)
+    if (!sr) {
+      set.status = 404
+      return { error: 'Product not found' }
+    }
+    const productId = denormalizedProductScopeValue(sr)
+
     // Auto-number: count existing cycles for this product
-    const [{ value: total }] = await db.select({ value: count() }).from(testCycles).where(eq(testCycles.productId, body.productId))
+    const [{ value: total }] = await db.select({ value: count() }).from(testCycles).where(whereDenormProductMatches(testCycles.productId, sr))
     const num = (total || 0) + 1
 
     const [cycle] = await db.insert(testCycles).values({
@@ -85,7 +94,7 @@ export const testCycleRoutes = new Elysia({ prefix: '/api/test-cycles' })
       status: body.status || 'planned',
       deliveryId: body.deliveryId || null,
       releaseId: body.releaseId || null,
-      productId: body.productId,
+      productId,
       startDate: body.startDate || null,
       endDate: body.endDate || null,
       createdByUserId: user.id,

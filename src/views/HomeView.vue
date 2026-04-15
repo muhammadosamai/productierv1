@@ -9,6 +9,7 @@ import {
 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useProductStore } from '@/stores/products'
+import { findProductIndexByDenormRef } from '@/utils/productDeepLink'
 import TaskStatusIcon from '@/components/shared/TaskStatusIcon.vue'
 import DoughnutChart from '@/components/charts/DoughnutChart.vue'
 import BarChart from '@/components/charts/BarChart.vue'
@@ -210,8 +211,8 @@ function formatRelativeTime(d: string) {
   return `${diffDays}d ago`
 }
 
-function navigateToProduct(productName: string) {
-  const idx = productStore.products.findIndex(p => p.name === productName)
+function navigateToProduct(productRef: string) {
+  const idx = findProductIndexByDenormRef(productStore.products, productRef)
   if (idx >= 0) productStore.selectProduct(idx)
   router.push('/metrics')
 }

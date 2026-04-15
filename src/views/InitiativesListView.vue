@@ -82,7 +82,7 @@ onMounted(() => {
   initiativesStore.fetchInitiatives()
   fetchTeamMembers()
 })
-watch(() => productStore.activeProductName, () => {
+watch(() => productStore.activeProductId, () => {
   initiativesStore.fetchInitiatives()
   fetchTeamMembers()
 })
@@ -407,7 +407,7 @@ const sortableColumns = ['title', 'status', 'priority', 'leader', 'createdAt']
               <!-- Title -->
               <td class="px-5 py-3.5">
                 <div class="flex items-center gap-2 min-w-0">
-                  <FavoriteStar entity-type="initiative" :entity-id="initiative.id" :product-id="productStore.activeProductName" />
+                  <FavoriteStar entity-type="initiative" :entity-id="initiative.id" :product-id="productStore.activeProductScopeForApi" />
                   <span class="w-1 h-7 rounded-full flex-shrink-0" :class="statusDotColor(initiative.status)"></span>
                   <span class="text-sm font-medium text-gray-900 truncate">{{ initiative.title }}</span>
                 </div>
@@ -479,7 +479,7 @@ const sortableColumns = ['title', 'status', 'priority', 'leader', 'createdAt']
           <!-- Header: title + status badge -->
           <div class="flex items-start justify-between gap-3 mb-3">
             <div class="flex items-center gap-2 min-w-0">
-              <FavoriteStar entity-type="initiative" :entity-id="initiative.id" :product-id="productStore.activeProductName" />
+              <FavoriteStar entity-type="initiative" :entity-id="initiative.id" :product-id="productStore.activeProductScopeForApi" />
               <span class="w-1 h-5 rounded-full flex-shrink-0" :class="statusDotColor(initiative.status)"></span>
               <h3 class="text-sm font-semibold text-gray-900 truncate group-hover:text-[#4857FE] transition-colors">{{ initiative.title }}</h3>
             </div>

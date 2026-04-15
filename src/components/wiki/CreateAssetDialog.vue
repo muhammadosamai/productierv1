@@ -133,7 +133,7 @@ function removeTag(tag: string) {
 }
 
 async function searchTags(query: string) {
-  const pname = productStore.activeProductName
+  const pname = productStore.activeProductScopeForApi
   if (!pname) {
     tagSuggestions.value = []
     return
@@ -198,7 +198,7 @@ watch(open, (val) => {
     showTagSuggestions.value = false
     } else {
       // Ensure types are loaded
-      const pname = productStore.activeProductName
+      const pname = productStore.activeProductScopeForApi
       if (wikiStore.assetTypes.length === 0 && pname) {
         wikiStore.fetchAssetTypes(pname)
       }
@@ -209,7 +209,7 @@ async function handleSubmit() {
   if (!title.value.trim() || !assetTypeId.value) return
   submitting.value = true
 
-  const pname = productStore.activeProductName
+  const pname = productStore.activeProductScopeForApi
   if (!pname) { submitting.value = false; return }
   const created = await wikiStore.createAsset({
     productId: pname,

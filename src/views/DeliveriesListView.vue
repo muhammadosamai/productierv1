@@ -17,6 +17,8 @@ import type { Activity } from '@/stores/activities'
 import CreateDeliveryDialog from '@/components/delivery/CreateDeliveryDialog.vue'
 import DeliveryDetailPanel from '@/components/delivery/DeliveryDetailPanel.vue'
 import type { Delivery, DeliveryStatus } from '@/types/delivery'
+import { toast } from 'vue-sonner'
+import { applyProductDeepLinkFromQuery, pickSingleQueryParam } from '@/utils/productDeepLink'
 import FavoriteStar from '@/components/shared/FavoriteStar.vue'
 
 interface TeamUser {
@@ -112,6 +114,13 @@ function closeDetailPanel() {
   selectedDelivery.value = null
 }
 
+function openDeliveryFromQueryParam() {
+  const deliveryId = pickSingleQueryParam(route.query.delivery)
+  if (!deliveryId) return
+  const delivery = deliveriesStore.deliveries.find(d => d.id === deliveryId)
+  if (delivery) openDetailPanel(delivery)
+}
+
 function navigateToDelivery(id: string) {
   showDetailPanel.value = false
   router.push(`/deliveries/${id}`)
@@ -135,26 +144,49 @@ function onDeliveryCreated(id: string) {
 }
 
 onMounted(async () => {
+  await productStore.fetchProducts()
+  const link = applyProductDeepLinkFromQuery(
+    productStore.products,
+    productStore.activeProductId,
+    productStore.selectProductById,
+    productStore.selectProductByName,
+    route.query as Record<string, unknown>,
+  )
+  if (link.unknownProjectKey && productStore.products.length > 0) {
+    toast.error('Unknown project key in this link. Your product selection was not changed.')
+  }
   await deliveriesStore.fetchDeliveries()
   loadUserSettings()
-  // Auto-open delivery from query param
-  const deliveryId = route.query.delivery as string | undefined
-  if (deliveryId) {
-    const delivery = deliveriesStore.deliveries.find(d => d.id === deliveryId)
-    if (delivery) openDetailPanel(delivery)
-  }
+  openDeliveryFromQueryParam()
 })
 
-watch(() => productStore.activeProductName, () => {
+watch(
+  () => [pickSingleQueryParam(route.query.projectKey), pickSingleQueryParam(route.query.product)].join('|'),
+  async (_v, oldVal) => {
+    if (oldVal === undefined) return
+    await productStore.fetchProducts()
+    const link = applyProductDeepLinkFromQuery(
+      productStore.products,
+      productStore.activeProductId,
+      productStore.selectProductById,
+      productStore.selectProductByName,
+      route.query as Record<string, unknown>,
+    )
+    if (link.unknownProjectKey && productStore.products.length > 0) {
+      toast.error('Unknown project key in this link. Your product selection was not changed.')
+    }
+    await deliveriesStore.fetchDeliveries()
+    openDeliveryFromQueryParam()
+  },
+)
+
+watch(() => productStore.activeProductId, () => {
   deliveriesStore.fetchDeliveries()
 })
 
 // Watch for delivery query param changes
-watch(() => route.query.delivery, (deliveryId) => {
-  if (deliveryId) {
-    const delivery = deliveriesStore.deliveries.find(d => d.id === deliveryId as string)
-    if (delivery) openDetailPanel(delivery)
-  }
+watch(() => route.query.delivery, () => {
+  openDeliveryFromQueryParam()
 })
 
 // Status-filtered delivery groups
@@ -520,7 +552,7 @@ const deliveryActivitiesLoading = ref(false)
 async function fetchDeliveryActivities() {
   deliveryActivitiesLoading.value = true
   try {
-    const p = productStore.activeProductName
+    const p = productStore.activeProductScopeForApi
     const res = await fetch(`/api/activities?product=${encodeURIComponent(p)}&entityType=delivery&limit=50`)
     if (res.ok) {
       deliveryActivities.value = await res.json()
@@ -1054,7 +1086,7 @@ function progressPercent(delivery: Delivery) {
                   :class="inlineEditMode && !isEditing(delivery.id, 'title') ? 'hover:bg-gray-100/60 rounded px-1 -mx-1 cursor-text' : ''"
                   @click="startEditing(delivery.id, 'title', delivery.title, $event)"
                 >
-                  <FavoriteStar entity-type="delivery" :entity-id="delivery.id" :product-id="productStore.activeProductName" />
+                  <FavoriteStar entity-type="delivery" :entity-id="delivery.id" :product-id="productStore.activeProductScopeForApi" />
                   <template v-if="isEditing(delivery.id, 'title')">
                     <input
                       v-model="editValue"
@@ -1218,7 +1250,7 @@ function progressPercent(delivery: Delivery) {
 
               <!-- Title -->
               <div class="mb-1.5 flex items-start gap-2">
-                <FavoriteStar entity-type="delivery" :entity-id="delivery.id" :product-id="productStore.activeProductName" />
+                <FavoriteStar entity-type="delivery" :entity-id="delivery.id" :product-id="productStore.activeProductScopeForApi" />
                 <h4 class="text-base leading-snug line-clamp-2 group-hover/card:text-[#4857FE] transition-colors">
                   <span v-if="parseDeliveryTitle(delivery.title).prefix" class="font-medium" :class="statusTextColor(delivery.status)">{{ parseDeliveryTitle(delivery.title).prefix }}</span>
                   <span v-if="parseDeliveryTitle(delivery.title).prefix"> - </span>

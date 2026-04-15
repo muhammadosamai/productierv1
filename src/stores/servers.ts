@@ -21,7 +21,7 @@ export const useServersStore = defineStore('servers', () => {
 
   async function fetchServers(environment?: Environment) {
     const productStore = useProductStore()
-    const product = productStore.activeProductName
+    const product = productStore.activeProductScopeForApi
     loading.value = true
     error.value = null
     try {

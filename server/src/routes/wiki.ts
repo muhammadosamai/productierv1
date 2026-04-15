@@ -2,6 +2,11 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { assetTypes, assets, assetRelations_table, users } from '../db/schema'
 import { eq, and, ilike, or } from 'drizzle-orm'
+import {
+  resolveProductByScope,
+  whereDenormProductMatches,
+  denormalizedProductScopeValue,
+} from '../lib/resolveProductScope'
 import { jwt } from '@elysiajs/jwt'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
@@ -42,15 +47,17 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
 
   // GET /api/wiki/types?product=X
   .get('/types', async ({ query }) => {
-    const product = query.product
+    const raw = query.product?.trim()
+    const scopeRow = raw ? await resolveProductByScope(raw) : null
     const existing = await db.query.assetTypes.findMany({
-      where: product ? eq(assetTypes.productId, product) : undefined,
+      where: scopeRow ? whereDenormProductMatches(assetTypes.productId, scopeRow) : undefined,
       orderBy: (t, { asc }) => [asc(t.category), asc(t.name)],
     })
     // Auto-seed defaults on first use for this product
-    if (product && existing.length === 0) {
+    if (scopeRow && existing.length === 0) {
+      const pid = denormalizedProductScopeValue(scopeRow)
       const seeded = await db.insert(assetTypes).values(
-        DEFAULT_ASSET_TYPES.map(d => ({ ...d, productId: product }))
+        DEFAULT_ASSET_TYPES.map(d => ({ ...d, productId: pid }))
       ).returning()
       return seeded.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name))
     }
@@ -64,13 +71,16 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
     const user = await getUserFromHeader(jwtVerify.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
+    const sr = await resolveProductByScope(body.productId)
+    const productId = sr ? denormalizedProductScopeValue(sr) : body.productId
+
     const [created] = await db.insert(assetTypes).values({
       name: body.name,
       slug: slugify(body.name),
       category: body.category || 'business',
       icon: body.icon || null,
       color: body.color || null,
-      productId: body.productId,
+      productId,
     }).returning()
 
     return created
@@ -88,14 +98,15 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
 
   // GET /api/wiki/assets?product=X&type=slug&search=q
   .get('/assets', async ({ query }) => {
-    const product = query.product
+    const raw = query.product?.trim()
+    const scopeRow = raw ? await resolveProductByScope(raw) : null
     const typeSlug = query.type
     const search = query.search
 
     let typeFilter: any = undefined
-    if (typeSlug && product) {
+    if (typeSlug && scopeRow) {
       const assetType = await db.query.assetTypes.findFirst({
-        where: and(eq(assetTypes.slug, typeSlug), eq(assetTypes.productId, product)),
+        where: and(eq(assetTypes.slug, typeSlug), whereDenormProductMatches(assetTypes.productId, scopeRow)),
       })
       if (assetType) {
         typeFilter = eq(assets.assetTypeId, assetType.id)
@@ -103,7 +114,7 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
     }
 
     const conditions = []
-    if (product) conditions.push(eq(assets.productId, product))
+    if (scopeRow) conditions.push(whereDenormProductMatches(assets.productId, scopeRow))
     if (typeFilter) conditions.push(typeFilter)
     if (search) {
       conditions.push(
@@ -133,11 +144,12 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
 
   // GET /api/wiki/tags?product=X&q=term
   .get('/tags', async ({ query }) => {
-    const product = query.product
+    const raw = query.product?.trim()
+    const scopeRow = raw ? await resolveProductByScope(raw) : null
     const q = (query.q || '').trim().toLowerCase()
 
     const rows = await db.query.assets.findMany({
-      where: product ? eq(assets.productId, product) : undefined,
+      where: scopeRow ? whereDenormProductMatches(assets.productId, scopeRow) : undefined,
       columns: { tags: true },
     })
 
@@ -208,8 +220,11 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
     const user = await getUserFromHeader(jwtVerify.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
+    const sr = await resolveProductByScope(body.productId)
+    const productId = sr ? denormalizedProductScopeValue(sr) : body.productId
+
     const [created] = await db.insert(assets).values({
-      productId: body.productId,
+      productId,
       assetTypeId: body.assetTypeId,
       title: body.title,
       slug: slugify(body.title),

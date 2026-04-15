@@ -7,6 +7,11 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { sendRoleChangeEmail } from '../services/email'
 import { isProductMemberRole } from '../lib/productMemberRoles'
+import {
+  resolveProductByScope,
+  whereDenormProductMatches,
+  denormalizedProductScopeValue,
+} from '../lib/resolveProductScope'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -20,9 +25,11 @@ async function getUserFromHeader(jwtVerify: any, headers: Record<string, string 
   return user || null
 }
 
-async function isProductAdmin(userId: string, product: string): Promise<boolean> {
+async function isProductAdmin(userId: string, productRef: string): Promise<boolean> {
+  const scopeRow = await resolveProductByScope(productRef)
+  if (!scopeRow) return false
   const member = await db.query.productMembers.findFirst({
-    where: and(eq(productMembers.product, product), eq(productMembers.userId, userId)),
+    where: and(whereDenormProductMatches(productMembers.product, scopeRow), eq(productMembers.userId, userId)),
   })
   return member?.role === 'admin'
 }
@@ -64,6 +71,19 @@ async function generateUniqueProjectKey(name: string) {
   }
 }
 
+/** Postgres unique_violation on legacy products.name unique index (until migration 0017 or drop script). */
+function isProductsNameUniqueViolation(e: unknown): boolean {
+  const err = e as { code?: string; constraint_name?: string; constraint?: string; detail?: string; table_name?: string }
+  if (err.code !== '23505') return false
+  const cn = err.constraint_name || err.constraint
+  if (cn === 'products_name_unique') return true
+  const d = `${err.detail || ''} ${err.table_name || ''}`
+  return d.includes('Key (name)') && !d.includes('Key (project_key)')
+}
+
+const DUPLICATE_DISPLAY_NAME_BLOCKED =
+  'This database still has a unique constraint on product names. From the server directory run: bun run db:drop-products-name-unique (or apply Drizzle migration 0017). After that, multiple products can share the same display name; use each product’s project key in URLs.'
+
 export const productRoutes = new Elysia({ prefix: '/api/products' })
   .use(jwt({ name: 'jwt', secret: JWT_SECRET }))
 
@@ -80,8 +100,14 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       roleByProduct = Object.fromEntries(membershipRows.map((r) => [r.product, r.role]))
     }
 
-    const attachMyRole = <T extends { name: string }>(list: T[]) =>
-      list.map((p) => ({ ...p, myRole: roleByProduct[p.name] ?? null }))
+    const attachMyRole = <T extends { name: string; projectKey?: string | null }>(list: T[]) =>
+      list.map((p) => ({
+        ...p,
+        myRole:
+          roleByProduct[p.name]
+          ?? (p.projectKey ? roleByProduct[p.projectKey] : null)
+          ?? null,
+      }))
 
     // Unauthenticated or super_admin: return all
     if (!user || user.role === 'super_admin') {
@@ -97,14 +123,19 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       .from(productMembers)
       .where(eq(productMembers.userId, user.id))
 
-    const productNames = memberProducts.map(m => m.product)
-    if (productNames.length === 0) return []
+    const memberScopeRefs = memberProducts.map(m => m.product)
+    if (memberScopeRefs.length === 0) return []
 
     const allProducts = await db.query.products.findMany({
       orderBy: (items, { asc }) => [asc(items.name)],
     })
 
-    return attachMyRole(allProducts.filter(p => productNames.includes(p.name)))
+    return attachMyRole(
+      allProducts.filter(p =>
+        memberScopeRefs.includes(p.name)
+        || (p.projectKey ? memberScopeRefs.includes(p.projectKey) : false),
+      ),
+    )
   })
 
   // POST /api/products - Create a new product
@@ -125,9 +156,11 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
         createdByUserId: user.id,
       }).returning()
 
+      const memberScope = denormalizedProductScopeValue(product!)
+
       // Auto-add creator as admin member
       await db.insert(productMembers).values({
-        product: product!.name,
+        product: memberScope,
         userId: user.id,
         role: 'admin',
       })
@@ -137,7 +170,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
         for (const member of body.members) {
           if (member.userId !== user.id) {
             await db.insert(productMembers).values({
-              product: product!.name,
+              product: memberScope,
               userId: member.userId,
               role: member.role || 'member',
             }).onConflictDoNothing()
@@ -149,7 +182,10 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     } catch (e: any) {
       if (e.code === '23505') {
         set.status = 409
-        return { error: 'A product with this name already exists' }
+        if (isProductsNameUniqueViolation(e)) {
+          return { error: DUPLICATE_DISPLAY_NAME_BLOCKED }
+        }
+        return { error: 'A product with this project key already exists' }
       }
       throw e
     }
@@ -166,7 +202,13 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
   })
 
   // GET /api/products/:name/members
-  .get('/:name/members', async ({ params: { name } }) => {
+  .get('/:name/members', async ({ params: { name }, set }) => {
+    const scopeRow = await resolveProductByScope(name)
+    if (!scopeRow) {
+      set.status = 404
+      return { error: 'Product not found' }
+    }
+
     const members = await db
       .select({
         id: productMembers.id,
@@ -181,16 +223,23 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       })
       .from(productMembers)
       .innerJoin(users, eq(productMembers.userId, users.id))
-      .where(eq(productMembers.product, name))
+      .where(whereDenormProductMatches(productMembers.product, scopeRow))
 
     return members
   })
 
   // POST /api/products/:name/members
   .post('/:name/members', async ({ params: { name }, body, set }) => {
+    const scopeRow = await resolveProductByScope(name)
+    if (!scopeRow) {
+      set.status = 404
+      return { error: 'Product not found' }
+    }
+    const memberScope = denormalizedProductScopeValue(scopeRow)
+
     try {
       const [member] = await db.insert(productMembers).values({
-        product: name,
+        product: memberScope,
         userId: body.userId,
         role: body.role || 'member',
       }).returning()
@@ -229,6 +278,12 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       return { error: 'Unauthorized' }
     }
 
+    const scopeRow = await resolveProductByScope(name)
+    if (!scopeRow) {
+      set.status = 404
+      return { error: 'Product not found' }
+    }
+
     const canManage = user.role === 'super_admin' || await isProductAdmin(user.id, name)
     if (!canManage) {
       set.status = 403
@@ -247,7 +302,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     }
 
     const existing = await db.query.productMembers.findFirst({
-      where: and(eq(productMembers.product, name), eq(productMembers.userId, userId)),
+      where: and(whereDenormProductMatches(productMembers.product, scopeRow), eq(productMembers.userId, userId)),
     })
     if (!existing) {
       set.status = 404
@@ -274,7 +329,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       const admins = await db
         .select({ id: productMembers.id })
         .from(productMembers)
-        .where(and(eq(productMembers.product, name), eq(productMembers.role, 'admin')))
+        .where(and(whereDenormProductMatches(productMembers.product, scopeRow), eq(productMembers.role, 'admin')))
       if (admins.length <= 1) {
         set.status = 400
         return { error: 'Cannot remove the last product admin' }
@@ -284,7 +339,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     const [updated] = await db
       .update(productMembers)
       .set({ role })
-      .where(and(eq(productMembers.product, name), eq(productMembers.userId, userId)))
+      .where(and(whereDenormProductMatches(productMembers.product, scopeRow), eq(productMembers.userId, userId)))
       .returning()
 
     if (targetUser?.email) {
@@ -292,7 +347,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       void sendRoleChangeEmail({
         email: targetUser.email,
         userName: targetUser.name || 'there',
-        productName: name,
+        productName: scopeRow.name,
         previousRole,
         newRole: role,
         changedByName: user.name || 'An administrator',
@@ -318,9 +373,15 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
 
   // DELETE /api/products/:name/members/:userId
   .delete('/:name/members/:userId', async ({ params: { name, userId }, set }) => {
+    const scopeRow = await resolveProductByScope(name)
+    if (!scopeRow) {
+      set.status = 404
+      return { error: 'Product not found' }
+    }
+
     const [deleted] = await db.delete(productMembers)
       .where(and(
-        eq(productMembers.product, name),
+        whereDenormProductMatches(productMembers.product, scopeRow),
         eq(productMembers.userId, userId),
       ))
       .returning()
@@ -345,8 +406,13 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
 
     const productName = query.product?.trim()
     if (productName) {
+      const scopeRow = await resolveProductByScope(productName)
+      if (!scopeRow) {
+        set.status = 404
+        return { error: 'Product not found' }
+      }
       const scopedProduct = await db.query.products.findFirst({
-        where: eq(products.name, productName),
+        where: eq(products.id, scopeRow.id),
       })
       if (!scopedProduct) {
         set.status = 404
@@ -392,8 +458,14 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       return { error: 'Unauthorized' }
     }
 
+    const scopeRow = await resolveProductByScope(name)
+    if (!scopeRow) {
+      set.status = 404
+      return { error: 'Product not found' }
+    }
+
     const product = await db.query.products.findFirst({
-      where: eq(products.name, name),
+      where: eq(products.id, scopeRow.id),
     })
     if (!product) {
       set.status = 404
@@ -409,7 +481,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     }
 
     if (!ownerOrSuper && productAdmin) {
-      if (body.name !== undefined && body.name !== name) {
+      if (body.name !== undefined && body.name !== product.name) {
         set.status = 403
         return { error: 'Only the product owner or super admin can rename this product' }
       }
@@ -430,24 +502,19 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     }
 
     try {
-      // If name is changing, update all references across tables
-      if (updates.name && updates.name !== name) {
-        await db.update(productMembers).set({ product: updates.name }).where(eq(productMembers.product, name))
-        await db.update(stories).set({ product: updates.name }).where(eq(stories.product, name))
-        await db.update(initiatives).set({ product: updates.name }).where(eq(initiatives.product, name))
-        await db.update(activities).set({ product: updates.name }).where(eq(activities.product, name))
-      }
-
       const [updated] = await db.update(products)
         .set(updates)
-        .where(eq(products.name, name))
+        .where(eq(products.id, product.id))
         .returning()
 
       return updated
     } catch (e: any) {
       if (e.code === '23505') {
         set.status = 409
-        return { error: 'A product with this name already exists' }
+        if (isProductsNameUniqueViolation(e)) {
+          return { error: DUPLICATE_DISPLAY_NAME_BLOCKED }
+        }
+        return { error: 'A product with this project key already exists' }
       }
       throw e
     }
@@ -467,9 +534,15 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       return { error: 'Unauthorized' }
     }
 
+    const scopeRow = await resolveProductByScope(name)
+    if (!scopeRow) {
+      set.status = 404
+      return { error: 'Product not found' }
+    }
+
     // Find the product
     const product = await db.query.products.findFirst({
-      where: eq(products.name, name),
+      where: eq(products.id, scopeRow.id),
     })
     if (!product) {
       set.status = 404
@@ -482,7 +555,12 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       return { error: 'Only the product owner or super admin can delete this product' }
     }
 
-    const productScope = [name, product.id]
+    const denorm = denormalizedProductScopeValue(scopeRow)
+    const productScope = Array.from(
+      new Set(
+        [scopeRow.name, denorm, product.id, ...(scopeRow.projectKey ? [scopeRow.projectKey] : [])],
+      ),
+    )
 
     // Delete all related data (no FK constraints, must clean up manually)
     // Tables with `productId` field (varchar matching product name)
@@ -499,13 +577,13 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     await db.delete(favorites).where(inArray(favorites.productId, productScope))
 
     // Tables with `product` field (varchar matching product name)
-    await db.delete(stories).where(eq(stories.product, name))
-    await db.delete(initiatives).where(eq(initiatives.product, name))
-    await db.delete(activities).where(eq(activities.product, name))
-    await db.delete(productMembers).where(eq(productMembers.product, name))
+    await db.delete(stories).where(whereDenormProductMatches(stories.product, scopeRow))
+    await db.delete(initiatives).where(whereDenormProductMatches(initiatives.product, scopeRow))
+    await db.delete(activities).where(whereDenormProductMatches(activities.product, scopeRow))
+    await db.delete(productMembers).where(whereDenormProductMatches(productMembers.product, scopeRow))
 
     // Finally delete the product itself
-    await db.delete(products).where(eq(products.name, name))
+    await db.delete(products).where(eq(products.id, product.id))
 
     return { success: true }
   })

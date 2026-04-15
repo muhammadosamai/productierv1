@@ -5,8 +5,10 @@ import {
   Clock, CalendarDays, FileText, Package, ListTodo,
 } from 'lucide-vue-next'
 import { useDeliveriesStore } from '@/stores/deliveries'
+import { useProductStore } from '@/stores/products'
 import type { Delivery, DeliveryStatus } from '@/types/delivery'
 import { useCopyLink } from '@/utils/useCopyLink'
+import { buildEntityShareUrl, productShareContextFromProductName } from '@/utils/productDeepLink'
 
 const props = defineProps<{
   delivery: Delivery | null
@@ -20,8 +22,20 @@ const emit = defineEmits<{
 }>()
 
 const deliveriesStore = useDeliveriesStore()
+const productStore = useProductStore()
 const { copied, copyLink } = useCopyLink()
 const origin = typeof window !== 'undefined' ? window.location.origin : ''
+
+function copyDeliveryShareLink() {
+  const d = props.delivery
+  if (!d) return
+  const ctx = productShareContextFromProductName(
+    productStore.products,
+    d.productId,
+    productStore.activeProduct || { name: d.productId, projectKey: null },
+  )
+  copyLink(buildEntityShareUrl(origin, '/deliveries', { delivery: d.id }, ctx))
+}
 
 // Editing state
 const editingField = ref<string | null>(null)
@@ -215,7 +229,7 @@ function progressPercent() {
               class="p-1 rounded-md hover:bg-gray-100 transition-colors"
               :class="copied ? 'text-green-600 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'"
               title="Copy link"
-              @click="copyLink(`${origin}/deliveries?delivery=${delivery.id}`)"
+              @click="copyDeliveryShareLink()"
             >
               <Check v-if="copied" :size="14" />
               <Copy v-else :size="14" />

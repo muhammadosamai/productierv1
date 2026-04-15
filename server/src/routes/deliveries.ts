@@ -2,6 +2,7 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { deliveries, deliveryInitiatives, tasks, users, initiatives } from '../db/schema'
 import { eq, count } from 'drizzle-orm'
+import { resolveProductByScope, whereDenormProductMatches, denormalizedProductScopeValue } from '../lib/resolveProductScope'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
@@ -36,9 +37,10 @@ export const deliveryRoutes = new Elysia({ prefix: '/api/deliveries' })
 
   // GET /api/deliveries?product=X
   .get('/', async ({ query }) => {
-    const product = query.product
+    const product = query.product?.trim()
+    const scopeRow = product ? await resolveProductByScope(product) : null
     const results = await db.query.deliveries.findMany({
-      where: product ? eq(deliveries.productId, product) : undefined,
+      where: scopeRow ? whereDenormProductMatches(deliveries.productId, scopeRow) : undefined,
       orderBy: (d, { desc }) => [desc(d.createdAt)],
       with: {
         createdByUser: {
@@ -123,20 +125,31 @@ export const deliveryRoutes = new Elysia({ prefix: '/api/deliveries' })
   })
 
   // POST /api/deliveries
-  .post('/', async ({ body, jwt: jwtInstance, headers }) => {
+  .post('/', async ({ body, jwt: jwtInstance, headers, set }) => {
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) return { error: 'Unauthorized' }
 
     const { initiativeIds, ...deliveryData } = body
 
     // Auto-prepend #N counter to the title
-    const productId = deliveryData.productId || ''
-    const [countResult] = await db.select({ total: count() }).from(deliveries).where(eq(deliveries.productId, productId))
+    const rawPid = deliveryData.productId?.trim()
+    if (!rawPid) {
+      set.status = 400
+      return { error: 'productId is required' }
+    }
+    const sr = await resolveProductByScope(rawPid)
+    if (!sr) {
+      set.status = 404
+      return { error: 'Product not found' }
+    }
+    const productId = denormalizedProductScopeValue(sr)
+    const [countResult] = await db.select({ total: count() }).from(deliveries).where(whereDenormProductMatches(deliveries.productId, sr))
     const nextNumber = (countResult?.total || 0) + 1
     const numberedTitle = `#${nextNumber} ${deliveryData.title}`
 
     const [delivery] = await db.insert(deliveries).values({
       ...deliveryData,
+      productId,
       title: numberedTitle,
       status: deliveryData.status ?? 'initialized',
       createdByUserId: user.id,

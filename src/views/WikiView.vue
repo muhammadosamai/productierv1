@@ -35,7 +35,7 @@ const expandedCategories = ref<Record<string, boolean>>(loadJson(STORAGE_KEY_CAT
 const expandedTypes = ref<Record<string, boolean>>(loadJson(STORAGE_KEY_TYPE, {}))
 
 onMounted(async () => {
-  const product = productStore.activeProduct?.name
+  const product = productStore.activeProductScopeForApi
   if (product) {
     await Promise.all([
       wikiStore.fetchAssetTypes(product),
@@ -48,7 +48,8 @@ onMounted(async () => {
   }
 })
 
-watch(() => productStore.activeProduct?.name, async (product) => {
+watch(() => productStore.activeProductId, async () => {
+  const product = productStore.activeProductScopeForApi
   if (!product) {
     wikiStore.selectedAsset = null
     return
@@ -133,7 +134,7 @@ async function saveEditing() {
       description: editDescription.value || null,
       content: editContent.value || null,
     })
-    const pname = productStore.activeProduct?.name
+    const pname = productStore.activeProductScopeForApi
     if (pname) await wikiStore.fetchAssets(pname)
     await wikiStore.fetchAsset(wikiStore.selectedAsset.id)
     isEditing.value = false
@@ -147,14 +148,14 @@ function cancelEditing() {
 async function deleteAsset() {
   if (wikiStore.selectedAsset && confirm('Delete this asset? This cannot be undone.')) {
     await wikiStore.deleteAsset(wikiStore.selectedAsset.id)
-    const pname = productStore.activeProduct?.name
+    const pname = productStore.activeProductScopeForApi
     if (pname) await wikiStore.fetchAssets(pname)
   }
 }
 
 async function onAssetCreated() {
   showCreateDialog.value = false
-  const pname = productStore.activeProduct?.name
+  const pname = productStore.activeProductScopeForApi
   if (pname) await wikiStore.fetchAssets(pname)
   // Select the newly created asset
   if (wikiStore.assets.length > 0) {

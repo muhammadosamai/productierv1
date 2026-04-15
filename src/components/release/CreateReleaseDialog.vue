@@ -114,7 +114,7 @@ async function submit() {
   if (!title.value.trim() || submitting.value) return
   submitting.value = true
   try {
-    const pid = productStore.activeProductName
+    const pid = productStore.activeProductScopeForApi
     if (!pid) return
     const result = await releasesStore.createRelease({
       title: title.value.trim(),

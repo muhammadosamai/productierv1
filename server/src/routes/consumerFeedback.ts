@@ -2,6 +2,7 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { consumerFeedbacks, consumerFeedbackComments, consumerFeedbackAttachments, users } from '../db/schema'
 import { eq, desc, sql } from 'drizzle-orm'
+import { resolveProductByScope, whereDenormProductMatches, denormalizedProductScopeValue } from '../lib/resolveProductScope'
 import { jwt } from '@elysiajs/jwt'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
@@ -20,9 +21,10 @@ export const consumerFeedbackRoutes = new Elysia({ prefix: '/api/consumer-feedba
 
   // GET /api/consumer-feedbacks?product=X
   .get('/', async ({ query }) => {
-    const product = query.product
+    const product = query.product?.trim()
+    const scopeRow = product ? await resolveProductByScope(product) : null
     const items = await db.query.consumerFeedbacks.findMany({
-      where: product ? eq(consumerFeedbacks.productId, product) : undefined,
+      where: scopeRow ? whereDenormProductMatches(consumerFeedbacks.productId, scopeRow) : undefined,
       orderBy: [desc(consumerFeedbacks.createdAt)],
       with: {
         assignedToUser: { columns: { id: true, name: true, email: true, avatar: true } },
@@ -59,8 +61,11 @@ export const consumerFeedbackRoutes = new Elysia({ prefix: '/api/consumer-feedba
 
   // POST /api/consumer-feedbacks (public - no auth required for external users)
   .post('/', async ({ body }) => {
+    const sr = await resolveProductByScope(body.productId)
+    const productId = sr ? denormalizedProductScopeValue(sr) : body.productId
+
     const [created] = await db.insert(consumerFeedbacks).values({
-      productId: body.productId,
+      productId,
       title: body.title,
       description: body.description || null,
       type: (body.type as any) || 'bug',

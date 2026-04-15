@@ -22,6 +22,8 @@ import TaskStatusIcon from '@/components/shared/TaskStatusIcon.vue'
 import CreateTaskDialog from '@/components/delivery/CreateTaskDialog.vue'
 import FormBuilderDialog from '@/components/forms/FormBuilderDialog.vue'
 import type { Task } from '@/types/backlog'
+import { toast } from 'vue-sonner'
+import { applyProductDeepLinkFromQuery, pickSingleQueryParam } from '@/utils/productDeepLink'
 
 interface TeamUser {
   id: string
@@ -172,6 +174,16 @@ function closeTaskPanel() {
   fromStoryId.value = null
 }
 
+function openTaskFromQueryParam() {
+  const taskId = pickSingleQueryParam(route.query.task)
+  if (!taskId) return
+  const task = backlogStore.allTasks.find(t => t.id === taskId)
+  if (task) {
+    openTaskDetail(task)
+    fromStoryId.value = pickSingleQueryParam(route.query.fromStory) || null
+  }
+}
+
 async function onTaskUpdated() {
   await backlogStore.fetchStories()
   if (selectedTask.value) {
@@ -187,35 +199,51 @@ function onTaskCreated() {
 }
 
 onMounted(async () => {
+  await productStore.fetchProducts()
+  const link = applyProductDeepLinkFromQuery(
+    productStore.products,
+    productStore.activeProductId,
+    productStore.selectProductById,
+    productStore.selectProductByName,
+    route.query as Record<string, unknown>,
+  )
+  if (link.unknownProjectKey && productStore.products.length > 0) {
+    toast.error('Unknown project key in this link. Your product selection was not changed.')
+  }
   await backlogStore.fetchStories()
   fetchTeamMembers()
   loadUserSettings()
-  // Auto-open task from query param
-  const taskId = route.query.task as string | undefined
-  if (taskId) {
-    const task = backlogStore.allTasks.find(t => t.id === taskId)
-    if (task) {
-      openTaskDetail(task)
-      // Set fromStoryId if navigated from a story
-      fromStoryId.value = (route.query.fromStory as string) || null
-    }
-  }
+  openTaskFromQueryParam()
 })
 
-watch(() => productStore.activeProductName, () => {
+watch(
+  () => [pickSingleQueryParam(route.query.projectKey), pickSingleQueryParam(route.query.product)].join('|'),
+  async (_v, oldVal) => {
+    if (oldVal === undefined) return
+    await productStore.fetchProducts()
+    const link = applyProductDeepLinkFromQuery(
+      productStore.products,
+      productStore.activeProductId,
+      productStore.selectProductById,
+      productStore.selectProductByName,
+      route.query as Record<string, unknown>,
+    )
+    if (link.unknownProjectKey && productStore.products.length > 0) {
+      toast.error('Unknown project key in this link. Your product selection was not changed.')
+    }
+    await backlogStore.fetchStories()
+    openTaskFromQueryParam()
+  },
+)
+
+watch(() => productStore.activeProductId, () => {
   backlogStore.fetchStories()
   fetchTeamMembers()
 })
 
 // Watch for query param changes
-watch(() => route.query.task, (taskId) => {
-  if (taskId) {
-    const task = backlogStore.allTasks.find(t => t.id === taskId as string)
-    if (task) {
-      openTaskDetail(task)
-      fromStoryId.value = (route.query.fromStory as string) || null
-    }
-  }
+watch(() => route.query.task, () => {
+  openTaskFromQueryParam()
 })
 
 // Status-filtered task groups
@@ -667,7 +695,7 @@ const taskActivitiesLoading = ref(false)
 async function fetchTaskActivities() {
   taskActivitiesLoading.value = true
   try {
-    const p = productStore.activeProductName
+    const p = productStore.activeProductScopeForApi
     const res = await fetch(`/api/activities?product=${encodeURIComponent(p)}&entityType=task&limit=50`)
     if (res.ok) {
       taskActivities.value = await res.json()
@@ -1522,7 +1550,7 @@ function renderUserAvatar(userId: string | null) {
                   @click="startTaskEditing(task.id, 'title', task.title, $event)"
                 >
                   <template v-if="isEditing(task.id, 'title')">
-                    <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProductName" />
+                    <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProductScopeForApi" />
                     <TaskStatusIcon :status="task.status" :size="18" />
                     <input
                       v-model="editValue"
@@ -1534,7 +1562,7 @@ function renderUserAvatar(userId: string | null) {
                     />
                   </template>
                   <template v-else>
-                    <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProductName" />
+                    <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProductScopeForApi" />
                     <TaskStatusIcon :status="task.status" :size="18" />
                     <span class="text-sm font-medium truncate" :class="(task.status === 'done' || task.status === 'archived') ? 'text-gray-400 line-through' : 'text-gray-800'">{{ task.title }}</span>
                     <ChevronRight v-if="!inlineEditMode" :size="14" class="text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
@@ -1932,7 +1960,7 @@ function renderUserAvatar(userId: string | null) {
               <!-- Row 1: Status badge -->
               <div class="flex items-center justify-between mb-3.5">
                 <div class="flex items-center gap-2">
-                  <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProductName" />
+                  <FavoriteStar entity-type="task" :entity-id="task.id" :product-id="productStore.activeProductScopeForApi" />
                   <div class="w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center">
                     <ListChecks :size="18" class="text-gray-400" />
                   </div>

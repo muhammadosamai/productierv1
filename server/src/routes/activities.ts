@@ -2,6 +2,7 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { activities } from '../db/schema'
 import { eq, desc, and, inArray } from 'drizzle-orm'
+import { resolveProductByScope, whereDenormProductMatches } from '../lib/resolveProductScope'
 
 export const activityRoutes = new Elysia({ prefix: '/api/activities' })
   // GET /api/activities?product=X&entityId=Y&entityIds=a,b,c&entityType=task&limit=50
@@ -14,7 +15,10 @@ export const activityRoutes = new Elysia({ prefix: '/api/activities' })
     const limit = parseInt(query.limit || '50', 10)
 
     const conditions = []
-    if (product) conditions.push(eq(activities.product, product))
+    if (product?.trim()) {
+      const scopeRow = await resolveProductByScope(product.trim())
+      if (scopeRow) conditions.push(whereDenormProductMatches(activities.product, scopeRow))
+    }
     if (userId) conditions.push(eq(activities.userId, userId))
 
     // Support multiple entity IDs (e.g. story + all its child task IDs)

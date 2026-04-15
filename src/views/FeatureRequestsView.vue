@@ -36,12 +36,12 @@ const submitting = ref(false)
 watch(viewMode, (v) => localStorage.setItem('fr-view-mode', v))
 
 onMounted(() => {
-  store.fetchAll(productStore.activeProductName, 'votes')
+  store.fetchAll(productStore.activeProductScopeForApi, 'votes')
   syncCreateDialogWithRoute()
 })
 
-watch(() => productStore.activeProductName, (p) => {
-  store.fetchAll(p, 'votes')
+watch(() => productStore.activeProductId, () => {
+  store.fetchAll(productStore.activeProductScopeForApi, 'votes')
 })
 
 watch(() => route.query.create, () => {
@@ -109,7 +109,7 @@ const tabCounts = computed(() => ({
 async function handleUpvote(id: string, e: Event) {
   e.stopPropagation()
   await store.toggleUpvote(id)
-  await store.fetchAll(productStore.activeProductName, 'votes')
+  await store.fetchAll(productStore.activeProductScopeForApi, 'votes')
 }
 
 function isUpvotedByMe(item: any): boolean {
@@ -133,7 +133,7 @@ async function handleCreate() {
   if (!newTitle.value.trim()) return
   submitting.value = true
   await store.create({
-    productId: productStore.activeProductName,
+    productId: productStore.activeProductScopeForApi,
     title: newTitle.value.trim(),
     description: newDescription.value.trim() || null,
     category: newCategory.value,
@@ -302,7 +302,7 @@ function timeAgo(dateStr: string) {
 
             <!-- Title -->
             <div class="flex items-start gap-2 mb-1.5">
-              <FavoriteStar entity-type="feature_request" :entity-id="item.id" :product-id="productStore.activeProductName" />
+              <FavoriteStar entity-type="feature_request" :entity-id="item.id" :product-id="productStore.activeProductScopeForApi" />
               <h3 class="text-sm font-semibold text-gray-900 group-hover:text-[#4857FE] transition-colors line-clamp-2">{{ item.title }}</h3>
             </div>
 
@@ -384,7 +384,7 @@ function timeAgo(dateStr: string) {
               <!-- Title -->
               <td class="px-5 py-3.5">
                 <div class="flex items-center gap-2 min-w-0">
-                  <FavoriteStar entity-type="feature_request" :entity-id="item.id" :product-id="productStore.activeProductName" />
+                  <FavoriteStar entity-type="feature_request" :entity-id="item.id" :product-id="productStore.activeProductScopeForApi" />
                   <span class="text-sm font-medium text-gray-900 truncate">{{ item.title }}</span>
                 </div>
               </td>

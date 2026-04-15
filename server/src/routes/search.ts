@@ -3,7 +3,14 @@ import { jwt } from '@elysiajs/jwt'
 import { and, arrayContains, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 import { issueStatusSearchDbValues } from '../lib/issueStatusId'
 import { db } from '../db'
-import { assets, initiatives, issues, productMembers, products, stories, tasks, users } from '../db/schema'
+import { assets, initiatives, issues, productMembers, stories, tasks, users } from '../db/schema'
+import {
+  resolveProductByScope,
+  denormalizedProductScopeValue,
+  denormMatchValues,
+  whereDenormProductMatches,
+  type ProductScopeRow,
+} from '../lib/resolveProductScope'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -98,53 +105,72 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
     const requestedProduct = query.product?.trim()
     const limit = Math.max(1, Math.min(Number(query.limit || 5), 20))
 
-    let allowedProducts: string[] = []
+    const emptyGroups = (filters: ParsedFilters) => ({
+      query: q,
+      groups: {
+        stories: [],
+        tasks: [],
+        issues: [],
+        initiatives: [],
+        wikiAssets: [],
+      },
+      filters,
+    })
+
+    let allowedScopeRows: ProductScopeRow[] = []
+
     if (user.role === 'super_admin') {
       if (requestedProduct) {
-        allowedProducts = [requestedProduct]
+        const sr = await resolveProductByScope(requestedProduct)
+        if (!sr) {
+          return emptyGroups(parseFilters(q))
+        }
+        allowedScopeRows = [sr]
       } else {
-        const allProducts = await db.query.productMembers.findMany({
-          columns: { product: true },
-        })
-        allowedProducts = [...new Set(allProducts.map(p => p.product))]
+        const allMemberRefs = await db.query.productMembers.findMany({ columns: { product: true } })
+        const refs = [...new Set(allMemberRefs.map(p => p.product))]
+        const resolved = (await Promise.all(refs.map(r => resolveProductByScope(r)))).filter(Boolean) as ProductScopeRow[]
+        allowedScopeRows = [...new Map(resolved.map(p => [p.id, p])).values()]
       }
     } else {
       const memberships = await db
         .select({ product: productMembers.product })
         .from(productMembers)
         .where(eq(productMembers.userId, user.id))
+      const memberRefs = [...new Set(memberships.map(m => m.product))]
 
-      const memberProducts = memberships.map(m => m.product)
-      if (requestedProduct && !memberProducts.includes(requestedProduct)) {
-        set.status = 403
-        return { error: 'Forbidden for requested product scope' }
+      if (requestedProduct) {
+        const sr = await resolveProductByScope(requestedProduct)
+        if (!sr) {
+          set.status = 403
+          return { error: 'Forbidden for requested product scope' }
+        }
+        const mem = await db.query.productMembers.findFirst({
+          where: and(whereDenormProductMatches(productMembers.product, sr), eq(productMembers.userId, user.id)),
+        })
+        if (!mem) {
+          set.status = 403
+          return { error: 'Forbidden for requested product scope' }
+        }
+        allowedScopeRows = [sr]
+      } else {
+        const resolved = (await Promise.all(memberRefs.map(r => resolveProductByScope(r)))).filter(Boolean) as ProductScopeRow[]
+        allowedScopeRows = [...new Map(resolved.map(p => [p.id, p])).values()]
       }
-      allowedProducts = requestedProduct ? [requestedProduct] : memberProducts
     }
 
-    if (allowedProducts.length === 0) {
-      return {
-        query: q,
-        groups: {
-          stories: [],
-          tasks: [],
-          issues: [],
-          initiatives: [],
-          wikiAssets: [],
-        },
-      }
+    if (allowedScopeRows.length === 0) {
+      return emptyGroups(parseFilters(q))
     }
 
-    // Resolve product names to product IDs for entities that store product_id
-    const productRows = await db.query.products.findMany({
-      where: allowedProducts.length > 0 ? inArray(products.name, allowedProducts) : undefined,
-      columns: { id: true, name: true },
-    })
-    const allowedProductIds = productRows.map(p => p.id)
-    const productIdToName = new Map(productRows.map(p => [p.id, p.name]))
-    // If allowedProducts already contains ids (rare), include them
-    for (const p of allowedProducts) {
-      if (/^[0-9a-fA-F-]{36}$/.test(p) && !allowedProductIds.includes(p)) allowedProductIds.push(p)
+    const allowedProducts = [...new Set(allowedScopeRows.flatMap(r => denormMatchValues(r)))]
+    const allowedProductIds = allowedScopeRows.map(p => p.id)
+    const productIdToName = new Map<string, string>()
+    for (const p of allowedScopeRows) {
+      productIdToName.set(p.id, p.name)
+      productIdToName.set(p.name, p.name)
+      if (p.projectKey) productIdToName.set(p.projectKey, p.name)
+      productIdToName.set(denormalizedProductScopeValue(p), p.name)
     }
     const productScopeForIdColumns = [...new Set([...allowedProducts, ...allowedProductIds])]
 

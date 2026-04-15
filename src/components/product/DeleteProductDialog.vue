@@ -46,7 +46,7 @@ async function handleDelete() {
   deleting.value = true
   error.value = ''
 
-  const success = await productStore.deleteProduct(props.productName)
+  const success = await productStore.deleteProduct()
 
   deleting.value = false
 

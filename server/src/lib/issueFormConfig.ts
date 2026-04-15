@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
 import { db } from '../db'
 import { formConfigs } from '../db/schema'
+import { resolveProductByScope, whereDenormProductMatches } from './resolveProductScope'
 import { getDefaultConfig } from './builtInFields'
 import {
   DEFAULT_LEGACY_SLUG_TO_CANONICAL_ID,
@@ -280,10 +281,12 @@ export async function getAllowedIssueStatusesForProduct(product: string): Promis
   }
 }
 
-export async function mergeIssueFormConfigForProduct(product: string): Promise<{ fields: IssueFormFieldConfig[] }> {
+export async function mergeIssueFormConfigForProduct(productRef: string): Promise<{ fields: IssueFormFieldConfig[] }> {
   try {
+    const scopeRow = await resolveProductByScope(productRef)
+    if (!scopeRow) return mergeIssueFormConfig(null)
     const row = await db.query.formConfigs.findFirst({
-      where: and(eq(formConfigs.product, product), eq(formConfigs.entityType, 'issue')),
+      where: and(whereDenormProductMatches(formConfigs.product, scopeRow), eq(formConfigs.entityType, 'issue')),
     })
     return mergeIssueFormConfig(row?.config as { fields?: IssueFormFieldConfig[] } | undefined)
   } catch {

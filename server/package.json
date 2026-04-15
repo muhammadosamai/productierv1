@@ -9,6 +9,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:seed": "bun src/db/seed.ts",
+    "db:backfill-project-keys": "bun scripts/backfill-product-project-keys.ts",
+    "db:drop-products-name-unique": "bun scripts/drop-products-name-unique.ts",
     "db:seed-users": "bun src/db/seed-users.ts",
     "db:studio": "drizzle-kit studio"
   },

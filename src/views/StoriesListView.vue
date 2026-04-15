@@ -22,6 +22,8 @@ import AddStoryDialog from '@/components/backlog/AddStoryDialog.vue'
 import StoryDetailPanel from '@/components/backlog/StoryDetailPanel.vue'
 import FormBuilderDialog from '@/components/forms/FormBuilderDialog.vue'
 import type { Story, StoryStatus } from '@/types/backlog'
+import { toast } from 'vue-sonner'
+import { applyProductDeepLinkFromQuery, pickSingleQueryParam } from '@/utils/productDeepLink'
 
 interface TeamUser {
   id: string
@@ -148,6 +150,13 @@ function closeStoryPanel() {
   selectedStory.value = null
 }
 
+function openStoryFromQueryParam() {
+  const storyId = pickSingleQueryParam(route.query.story)
+  if (!storyId) return
+  const story = backlogStore.stories.find(s => s.id === storyId)
+  if (story) openStoryDetail(story)
+}
+
 async function onStoryUpdated() {
   await backlogStore.fetchStories()
   if (selectedStory.value) {
@@ -159,28 +168,51 @@ async function onStoryUpdated() {
 }
 
 onMounted(async () => {
+  await productStore.fetchProducts()
+  const link = applyProductDeepLinkFromQuery(
+    productStore.products,
+    productStore.activeProductId,
+    productStore.selectProductById,
+    productStore.selectProductByName,
+    route.query as Record<string, unknown>,
+  )
+  if (link.unknownProjectKey && productStore.products.length > 0) {
+    toast.error('Unknown project key in this link. Your product selection was not changed.')
+  }
   await backlogStore.fetchStories()
   fetchTeamMembers()
   loadUserSettings()
-  // Auto-open story from query param (e.g. navigating back from task detail)
-  const storyId = route.query.story as string | undefined
-  if (storyId) {
-    const story = backlogStore.stories.find(s => s.id === storyId)
-    if (story) openStoryDetail(story)
-  }
+  openStoryFromQueryParam()
 })
 
-watch(() => productStore.activeProductName, () => {
+watch(
+  () => [pickSingleQueryParam(route.query.projectKey), pickSingleQueryParam(route.query.product)].join('|'),
+  async (_v, oldVal) => {
+    if (oldVal === undefined) return
+    await productStore.fetchProducts()
+    const link = applyProductDeepLinkFromQuery(
+      productStore.products,
+      productStore.activeProductId,
+      productStore.selectProductById,
+      productStore.selectProductByName,
+      route.query as Record<string, unknown>,
+    )
+    if (link.unknownProjectKey && productStore.products.length > 0) {
+      toast.error('Unknown project key in this link. Your product selection was not changed.')
+    }
+    await backlogStore.fetchStories()
+    openStoryFromQueryParam()
+  },
+)
+
+watch(() => productStore.activeProductId, () => {
   backlogStore.fetchStories()
   fetchTeamMembers()
 })
 
 // Watch for story query param changes (e.g. back from task detail)
-watch(() => route.query.story, (storyId) => {
-  if (storyId) {
-    const story = backlogStore.stories.find(s => s.id === storyId as string)
-    if (story) openStoryDetail(story)
-  }
+watch(() => route.query.story, () => {
+  openStoryFromQueryParam()
 })
 
 // Status-filtered story groups
@@ -567,7 +599,7 @@ const storyActivitiesLoading = ref(false)
 async function fetchStoryActivities() {
   storyActivitiesLoading.value = true
   try {
-    const p = productStore.activeProductName
+    const p = productStore.activeProductScopeForApi
     const res = await fetch(`/api/activities?product=${encodeURIComponent(p)}&entityType=story&limit=50`)
     if (res.ok) {
       storyActivities.value = await res.json()
@@ -1116,7 +1148,7 @@ function formatDate(dateStr: string | null) {
                   @click="startEditing(story.id, 'title', story.title, $event)"
                 >
                   <template v-if="isEditing(story.id, 'title')">
-                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProductName" />
+                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProductScopeForApi" />
                     <component :is="typeIcon(story.type)" :size="16" class="shrink-0" :class="{
                       'text-blue-500': story.type === 'feature',
                       'text-red-500': story.type === 'bug',
@@ -1137,7 +1169,7 @@ function formatDate(dateStr: string | null) {
                     />
                   </template>
                   <template v-else>
-                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProductName" />
+                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProductScopeForApi" />
                     <component :is="typeIcon(story.type)" :size="16" class="shrink-0" :class="{
                       'text-blue-500': story.type === 'feature',
                       'text-red-500': story.type === 'bug',
@@ -1370,7 +1402,7 @@ function formatDate(dateStr: string | null) {
               <!-- Row 1: Type icon + status badge -->
               <div class="flex items-center justify-between mb-3.5">
                 <div class="flex items-center gap-2">
-                  <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProductName" />
+                  <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProductScopeForApi" />
                   <div class="w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center">
                     <component :is="typeIcon(story.type)" :size="18" class="text-gray-400" />
                   </div>

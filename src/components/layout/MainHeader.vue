@@ -3,6 +3,7 @@ import { Search, Settings, Moon, HelpCircle, Bell, ChevronDown, LogOut, BookText
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { useAuthStore } from '@/stores/auth'
 import { useProductStore } from '@/stores/products'
+import { findProductIndexByDenormRef } from '@/utils/productDeepLink'
 import type { SearchQuickItem, SearchQuickResponse } from '@/types/search'
 import { useRouter } from 'vue-router'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -44,12 +45,16 @@ function handleSearchSubmit() {
   showSuggestions.value = false
 }
 
+function productIndexFromSearchRef(ref: string): number {
+  return findProductIndexByDenormRef(productStore.products, ref)
+}
+
 async function handleSuggestionClick(item: SearchQuickItem) {
   if (item.product) {
-    let productIndex = productStore.products.findIndex(p => p.name === item.product)
+    let productIndex = productIndexFromSearchRef(item.product)
     if (productIndex < 0) {
       await productStore.fetchProducts()
-      productIndex = productStore.products.findIndex(p => p.name === item.product)
+      productIndex = productIndexFromSearchRef(item.product)
     }
     if (productIndex >= 0) {
       productStore.selectProduct(productIndex)

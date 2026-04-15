@@ -35,6 +35,8 @@ import {
 } from '@/lib/issueFormConfig'
 import { ISSUE_STATUS_ID_CLOSED, ISSUE_STATUS_ID_OPEN, issueStatusSemanticTone } from '@/lib/issueStatusId'
 import type { Issue, IssueStatus } from '@/types/issue'
+import { toast } from 'vue-sonner'
+import { applyProductDeepLinkFromQuery, pickSingleQueryParam } from '@/utils/productDeepLink'
 
 interface TeamUser {
   id: string
@@ -56,7 +58,7 @@ const showArchived = ref(false)
 
 const canIncludeArchived = computed(() => {
   const u = authStore.user
-  const p = productStore.activeProduct?.name
+  const p = productStore.activeProductScopeForApi
   if (!u || !p) return false
   if (u.role === 'super_admin') return true
   return productMembersStore.members.some(m => m.userId === u.id && m.role === 'admin')
@@ -69,7 +71,7 @@ function issueListFetchOpts() {
 }
 
 async function loadIssuesForProduct() {
-  const p = productStore.activeProduct?.name
+  const p = productStore.activeProductScopeForApi
   if (p && authStore.token) await productMembersStore.fetchMembers(p)
   if (p) await formConfigsStore.fetchConfig(p, 'issue')
   await issuesStore.fetchIssues(p || '', undefined, issueListFetchOpts())
@@ -93,7 +95,7 @@ const editValue = ref('')
 const inlineAssigneeSearch = ref('')
 
 const issueStatusFormMerged = computed(() => {
-  const p = productStore.activeProduct?.name
+  const p = productStore.activeProductScopeForApi
   const cfg = p ? formConfigsStore.getConfig(p, 'issue') : null
   return mergeIssueFormConfig(cfg ?? undefined)
 })
@@ -101,7 +103,7 @@ const issueStatusFormMerged = computed(() => {
 const issueStatusCatalog = computed(() => getIssueStatusCatalogFromMerged(issueStatusFormMerged.value))
 
 const issueStatusFormConfigRaw = computed(() => {
-  const p = productStore.activeProduct?.name
+  const p = productStore.activeProductScopeForApi
   if (!p) return null
   return formConfigsStore.getConfig(p, 'issue')
 })
@@ -199,6 +201,13 @@ function closeIssuePanel() {
   selectedIssue.value = null
 }
 
+function openIssueFromQueryParam() {
+  const issueId = pickSingleQueryParam(route.query.issue)
+  if (!issueId) return
+  const issue = issuesStore.issues.find(i => i.id === issueId)
+  if (issue) openIssueDetail(issue)
+}
+
 async function onIssueUpdated() {
   await loadIssuesForProduct()
   if (selectedIssue.value) {
@@ -210,18 +219,44 @@ async function onIssueUpdated() {
 }
 
 onMounted(async () => {
+  await productStore.fetchProducts()
+  const link = applyProductDeepLinkFromQuery(
+    productStore.products,
+    productStore.activeProductId,
+    productStore.selectProductById,
+    productStore.selectProductByName,
+    route.query as Record<string, unknown>,
+  )
+  if (link.unknownProjectKey && productStore.products.length > 0) {
+    toast.error('Unknown project key in this link. Your product selection was not changed.')
+  }
   await loadIssuesForProduct()
   fetchTeamMembers()
   loadUserSettings()
-  // Auto-open issue from query param
-  const issueId = route.query.issue as string | undefined
-  if (issueId) {
-    const issue = issuesStore.issues.find(i => i.id === issueId)
-    if (issue) openIssueDetail(issue)
-  }
+  openIssueFromQueryParam()
 })
 
-watch(() => productStore.activeProduct?.name, () => {
+watch(
+  () => [pickSingleQueryParam(route.query.projectKey), pickSingleQueryParam(route.query.product)].join('|'),
+  async (_v, oldVal) => {
+    if (oldVal === undefined) return
+    await productStore.fetchProducts()
+    const link = applyProductDeepLinkFromQuery(
+      productStore.products,
+      productStore.activeProductId,
+      productStore.selectProductById,
+      productStore.selectProductByName,
+      route.query as Record<string, unknown>,
+    )
+    if (link.unknownProjectKey && productStore.products.length > 0) {
+      toast.error('Unknown project key in this link. Your product selection was not changed.')
+    }
+    await loadIssuesForProduct()
+    openIssueFromQueryParam()
+  },
+)
+
+watch(() => productStore.activeProductId, () => {
   showArchived.value = false
   activeTab.value = 'all'
   resetAllColumnValueFilters()
@@ -230,15 +265,12 @@ watch(() => productStore.activeProduct?.name, () => {
 })
 
 watch(showArchived, async () => {
-  await issuesStore.fetchIssues(productStore.activeProduct?.name || '', undefined, issueListFetchOpts())
+  await issuesStore.fetchIssues(productStore.activeProductScopeForApi || '', undefined, issueListFetchOpts())
 })
 
 // Watch for issue query param changes
-watch(() => route.query.issue, (issueId) => {
-  if (issueId) {
-    const issue = issuesStore.issues.find(i => i.id === issueId as string)
-    if (issue) openIssueDetail(issue)
-  }
+watch(() => route.query.issue, () => {
+  openIssueFromQueryParam()
 })
 
 const issueStatusTabs = computed(() => issueStatusCatalog.value.map(e => e.id))
@@ -888,7 +920,7 @@ const issueActivitiesLoading = ref(false)
 async function fetchIssueActivities() {
   issueActivitiesLoading.value = true
   try {
-    const p = productStore.activeProduct?.name || ''
+    const p = productStore.activeProductScopeForApi || ''
     const res = await fetch(`/api/activities?product=${encodeURIComponent(p)}&entityType=issue&limit=50`)
     if (res.ok) {
       issueActivities.value = await res.json()
@@ -1846,7 +1878,7 @@ function formatDate(dateStr: string | null) {
                   @click="startEditing(issue.id, 'title', issue.title, $event)"
                 >
                   <template v-if="isEditing(issue.id, 'title')">
-                    <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProduct?.name || ''" />
+                    <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProductScopeForApi || ''" />
                     <Bug :size="16" class="shrink-0 text-red-500" />
                     <input
                       v-model="editValue"
@@ -1858,7 +1890,7 @@ function formatDate(dateStr: string | null) {
                     />
                   </template>
                   <template v-else>
-                    <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProduct?.name || ''" />
+                    <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProductScopeForApi || ''" />
                     <Bug :size="16" class="shrink-0 text-red-500" />
                     <span
                       class="text-sm font-medium truncate"
@@ -2138,7 +2170,7 @@ function formatDate(dateStr: string | null) {
               <!-- Row 1: Bug icon + type badge + severity badge -->
               <div class="flex items-center justify-between mb-3.5">
                 <div class="flex items-center gap-2">
-                  <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProduct?.name || ''" />
+                  <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProductScopeForApi || ''" />
                   <div class="w-9 h-9 rounded-lg bg-red-50 border border-red-100 flex items-center justify-center">
                     <Bug :size="18" class="text-red-500" />
                   </div>

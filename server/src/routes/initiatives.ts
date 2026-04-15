@@ -2,6 +2,11 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { initiatives, initiativeAttachments, users, productMembers } from '../db/schema'
 import { eq, and } from 'drizzle-orm'
+import {
+  resolveProductByScope,
+  whereDenormProductMatches,
+  denormalizedProductScopeValue,
+} from '../lib/resolveProductScope'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { randomUUID } from 'node:crypto'
@@ -51,8 +56,10 @@ async function userCanAccessInitiativeAttachment(
     columns: { product: true },
   })
   if (!ini) return false
+  const scopeRow = await resolveProductByScope(ini.product)
+  if (!scopeRow) return false
   const member = await db.query.productMembers.findFirst({
-    where: and(eq(productMembers.product, ini.product), eq(productMembers.userId, user.id)),
+    where: and(whereDenormProductMatches(productMembers.product, scopeRow), eq(productMembers.userId, user.id)),
   })
   return !!member
 }
@@ -65,16 +72,26 @@ export const initiativeRoutes = new Elysia({ prefix: '/api/initiatives' })
 
   // GET /api/initiatives
   .get('/', async ({ query }) => {
-    const product = query.product
+    const product = query.product?.trim()
+    const scopeRow = product ? await resolveProductByScope(product) : null
     return db.query.initiatives.findMany({
-      where: product ? eq(initiatives.product, product) : undefined,
+      where: scopeRow ? whereDenormProductMatches(initiatives.product, scopeRow) : undefined,
       orderBy: (items, { desc }) => [desc(items.createdAt)],
     })
   })
 
   // POST /api/initiatives
-  .post('/', async ({ body, jwt, headers }) => {
-    const [initiative] = await db.insert(initiatives).values(body).returning()
+  .post('/', async ({ body, jwt, headers, set }) => {
+    let values = { ...body } as typeof body
+    if (body.product != null && String(body.product).trim() !== '') {
+      const sr = await resolveProductByScope(String(body.product))
+      if (!sr) {
+        set.status = 404
+        return { error: 'Product not found' }
+      }
+      values = { ...values, product: denormalizedProductScopeValue(sr) }
+    }
+    const [initiative] = await db.insert(initiatives).values(values).returning()
     const user = await getUserFromHeader(jwt.verify, headers)
     logActivity({
       product: initiative!.product,

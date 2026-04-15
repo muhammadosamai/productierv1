@@ -2,6 +2,7 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { favorites, users } from '../db/schema'
 import { eq, and } from 'drizzle-orm'
+import { resolveProductByScope, whereDenormProductMatches, denormalizedProductScopeValue } from '../lib/resolveProductScope'
 import { jwt } from '@elysiajs/jwt'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
@@ -24,13 +25,19 @@ export const favoriteRoutes = new Elysia({ prefix: '/api/favorites' })
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
-    const productId = query.productId
+    const productId = query.productId?.trim()
     if (!productId) { set.status = 400; return { error: 'productId is required' } }
+
+    const scopeRow = await resolveProductByScope(productId)
+    if (!scopeRow) {
+      set.status = 404
+      return { error: 'Product not found' }
+    }
 
     return db.select().from(favorites).where(
       and(
         eq(favorites.userId, user.id),
-        eq(favorites.productId, productId),
+        whereDenormProductMatches(favorites.productId, scopeRow),
       )
     )
   }, {
@@ -57,11 +64,14 @@ export const favoriteRoutes = new Elysia({ prefix: '/api/favorites' })
       return existing[0]
     }
 
+    const sr = await resolveProductByScope(body.productId)
+    const productId = sr ? denormalizedProductScopeValue(sr) : body.productId
+
     const [created] = await db.insert(favorites).values({
       userId: user.id,
       entityType: body.entityType,
       entityId: body.entityId,
-      productId: body.productId,
+      productId,
     }).returning()
 
     return created

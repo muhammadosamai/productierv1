@@ -43,7 +43,7 @@ const periodOptions = [
   { value: 365, label: 'Last year' },
 ]
 
-provide('metricsProduct', () => productStore.activeProduct?.name || '')
+provide('metricsProduct', () => productStore.activeProductScopeForApi || '')
 provide('metricsPeriod', period)
 </script>
 

@@ -19,6 +19,7 @@ import draggable from 'vuedraggable'
 import DeliveryTimeline from '@/components/delivery/DeliveryTimeline.vue'
 import DeliveryList from '@/components/delivery/DeliveryList.vue'
 import TaskDetailPanel from '@/components/delivery/TaskDetailPanel.vue'
+import { richTextPreviewText } from '@/lib/richText'
 import { toast } from 'vue-sonner'
 
 const route = useRoute()
@@ -231,9 +232,9 @@ async function onColumnChange(colKey: string, evt: any) {
   }
 }
 
-// Timeline drag: update task due date
-async function onTaskDueChange(taskId: string, dueAt: string) {
-  await backlogStore.updateTask(taskId, { dueAt })
+// Timeline drag: update task end date (calendar)
+async function onTaskDueChange(taskId: string, endDateWire: string) {
+  await backlogStore.updateTask(taskId, { endDate: endDateWire || null })
   if (delivery.value) {
     delivery.value = await deliveriesStore.fetchDelivery(delivery.value.id)
   }
@@ -853,7 +854,7 @@ function taskShortId(task: Task) {
                       <h4 class="text-sm font-semibold text-gray-900 line-clamp-2 leading-snug mb-1">{{ task.title }}</h4>
 
                       <!-- Row 3: Description -->
-                      <p v-if="task.description" class="text-xs text-gray-400 line-clamp-2 mb-2 leading-relaxed">{{ task.description }}</p>
+                      <p v-if="task.description" class="text-xs text-gray-400 line-clamp-2 mb-2 leading-relaxed">{{ richTextPreviewText(task.description) }}</p>
                       <div v-else class="mb-1"></div>
 
                       <!-- Row 4: Tags -->

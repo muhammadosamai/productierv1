@@ -1,6 +1,7 @@
 import { Elysia } from 'elysia'
 import { db } from '../db'
 import { users, tasks, stories, initiatives, deliveries, productMembers, taskStatusHistory } from '../db/schema'
+import { effectiveTaskDeadlineUtcDay, taskCompletedOnOrBeforeDeadline } from '../lib/taskDates'
 
 // Helper: get date N days ago
 function daysAgo(n: number) { return new Date(Date.now() - n * 86400000) }
@@ -92,9 +93,11 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
     const inProgressCount = ft.filter(t => t.status === 'in_progress').length
     const inReviewCount = ft.filter(t => t.status === 'in_review').length
 
-    // On-time completion: tasks completed before/on dueAt
-    const tasksWithDue = ft.filter(t => t.completedAt && t.dueAt)
-    const onTimeCount = tasksWithDue.filter(t => new Date(t.completedAt!) <= new Date(t.dueAt!)).length
+    // On-time completion: completed before/on effective deadline (endDate or legacy dueAt)
+    const tasksWithDue = ft.filter(t => t.completedAt && effectiveTaskDeadlineUtcDay(t))
+    const onTimeCount = tasksWithDue.filter(t =>
+      taskCompletedOnOrBeforeDeadline(new Date(t.completedAt!), effectiveTaskDeadlineUtcDay(t)!),
+    ).length
     const onTimeRate = tasksWithDue.length > 0 ? Math.round((onTimeCount / tasksWithDue.length) * 100) : 100
 
     // Sparkline: tasks completed per week for last 8 weeks
@@ -449,10 +452,16 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
     }))
 
     // On-time completion
-    const tasksWithDue = ft.filter(t => t.completedAt && t.dueAt)
-    const onTimeCount = tasksWithDue.filter(t => new Date(t.completedAt!) <= new Date(t.dueAt!)).length
+    const tasksWithDue = ft.filter(t => t.completedAt && effectiveTaskDeadlineUtcDay(t))
+    const onTimeCount = tasksWithDue.filter(t =>
+      taskCompletedOnOrBeforeDeadline(new Date(t.completedAt!), effectiveTaskDeadlineUtcDay(t)!),
+    ).length
     const onTimeRate = tasksWithDue.length > 0 ? Math.round((onTimeCount / tasksWithDue.length) * 100) : 100
-    const overdueCount = ft.filter(t => t.status === 'overdue' || (t.dueAt && !t.completedAt && new Date(t.dueAt) < new Date())).length
+    const overdueCount = ft.filter(t => {
+      if (t.status === 'overdue') return true
+      const dl = effectiveTaskDeadlineUtcDay(t)
+      return !!(dl && !t.completedAt && dl.getTime() < Date.now())
+    }).length
 
     // Scope change: tasks created after their delivery started
     let scopeChangeCount = 0
@@ -490,8 +499,11 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
       // Review load
       const reviewTasks = ft.filter(t => t.status === 'in_review' && t.reviewerUserIds && t.reviewerUserIds.includes(u.id))
 
-      // Overdue
-      const overdueTasks = userTasks.filter(t => t.dueAt && !t.completedAt && new Date(t.dueAt) < new Date() && t.status !== 'done')
+      // Overdue (endDate or legacy dueAt)
+      const overdueTasks = userTasks.filter(t => {
+        const dl = effectiveTaskDeadlineUtcDay(t)
+        return !!(dl && !t.completedAt && dl.getTime() < now && t.status !== 'done')
+      })
 
       return {
         id: u.id, name: u.name, avatar: u.avatar, role: u.role,
@@ -501,7 +513,15 @@ export const metricsRoutes = new Elysia({ prefix: '/api/metrics' })
         byStatus,
         reviewLoad: reviewTasks.length,
         overdueCount: overdueTasks.length,
-        overdueTasks: overdueTasks.map(t => ({ taskId: t.id, title: t.title, dueAt: t.dueAt, daysOverdue: Math.round(((now - new Date(t.dueAt!).getTime()) / 86400000) * 10) / 10 })),
+        overdueTasks: overdueTasks.map(t => {
+          const dl = effectiveTaskDeadlineUtcDay(t)!
+          return {
+            taskId: t.id,
+            title: t.title,
+            dueAt: dl.toISOString(),
+            daysOverdue: Math.round(((now - dl.getTime()) / 86400000) * 10) / 10,
+          }
+        }),
         completionRate: userTasks.length > 0 ? Math.round((userTasks.filter(t => t.status === 'done').length / userTasks.length) * 100) : 0,
       }
     }).filter(u => u.totalTasks > 0).sort((a, b) => b.wipCount - a.wipCount)

@@ -85,3 +85,59 @@ export function tiptapDocToPlainComment(doc: JSONContent): string {
   }
   return parts.join('\n')
 }
+
+function hasHtmlTag(input: string): boolean {
+  return /<[a-z][\s\S]*>/i.test(input)
+}
+
+export function looksLikeLegacyPlainComment(input = ''): boolean {
+  return !hasHtmlTag(input)
+}
+
+function isDefaultParagraphNode(node: JSONContent): boolean {
+  if (node.type !== 'paragraph') return false
+  if (!node.content?.length) return true
+  for (const child of node.content) {
+    if (child.type === 'text') {
+      if (child.marks?.length) return false
+      continue
+    }
+    if (child.type === 'hardBreak') continue
+    if (child.type === 'mention') continue
+    return false
+  }
+  return true
+}
+
+export function commentDocUsesRichFeatures(doc: JSONContent): boolean {
+  if (doc.type !== 'doc') return false
+  const blocks = doc.content ?? []
+  if (blocks.length > 1) return true
+  const first = blocks[0]
+  if (!first) return false
+  return !isDefaultParagraphNode(first)
+}
+
+function normalizeEmptyCommentHtml(html: string): string {
+  const raw = html.trim()
+  if (!raw) return ''
+  const textOnly = raw.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim()
+  return textOnly ? raw : ''
+}
+
+export function serializeCommentEditor(doc: JSONContent, html: string): string {
+  if (!commentDocUsesRichFeatures(doc)) {
+    return tiptapDocToPlainComment(doc)
+  }
+  return normalizeEmptyCommentHtml(html)
+}
+
+export function hydrateCommentEditorContent(
+  stored: string,
+  users: MentionUser[],
+): JSONContent | string {
+  if (looksLikeLegacyPlainComment(stored)) {
+    return plainCommentToTiptapDoc(stored, users)
+  }
+  return stored
+}

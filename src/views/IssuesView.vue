@@ -36,6 +36,7 @@ import {
 import { ISSUE_STATUS_ID_CLOSED, ISSUE_STATUS_ID_OPEN, issueStatusSemanticTone } from '@/lib/issueStatusId'
 import type { Issue, IssueStatus } from '@/types/issue'
 import { ISSUE_TYPES, ISSUE_TYPE_ORDER } from '@shared/issueTypes'
+import { richTextPreviewText } from '@/lib/richText'
 
 interface TeamUser {
   id: string
@@ -305,6 +306,8 @@ function normalizeIssueFilterToken(v: unknown): string {
     .toLowerCase()
 }
 
+const ISSUE_TYPE_FILTER_IDS = ISSUE_TYPES.map(v => normalizeIssueFilterToken(v))
+
 /** Status column filter: canonical catalog ids to include in table/card lists. */
 const statusColumnIncludedIds = ref<Set<string>>(new Set())
 const showStatusColumnFilter = ref(false)
@@ -318,11 +321,14 @@ watch(
   { immediate: true },
 )
 
-const severityColumnIncludedIds = ref<Set<string>>(new Set([...ISSUE_SEVERITY_FILTER_IDS]))
+const severityColumnIncludedIds = ref<Set<string>>(new Set(ISSUE_SEVERITY_FILTER_IDS))
 const showSeverityColumnFilter = ref(false)
 
-const priorityColumnIncludedIds = ref<Set<string>>(new Set([...ISSUE_PRIORITY_FILTER_IDS]))
+const priorityColumnIncludedIds = ref<Set<string>>(new Set(ISSUE_PRIORITY_FILTER_IDS))
 const showPriorityColumnFilter = ref(false)
+
+const typeColumnIncludedIds = ref<Set<string>>(new Set(ISSUE_TYPE_FILTER_IDS))
+const showTypeColumnFilter = ref(false)
 
 const statusColumnFilterActive = computed(() => {
   const cat = issueStatusCatalog.value
@@ -338,6 +344,11 @@ const severityColumnFilterActive = computed(() => {
 const priorityColumnFilterActive = computed(() => {
   const inc = priorityColumnIncludedIds.value
   return inc.size > 0 && inc.size < ISSUE_PRIORITY_FILTER_IDS.length
+})
+
+const typeColumnFilterActive = computed(() => {
+  const inc = typeColumnIncludedIds.value
+  return inc.size > 0 && inc.size < ISSUE_TYPE_FILTER_IDS.length
 })
 
 function isStatusIncludedForFilter(id: string) {
@@ -381,7 +392,7 @@ function toggleSeverityColumnFilter(id: string, evt?: Event) {
 }
 
 function selectAllSeverityColumnFilters() {
-  severityColumnIncludedIds.value = new Set([...ISSUE_SEVERITY_FILTER_IDS])
+  severityColumnIncludedIds.value = new Set(ISSUE_SEVERITY_FILTER_IDS)
 }
 
 function isPriorityIncludedForFilter(id: string) {
@@ -406,19 +417,47 @@ function togglePriorityColumnFilter(id: string, evt?: Event) {
 }
 
 function selectAllPriorityColumnFilters() {
-  priorityColumnIncludedIds.value = new Set([...ISSUE_PRIORITY_FILTER_IDS])
+  priorityColumnIncludedIds.value = new Set(ISSUE_PRIORITY_FILTER_IDS)
+}
+
+function isTypeIncludedForFilter(id: string) {
+  return typeColumnIncludedIds.value.has(normalizeIssueFilterToken(id))
+}
+
+function toggleTypeColumnFilter(id: string, evt?: Event) {
+  const token = normalizeIssueFilterToken(id)
+  const input = evt?.target as HTMLInputElement | undefined
+  const wantChecked =
+    input && input.type === 'checkbox' ? input.checked : !typeColumnIncludedIds.value.has(token)
+  const next = new Set(typeColumnIncludedIds.value)
+  if (wantChecked) {
+    next.add(token)
+  } else {
+    if (next.size <= 1) {
+      if (input) input.checked = true
+      return
+    }
+    next.delete(token)
+  }
+  typeColumnIncludedIds.value = next
+}
+
+function selectAllTypeColumnFilters() {
+  typeColumnIncludedIds.value = new Set(ISSUE_TYPE_FILTER_IDS)
 }
 
 function closeAllColumnFilterMenus() {
   showStatusColumnFilter.value = false
   showSeverityColumnFilter.value = false
   showPriorityColumnFilter.value = false
+  showTypeColumnFilter.value = false
 }
 
 function resetAllColumnValueFilters() {
   selectAllStatusColumnFilters()
   selectAllSeverityColumnFilters()
   selectAllPriorityColumnFilters()
+  selectAllTypeColumnFilters()
 }
 
 function toggleStatusFilterPanel() {
@@ -451,6 +490,16 @@ function togglePriorityFilterPanel() {
   }
 }
 
+function toggleTypeFilterPanel() {
+  if (showTypeColumnFilter.value) {
+    showTypeColumnFilter.value = false
+  } else {
+    closeAllColumnFilterMenus()
+    showTypeColumnFilter.value = true
+    showColumnCustomizer.value = false
+  }
+}
+
 function toggleColumnCustomizerPanel() {
   showColumnCustomizer.value = !showColumnCustomizer.value
   if (showColumnCustomizer.value) closeAllColumnFilterMenus()
@@ -475,6 +524,10 @@ const columnFilteredIssues = computed(() => {
   const includedPriorities = priorityColumnIncludedIds.value
   if (includedPriorities.size > 0 && includedPriorities.size < ISSUE_PRIORITY_FILTER_IDS.length) {
     list = list.filter(issue => includedPriorities.has(normalizeIssueFilterToken(issue.priority)))
+  }
+  const includedTypes = typeColumnIncludedIds.value
+  if (includedTypes.size > 0 && includedTypes.size < ISSUE_TYPE_FILTER_IDS.length) {
+    list = list.filter(issue => includedTypes.has(normalizeIssueFilterToken(issue.type)))
   }
   return list
 })
@@ -684,6 +737,9 @@ const severityFilterInTableHeader = computed(
 const priorityFilterInTableHeader = computed(
   () => viewMode.value === 'table' && visibleColumns.value.some(c => c.field === 'priority'),
 )
+const typeFilterInTableHeader = computed(
+  () => viewMode.value === 'table' && visibleColumns.value.some(c => c.field === 'type'),
+)
 
 /** Fixed column for row actions (delete / reopen); must match grid cell count or buttons wrap to a new row. */
 const TABLE_ROW_ACTIONS_COL_PX = 80
@@ -844,7 +900,11 @@ function onColumnFilterClickOutside(event: MouseEvent) {
 }
 
 const anyColumnFilterMenuOpen = computed(
-  () => showStatusColumnFilter.value || showSeverityColumnFilter.value || showPriorityColumnFilter.value,
+  () =>
+    showStatusColumnFilter.value ||
+    showSeverityColumnFilter.value ||
+    showPriorityColumnFilter.value ||
+    showTypeColumnFilter.value,
 )
 
 watch(anyColumnFilterMenuOpen, (open) => {
@@ -1496,6 +1556,60 @@ function formatDate(dateStr: string | null) {
                 </div>
               </Transition>
             </div>
+            <div
+              v-if="!typeFilterInTableHeader"
+              class="relative issues-column-filter-container"
+            >
+              <button
+                type="button"
+                class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors cursor-pointer"
+                :class="showTypeColumnFilter || typeColumnFilterActive
+                  ? 'bg-red-500/10 text-red-500'
+                  : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'"
+                title="Filter by type"
+                @click.stop="toggleTypeFilterPanel()"
+              >
+                <Filter :size="15" />
+              </button>
+              <Transition
+                enter-active-class="transition ease-out duration-150"
+                enter-from-class="opacity-0 scale-95 translate-y-1"
+                enter-to-class="opacity-100 scale-100 translate-y-0"
+                leave-active-class="transition ease-in duration-100"
+                leave-from-class="opacity-100 scale-100 translate-y-0"
+                leave-to-class="opacity-0 scale-95 translate-y-1"
+              >
+                <div
+                  v-if="showTypeColumnFilter && !typeFilterInTableHeader"
+                  class="absolute right-0 top-full z-50 mt-2 w-56 max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white py-2 shadow-xl"
+                  @click.stop
+                >
+                  <div class="flex items-center justify-between border-b border-gray-100 px-3 pb-2">
+                    <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Type</span>
+                    <button
+                      type="button"
+                      class="cursor-pointer text-[11px] text-red-500 hover:underline"
+                      @click="selectAllTypeColumnFilters"
+                    >
+                      All
+                    </button>
+                  </div>
+                  <label
+                    v-for="opt in ISSUE_TYPES"
+                    :key="opt"
+                    class="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50"
+                  >
+                    <input
+                      type="checkbox"
+                      class="rounded border-gray-300 text-red-500 focus:ring-red-500"
+                      :checked="isTypeIncludedForFilter(opt)"
+                      @change="toggleTypeColumnFilter(opt, $event)"
+                    />
+                    <span class="text-sm text-gray-800">{{ typeLabel(opt) }}</span>
+                  </label>
+                </div>
+              </Transition>
+            </div>
           </div>
 
           <!-- Column Customizer -->
@@ -1624,7 +1738,7 @@ function formatDate(dateStr: string | null) {
             >
               <div
                 class="flex min-w-0 items-center gap-0.5"
-                :class="['status', 'severity', 'priority'].includes(col.field) ? 'flex-1' : ''"
+                :class="['status', 'severity', 'priority', 'type'].includes(col.field) ? 'flex-1' : ''"
               >
                 <button
                   class="flex min-w-0 items-center gap-1 text-[11px] font-medium tracking-wide uppercase cursor-pointer select-none transition-colors group/col"
@@ -1798,6 +1912,60 @@ function formatDate(dateStr: string | null) {
                           @change="togglePriorityColumnFilter(pri, $event)"
                         />
                         <span class="text-sm text-gray-800">{{ priorityLabel(pri) }}</span>
+                      </label>
+                    </div>
+                  </Transition>
+                </div>
+                <div
+                  v-if="col.field === 'type'"
+                  class="relative shrink-0 issues-column-filter-container"
+                >
+                  <button
+                    type="button"
+                    class="rounded-md p-1 transition-colors cursor-pointer"
+                    :class="showTypeColumnFilter || typeColumnFilterActive
+                      ? 'bg-red-500/10 text-red-500'
+                      : 'text-gray-300 hover:bg-gray-100 hover:text-gray-500'"
+                    title="Filter by type"
+                    @click.stop="toggleTypeFilterPanel()"
+                  >
+                    <Filter :size="14" />
+                  </button>
+                  <Transition
+                    enter-active-class="transition ease-out duration-150"
+                    enter-from-class="opacity-0 scale-95 translate-y-1"
+                    enter-to-class="opacity-100 scale-100 translate-y-0"
+                    leave-active-class="transition ease-in duration-100"
+                    leave-from-class="opacity-100 scale-100 translate-y-0"
+                    leave-to-class="opacity-0 scale-95 translate-y-1"
+                  >
+                    <div
+                      v-if="showTypeColumnFilter && typeFilterInTableHeader"
+                      class="absolute left-0 top-full z-50 mt-1.5 w-56 max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white py-2 shadow-xl"
+                      @click.stop
+                    >
+                      <div class="flex items-center justify-between border-b border-gray-100 px-3 pb-2">
+                        <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Type</span>
+                        <button
+                          type="button"
+                          class="cursor-pointer text-[11px] text-red-500 hover:underline"
+                          @click="selectAllTypeColumnFilters"
+                        >
+                          All
+                        </button>
+                      </div>
+                      <label
+                        v-for="opt in ISSUE_TYPES"
+                        :key="opt"
+                        class="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50"
+                      >
+                        <input
+                          type="checkbox"
+                          class="rounded border-gray-300 text-red-500 focus:ring-red-500"
+                          :checked="isTypeIncludedForFilter(opt)"
+                          @change="toggleTypeColumnFilter(opt, $event)"
+                        />
+                        <span class="text-sm text-gray-800">{{ typeLabel(opt) }}</span>
                       </label>
                     </div>
                   </Transition>
@@ -2170,7 +2338,7 @@ function formatDate(dateStr: string | null) {
               </div>
 
               <!-- Description -->
-              <p v-if="issue.description" class="text-sm text-gray-500 line-clamp-2 mb-4 leading-relaxed">{{ issue.description }}</p>
+              <p v-if="issue.description" class="text-sm text-gray-500 line-clamp-2 mb-4 leading-relaxed">{{ richTextPreviewText(issue.description) }}</p>
               <p v-else class="text-sm text-gray-400 italic mb-4">No description</p>
 
               <!-- Priority + Status -->

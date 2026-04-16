@@ -13,7 +13,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
+import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import {
   Select,
   SelectContent,
@@ -90,10 +90,10 @@ const ownerAvatar = ref<string | null>(null)
 const submitting = ref(false)
 const submittingWithBreakdown = ref(false)
 
-// Sub-tasks for breakdown
+// Optional story breakdown: titles become tasks on the new story
 const showBreakdown = ref(false)
-const subtasks = ref<{ title: string }[]>([])
-const newSubtaskTitle = ref('')
+const breakdownTasks = ref<{ title: string }[]>([])
+const newTaskTitle = ref('')
 
 // Owner search
 const ownerSearchQuery = ref('')
@@ -305,22 +305,28 @@ function formatDisplayDate(iso: string): string {
   return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
 }
 
-// ---- Subtask methods ----
-function addSubtask() {
-  if (!newSubtaskTitle.value.trim()) return
-  subtasks.value.push({ title: newSubtaskTitle.value.trim() })
-  newSubtaskTitle.value = ''
+// ---- Breakdown task rows (created as story tasks on submit) ----
+function addBreakdownTask() {
+  if (!newTaskTitle.value.trim()) return
+  breakdownTasks.value.push({ title: newTaskTitle.value.trim() })
+  newTaskTitle.value = ''
 }
 
-function removeSubtask(index: number) {
-  subtasks.value.splice(index, 1)
+function removeBreakdownTask(index: number) {
+  breakdownTasks.value.splice(index, 1)
 }
 
-function onSubtaskKeydown(e: KeyboardEvent) {
+function onNewTaskKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter') {
     e.preventDefault()
-    addSubtask()
+    addBreakdownTask()
   }
+}
+
+function cancelBreakdown() {
+  showBreakdown.value = false
+  breakdownTasks.value = []
+  newTaskTitle.value = ''
 }
 
 // Reset form when dialog closes
@@ -344,8 +350,8 @@ function resetForm() {
   initiativeSearchQuery.value = ''
   showInitiativeDropdown.value = false
   showBreakdown.value = false
-  subtasks.value = []
-  newSubtaskTitle.value = ''
+  breakdownTasks.value = []
+  newTaskTitle.value = ''
 }
 
 watch(open, (val) => {
@@ -369,8 +375,8 @@ async function handleSubmit(withBreakdown = false) {
 
   const created = await backlogStore.createStory({
     title: title.value.trim(),
-    description: description.value.trim() || undefined,
-    acceptanceCriteria: acceptanceCriteria.value.trim() || undefined,
+    description: description.value || undefined,
+    acceptanceCriteria: acceptanceCriteria.value || undefined,
     type: type.value,
     priority: priority.value,
     product: activeProduct.name,
@@ -380,10 +386,10 @@ async function handleSubmit(withBreakdown = false) {
     ownerAvatar: ownerAvatar.value || undefined,
   })
 
-  // Create subtasks if any
-  if (created && subtasks.value.length > 0) {
-    for (const st of subtasks.value) {
-      await backlogStore.createTask(created.id, { title: st.title })
+  // Create breakdown rows as story tasks
+  if (created && breakdownTasks.value.length > 0) {
+    for (const t of breakdownTasks.value) {
+      await backlogStore.createTask(created.id, { title: t.title })
     }
   }
 
@@ -401,8 +407,8 @@ async function handleSubmit(withBreakdown = false) {
     description.value = ''
     acceptanceCriteria.value = ''
     showBreakdown.value = true
-    subtasks.value = []
-    newSubtaskTitle.value = ''
+    breakdownTasks.value = []
+    newTaskTitle.value = ''
     // We could navigate to the story, but for now just close
     open.value = false
   } else {
@@ -438,20 +444,18 @@ async function handleSubmit(withBreakdown = false) {
         <!-- Description -->
         <div class="space-y-1.5">
           <label class="text-sm font-medium text-gray-700">Description</label>
-          <Textarea
+          <RichTextEditor
             v-model="description"
             placeholder="Describe the requirement or feature..."
-            :rows="3"
           />
         </div>
 
         <!-- Acceptance Criteria -->
         <div class="space-y-1.5">
           <label class="text-sm font-medium text-gray-700">Acceptance Criteria</label>
-          <Textarea
+          <RichTextEditor
             v-model="acceptanceCriteria"
             placeholder="Define the conditions that must be met..."
-            :rows="3"
           />
         </div>
 
@@ -767,45 +771,45 @@ async function handleSubmit(withBreakdown = false) {
           <div class="flex items-center justify-between">
             <label class="text-sm font-medium text-gray-700 flex items-center gap-1.5">
               <ListTodo :size="14" class="text-gray-400" />
-              Sub-tasks
+              Tasks
             </label>
-            <button type="button" class="text-xs text-gray-400 hover:text-gray-600" @click="showBreakdown = false; subtasks = []">
+            <button type="button" class="text-xs text-gray-400 hover:text-gray-600" @click="cancelBreakdown">
               Cancel
             </button>
           </div>
 
-          <!-- Existing subtasks -->
-          <div v-if="subtasks.length > 0" class="space-y-1">
+          <!-- Existing tasks -->
+          <div v-if="breakdownTasks.length > 0" class="space-y-1">
             <div
-              v-for="(st, idx) in subtasks"
+              v-for="(t, idx) in breakdownTasks"
               :key="idx"
               class="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-lg group"
             >
               <div class="w-4 h-4 rounded border border-gray-300 shrink-0"></div>
-              <span class="text-sm text-gray-700 flex-1">{{ st.title }}</span>
-              <button type="button" class="text-gray-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all shrink-0" @click="removeSubtask(idx)">
+              <span class="text-sm text-gray-700 flex-1">{{ t.title }}</span>
+              <button type="button" class="text-gray-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all shrink-0" @click="removeBreakdownTask(idx)">
                 <Trash2 :size="12" />
               </button>
             </div>
           </div>
 
-          <!-- Add subtask input -->
+          <!-- Add task input -->
           <div class="flex items-center gap-2">
             <div class="flex items-center gap-2 flex-1 border border-dashed border-gray-200 rounded-lg px-3 py-1.5">
               <Plus :size="14" class="text-gray-400 shrink-0" />
               <input
-                v-model="newSubtaskTitle"
+                v-model="newTaskTitle"
                 type="text"
-                placeholder="Add a sub-task..."
+                placeholder="Add a task…"
                 class="flex-1 text-sm bg-transparent outline-none placeholder:text-gray-400"
-                @keydown="onSubtaskKeydown"
+                @keydown="onNewTaskKeydown"
               />
             </div>
             <button
-              v-if="newSubtaskTitle.trim()"
+              v-if="newTaskTitle.trim()"
               type="button"
               class="text-xs font-medium text-[#4857FE] hover:text-[#3E4BDE] px-2 py-1.5 rounded transition-colors"
-              @click="addSubtask"
+              @click="addBreakdownTask"
             >
               Add
             </button>

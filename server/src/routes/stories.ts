@@ -6,6 +6,9 @@ import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
+import { sanitizeCommentHtml } from '../lib/sanitizeCommentHtml'
+import { previewWithEllipsis } from '../lib/richTextPreview'
+import { serializeParentTaskRow } from '../lib/taskDates'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
@@ -76,7 +79,7 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
   // GET /api/stories
   .get('/', async ({ query }) => {
     const product = query.product
-    return db.query.stories.findMany({
+    const storyRows = await db.query.stories.findMany({
       where: product ? eq(stories.product, product) : undefined,
       orderBy: (s, { desc }) => [desc(s.createdAt)],
       with: {
@@ -106,6 +109,10 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
         comments: { with: { user: true } },
       },
     })
+    return storyRows.map(s => ({
+      ...s,
+      tasks: (s.tasks || []).map(t => serializeParentTaskRow(t as Record<string, unknown>)),
+    }))
   })
 
   // POST /api/stories
@@ -196,7 +203,10 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
       },
     })
     if (!story) { set.status = 404; return { error: 'Story not found' } }
-    return story
+    return {
+      ...story,
+      tasks: (story.tasks || []).map(t => serializeParentTaskRow(t as Record<string, unknown>)),
+    }
   })
 
   // PUT /api/stories/:id
@@ -204,15 +214,30 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
     const old = await db.query.stories.findFirst({ where: eq(stories.id, id) })
     if (!old) { set.status = 404; return { error: 'Story not found' } }
 
-    // Strip estimate & delivery — these are computed from child tasks
-    const { estimate: _est, delivery: _del, ...updateFields } = body
+    // Strip delivery — not updated via this payload shape
+    const { delivery: _del, ...updateFields } = body
+
+    if ('estimate' in updateFields) {
+      const raw = updateFields.estimate
+      if (raw === null || raw === undefined || String(raw).trim() === '') {
+        updateFields.estimate = null
+      } else {
+        const n = Number.parseFloat(String(raw).trim().replace(/,/g, '.'))
+        if (!Number.isFinite(n) || n <= 0) {
+          set.status = 400
+          return { error: 'Estimate hours must be a positive number (decimals allowed), or empty to clear' }
+        }
+        updateFields.estimate = String(n)
+      }
+    }
+
     const [updated] = await db.update(stories)
       .set({ ...updateFields, updatedAt: new Date() })
       .where(eq(stories.id, id))
       .returning()
 
     const user = await getUserFromHeader(jwt.verify, headers)
-    const changes = computeChanges(old, body, ['title', 'status', 'priority', 'type', 'owner', 'initiative', 'description'])
+    const changes = computeChanges(old, body, ['title', 'status', 'priority', 'type', 'owner', 'initiative', 'description', 'estimate'])
     if (changes.length > 0) {
       logActivity({
         product: updated!.product,
@@ -295,20 +320,25 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
   .post('/:id/comments', async ({ params: { id }, body, jwt, headers, set }) => {
     const user = await getUserFromHeader(jwt.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+    const content = sanitizeCommentHtml(body.content)
+    if (!content.trim()) {
+      set.status = 400
+      return { error: 'Comment content is required' }
+    }
 
     const story = await db.query.stories.findFirst({ where: eq(stories.id, id) })
 
     const [comment] = await db.insert(storyComments).values({
       storyId: id,
       userId: user.id,
-      content: body.content,
+      content,
     }).returning()
 
     // Notify story owner about the comment
     if (story?.owner) {
       const ownerUser = await db.query.users.findFirst({ where: eq(users.name, story.owner) })
       if (ownerUser) {
-        const preview = body.content.length > 100 ? body.content.slice(0, 100) + '...' : body.content
+        const preview = previewWithEllipsis(content, 100)
         sendNotificationIfEnabled({
           targetUserId: ownerUser.id,
           actorUserId: user.id,

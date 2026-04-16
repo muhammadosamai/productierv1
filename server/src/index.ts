@@ -23,10 +23,15 @@ import { issueRoutes } from './routes/issues'
 import { formConfigRoutes, customFieldRoutes } from './routes/formConfigs'
 import { searchRoutes } from './routes/search'
 import { startDeadlineReminder } from './services/deadlineReminder'
+import { ensureTaskScheduleColumns } from './lib/ensureTaskScheduleColumns'
 
 const corsOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean)
   : ['http://localhost:5173', 'https://productier.wonderbyte.io']
+
+await ensureTaskScheduleColumns().catch((err) => {
+  console.error('[Startup] ensureTaskScheduleColumns failed (tasks.start_date / end_date):', err)
+})
 
 const app = new Elysia()
   .use(cors({

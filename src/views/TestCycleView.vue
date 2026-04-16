@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft, Loader2, Plus, FlaskConical,
   CalendarDays, Link2, Trash2, X, Pencil, Check,
-  LayoutList, ChevronDown, User,
+  LayoutList,
 } from 'lucide-vue-next'
 import { useTestCyclesStore } from '@/stores/testCycles'
 import { useBacklogStore } from '@/stores/backlog'
@@ -26,10 +26,11 @@ import {
   issueStatusSemanticTone,
 } from '@/lib/issueStatusId'
 import draggable from 'vuedraggable'
-import type { TestCycle, IssueSeverity, IssueStatus } from '@/types/testCycle'
-import type { Issue, CreateIssuePayload } from '@/types/issue'
+import type { TestCycle, IssueStatus } from '@/types/testCycle'
+import type { Issue } from '@/types/issue'
 import { toast } from 'vue-sonner'
 import IssueDetailPanel from '@/components/issue/IssueDetailPanel.vue'
+import CreateIssueDialog from '@/components/issue/CreateIssueDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -60,11 +61,7 @@ const editTitle = ref('')
 const savingTitle = ref(false)
 const titleInputRef = ref<HTMLInputElement | null>(null)
 
-// Add issue form
-const showAddIssue = ref(false)
-const issueTitle = ref('')
-const issueSeverity = ref<IssueSeverity>('minor')
-const addingIssue = ref(false)
+const showCreateIssueDialog = ref(false)
 
 interface TeamUser {
   id: string
@@ -74,44 +71,6 @@ interface TeamUser {
 }
 
 const teamMembers = ref<TeamUser[]>([])
-/** Selected assignee for “Report issue” (same pattern as Issues table inline assignee). */
-const reportIssueAssignee = ref<TeamUser | null>(null)
-const reportAssigneeMenuOpen = ref(false)
-const reportAssigneeSearch = ref('')
-
-const filteredReportAssignees = computed(() => {
-  const q = reportAssigneeSearch.value.toLowerCase().trim()
-  if (!q) return teamMembers.value
-  return teamMembers.value.filter(
-    m => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q),
-  )
-})
-
-function onReportAssigneeClickOutside(event: MouseEvent) {
-  const target = event.target as HTMLElement
-  if (!target.closest('.report-assignee-picker')) {
-    reportAssigneeMenuOpen.value = false
-  }
-}
-
-watch(reportAssigneeMenuOpen, (open) => {
-  if (open) {
-    setTimeout(() => document.addEventListener('click', onReportAssigneeClickOutside), 0)
-  } else {
-    document.removeEventListener('click', onReportAssigneeClickOutside)
-    reportAssigneeSearch.value = ''
-  }
-})
-
-function selectReportAssignee(member: TeamUser) {
-  reportIssueAssignee.value = member
-  reportAssigneeMenuOpen.value = false
-}
-
-function clearReportAssignee() {
-  reportIssueAssignee.value = null
-  reportAssigneeMenuOpen.value = false
-}
 
 async function fetchTeamMembersForIssueForm() {
   if (!authStore.token) return
@@ -125,18 +84,6 @@ async function fetchTeamMembersForIssueForm() {
     teamMembers.value = []
   }
 }
-
-watch(showAddIssue, (open) => {
-  if (open) {
-    fetchTeamMembersForIssueForm()
-    reportAssigneeMenuOpen.value = false
-    reportAssigneeSearch.value = ''
-  }
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('click', onReportAssigneeClickOutside)
-})
 
 // Kanban columns
 interface ColumnMeta {
@@ -231,7 +178,7 @@ async function loadCyclePage(cycleId: string) {
   if (!cycleId) return
   loading.value = true
   closeIssueDetailPanel()
-  closeAddIssueForm()
+  showCreateIssueDialog.value = false
   try {
     if (productStore.activeProduct) {
       await backlogStore.fetchStories(productStore.activeProduct.name)
@@ -258,40 +205,9 @@ watch(
   },
 )
 
-async function addIssue() {
-  if (!issueTitle.value.trim() || !cycle.value) return
-  addingIssue.value = true
-  try {
-    const payload: CreateIssuePayload = {
-      title: issueTitle.value.trim(),
-      severity: issueSeverity.value || 'minor',
-      product: cycle.value.productId || productStore.activeProduct?.name || '',
-      testCycleId: cycle.value.id,
-    }
-    const assigneeId = reportIssueAssignee.value?.id
-    if (assigneeId) payload.assignedToUserId = assigneeId
-    const created = await issuesStore.createIssue(payload)
-    if (!created) {
-      toast.error('Could not create the issue. Please try again.')
-      return
-    }
-    await fetchCycleIssues(cycle.value.id)
-    issueTitle.value = ''
-    issueSeverity.value = 'minor'
-    reportIssueAssignee.value = null
-    reportAssigneeMenuOpen.value = false
-    reportAssigneeSearch.value = ''
-    showAddIssue.value = false
-  } finally {
-    addingIssue.value = false
-  }
-}
-
-function closeAddIssueForm() {
-  showAddIssue.value = false
-  reportIssueAssignee.value = null
-  reportAssigneeMenuOpen.value = false
-  reportAssigneeSearch.value = ''
+async function onCreateIssueDialogCreated() {
+  if (!cycle.value) return
+  await fetchCycleIssues(cycle.value.id)
 }
 
 async function updateIssueStatus(issue: Issue, status: IssueStatus) {
@@ -535,7 +451,7 @@ const resolvedIssues = computed(
         </div>
         <button
           class="flex items-center gap-1.5 bg-[#4857FE] hover:bg-[#3E4BDE] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer"
-          @click="showAddIssue = true"
+          @click="showCreateIssueDialog = true"
         >
           <Plus :size="15" />
           Report Issue
@@ -575,97 +491,12 @@ const resolvedIssues = computed(
     </div>
 
     <template v-else-if="cycle">
-      <!-- Add Issue Form -->
-      <div v-if="showAddIssue" class="px-8 py-4 bg-white border-b border-gray-100">
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-semibold text-gray-900">Report Issue</h3>
-          <button type="button" class="text-gray-400 hover:text-gray-600 cursor-pointer" @click="closeAddIssueForm"><X :size="16" /></button>
-        </div>
-        <form @submit.prevent="addIssue" class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-          <input
-            v-model="issueTitle"
-            placeholder="Issue title..."
-            autofocus
-            class="flex-1 min-w-[200px] text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#4857FE] placeholder-gray-400"
-          />
-          <select v-model="issueSeverity" class="text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#4857FE] bg-white shrink-0 w-full sm:w-auto">
-            <option value="trivial">Trivial</option>
-            <option value="minor">Minor</option>
-            <option value="major">Major</option>
-            <option value="critical">Critical</option>
-            <option value="blocker">Blocker</option>
-          </select>
-          <div class="relative report-assignee-picker w-full sm:w-auto sm:min-w-[240px] shrink-0">
-            <button
-              type="button"
-              class="flex w-full items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-sm outline-none transition-colors hover:border-gray-300 focus:border-[#4857FE] focus:ring-1 focus:ring-[#4857FE]/20"
-              @click.stop="reportAssigneeMenuOpen = !reportAssigneeMenuOpen"
-            >
-              <template v-if="reportIssueAssignee">
-                <div class="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#7C5CFC] text-[10px] font-bold text-white">
-                  <UploadAssetImg
-                    v-if="reportIssueAssignee.avatar"
-                    :src="reportIssueAssignee.avatar"
-                    class="h-7 w-7 rounded-full object-cover"
-                  />
-                  <span v-else>{{ reportIssueAssignee.name[0] }}</span>
-                </div>
-                <span class="min-w-0 flex-1 truncate text-gray-800">{{ reportIssueAssignee.name }}</span>
-              </template>
-              <template v-else>
-                <User :size="16" class="shrink-0 text-gray-400" />
-                <span class="flex-1 text-gray-500">Assign to…</span>
-              </template>
-              <ChevronDown :size="14" class="shrink-0 text-gray-400" />
-            </button>
-            <div
-              v-if="reportAssigneeMenuOpen"
-              class="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl sm:right-auto sm:w-[260px]"
-              @click.stop
-            >
-              <div class="border-b border-gray-100 p-2">
-                <input
-                  v-model="reportAssigneeSearch"
-                  type="text"
-                  class="inline-edit-input w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-[#4857FE] focus:ring-1 focus:ring-[#4857FE]/20"
-                  placeholder="Search members..."
-                  @click.stop
-                />
-              </div>
-              <div class="max-h-[220px] overflow-y-auto py-1">
-                <button
-                  type="button"
-                  class="w-full cursor-pointer px-3 py-2 text-left text-sm text-gray-400 hover:bg-gray-50"
-                  @click.stop="clearReportAssignee"
-                >
-                  Unassign
-                </button>
-                <button
-                  v-for="member in filteredReportAssignees"
-                  :key="member.id"
-                  type="button"
-                  class="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50"
-                  :class="reportIssueAssignee?.id === member.id ? 'bg-[#4857FE]/5' : ''"
-                  @click.stop="selectReportAssignee(member)"
-                >
-                  <div class="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#7C5CFC] text-[9px] font-bold text-white">
-                    <UploadAssetImg
-                      v-if="member.avatar"
-                      :src="member.avatar"
-                      class="h-6 w-6 rounded-full object-cover"
-                    />
-                    <span v-else>{{ member.name[0] }}</span>
-                  </div>
-                  <span class="min-w-0 flex-1 truncate text-gray-800">{{ member.name }}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-          <button type="submit" :disabled="!issueTitle.trim() || addingIssue" class="text-sm font-medium text-white bg-[#4857FE] hover:bg-[#3E4BDE] px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50 shrink-0 w-full sm:w-auto">
-            {{ addingIssue ? 'Adding...' : 'Add Issue' }}
-          </button>
-        </form>
-      </div>
+      <CreateIssueDialog
+        v-model:open="showCreateIssueDialog"
+        :test-cycle-id="cycle.id"
+        :test-cycle-title="cycle.title"
+        @created="onCreateIssueDialogCreated"
+      />
 
       <!-- ═══ Kanban View ═══ -->
       <div v-if="activeView === 'kanban'" class="flex-1 overflow-auto p-5" style="background-color: #FAFBFD">
@@ -690,7 +521,7 @@ const resolvedIssues = computed(
               <button
                 v-if="col.hasAdd"
                 class="flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-[#4857FE] transition-colors px-2 py-1 rounded-md hover:bg-[#4857FE]/5 cursor-pointer"
-                @click="showAddIssue = true"
+                @click="showCreateIssueDialog = true"
               >
                 <Plus :size="13" />
                 Add

@@ -3,18 +3,17 @@ import { ref, computed, watch, useAttrs, shallowRef } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { EditorContent, useEditor } from '@tiptap/vue-3'
 import type { Editor } from '@tiptap/core'
-import Document from '@tiptap/extension-document'
-import Paragraph from '@tiptap/extension-paragraph'
-import Text from '@tiptap/extension-text'
-import HardBreak from '@tiptap/extension-hard-break'
-import History from '@tiptap/extension-history'
 import Placeholder from '@tiptap/extension-placeholder'
 import Mention from '@tiptap/extension-mention'
 import { PluginKey } from '@tiptap/pm/state'
 import { exitSuggestion, type SuggestionProps } from '@tiptap/suggestion'
 import type { MentionUser } from '@/lib/commentMentions'
 import { filterMentionUsers } from '@/lib/commentMentions'
-import { plainCommentToTiptapDoc, tiptapDocToPlainComment } from '@/lib/commentMentionEditor'
+import {
+  hydrateCommentEditorContent,
+  serializeCommentEditor,
+} from '@/lib/commentMentionEditor'
+import { commentComposerBaseExtensions } from '@/lib/tiptap/commentComposerExtensions'
 import UploadAssetImg from '@/components/shared/UploadAssetImg.vue'
 
 const COMMENT_MENTION_SUGGESTION_KEY = new PluginKey('commentComposerMention')
@@ -51,7 +50,7 @@ const wrapperBind = computed(() => {
 
 const wrapperClass = computed(() => {
   const base =
-    'w-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2 outline-none focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 transition-colors'
+    'w-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-xl outline-none focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 transition-colors overflow-hidden'
   const extra = attrs.class
   if (!extra) return base
   if (typeof extra === 'string') return `${base} ${extra}`
@@ -60,7 +59,10 @@ const wrapperClass = computed(() => {
 })
 
 const editorHostClass =
-  'mention-textarea-editor prose prose-sm max-w-none min-w-0 [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[2.5rem] [&_.ProseMirror]:text-sm [&_.ProseMirror]:text-gray-700 [&_.ProseMirror]:leading-relaxed [&_.ProseMirror_p]:m-0'
+  'mention-textarea-editor prose prose-sm max-w-none min-w-0 px-3.5 py-2 [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[2.5rem] [&_.ProseMirror]:text-sm [&_.ProseMirror]:text-gray-700 [&_.ProseMirror]:leading-relaxed [&_.ProseMirror_p]:m-0'
+
+const toolbarIconBtnClass =
+  'p-1.5 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center shrink-0'
 
 const rootRef = ref<HTMLElement | null>(null)
 const editorRef = shallowRef<Editor | null>(null)
@@ -116,6 +118,15 @@ const showMentionMenu = computed(
   () => suggestionOpen.value && !props.disabled && latestSuggestionProps !== null,
 )
 
+/** Allow link edit when caret is inside a link, even if selection is collapsed. */
+const linkToolDisabled = computed(() => {
+  if (props.disabled) return true
+  const ed = editorRef.value
+  if (!ed) return true
+  if (ed.isActive('link')) return false
+  return ed.state.selection.empty
+})
+
 onClickOutside(rootRef, () => {
   const ed = editorRef.value
   if (!ed) return
@@ -127,7 +138,7 @@ onClickOutside(rootRef, () => {
 })
 
 const editor = useEditor({
-  content: plainCommentToTiptapDoc(props.modelValue, props.users),
+  content: hydrateCommentEditorContent(props.modelValue, props.users),
   editable: !props.disabled,
   onCreate: ({ editor: ed }) => {
     editorRef.value = ed
@@ -136,11 +147,7 @@ const editor = useEditor({
     editorRef.value = null
   },
   extensions: [
-    Document,
-    Paragraph,
-    Text,
-    HardBreak,
-    History,
+    ...commentComposerBaseExtensions(),
     Placeholder.configure({
       placeholder: props.placeholder || '',
       showOnlyWhenEditable: true,
@@ -154,6 +161,9 @@ const editor = useEditor({
       renderHTML: ({ node }) => [
         'span',
         {
+          'data-type': 'mention',
+          'data-id': node.attrs.id,
+          'data-label': node.attrs.label,
           class:
             'mention-pill rounded px-1 py-0.5 bg-[#7C5CFC]/15 text-[#4857FE] font-medium not-prose align-baseline',
         },
@@ -248,7 +258,7 @@ const editor = useEditor({
     },
   },
   onUpdate: ({ editor: ed }) => {
-    emit('update:modelValue', tiptapDocToPlainComment(ed.getJSON()))
+    emit('update:modelValue', serializeCommentEditor(ed.getJSON(), ed.getHTML()))
   },
 })
 
@@ -257,9 +267,9 @@ watch(
   val => {
     const ed = editorRef.value
     if (!ed) return
-    const current = tiptapDocToPlainComment(ed.getJSON())
+    const current = serializeCommentEditor(ed.getJSON(), ed.getHTML())
     if (val !== current) {
-      ed.commands.setContent(plainCommentToTiptapDoc(val, props.users), { emitUpdate: false })
+      ed.commands.setContent(hydrateCommentEditorContent(val, props.users), { emitUpdate: false })
     }
   },
 )
@@ -272,8 +282,8 @@ const usersDisplayRefreshKey = computed(() =>
 watch(usersDisplayRefreshKey, () => {
   const ed = editorRef.value
   if (!ed) return
-  const plain = tiptapDocToPlainComment(ed.getJSON())
-  ed.commands.setContent(plainCommentToTiptapDoc(plain, props.users), { emitUpdate: false })
+  const currentStored = serializeCommentEditor(ed.getJSON(), ed.getHTML())
+  ed.commands.setContent(hydrateCommentEditorContent(currentStored, props.users), { emitUpdate: false })
 })
 
 watch(
@@ -287,6 +297,19 @@ function pickUser(pick: MentionPick) {
   const p = latestSuggestionProps
   if (!p) return
   p.command(pick)
+}
+
+function setLink() {
+  const ed = editorRef.value
+  if (!ed || props.disabled) return
+  const previousUrl = ed.getAttributes('link').href
+  const url = globalThis.window.prompt('URL', previousUrl)
+  if (url === null) return
+  if (url === '') {
+    ed.chain().focus().extendMarkRange('link').unsetLink().run()
+    return
+  }
+  ed.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
 }
 
 const editorMinHeightStyle = computed(() => ({
@@ -307,6 +330,97 @@ const editorMinHeightStyle = computed(() => ({
 <template>
   <div ref="rootRef" class="relative">
     <div :class="wrapperClass" :style="editorMinHeightStyle" v-bind="wrapperBind">
+      <div
+        v-if="editor"
+        class="flex items-center gap-0.5 flex-wrap px-2 py-1.5 border-b border-gray-200 bg-gray-50 shadow-[0_1px_0_rgba(0,0,0,0.06)]"
+      >
+        <button
+          type="button"
+          :class="[
+            toolbarIconBtnClass,
+            editor.isActive('bold') ? 'bg-gray-200 text-[#4857FE]' : 'text-gray-500 hover:bg-gray-200',
+          ]"
+          :disabled="props.disabled"
+          title="Bold"
+          @click="editor.chain().focus().toggleBold().run()"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"/></svg>
+        </button>
+        <button
+          type="button"
+          :class="[
+            toolbarIconBtnClass,
+            editor.isActive('italic') ? 'bg-gray-200 text-[#4857FE]' : 'text-gray-500 hover:bg-gray-200',
+          ]"
+          :disabled="props.disabled"
+          title="Italic"
+          @click="editor.chain().focus().toggleItalic().run()"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" x2="10" y1="4" y2="4"/><line x1="14" x2="5" y1="20" y2="20"/><line x1="15" x2="9" y1="4" y2="20"/></svg>
+        </button>
+        <button
+          type="button"
+          :class="[
+            toolbarIconBtnClass,
+            editor.isActive('underline') ? 'bg-gray-200 text-[#4857FE]' : 'text-gray-500 hover:bg-gray-200',
+          ]"
+          :disabled="props.disabled"
+          title="Underline"
+          @click="editor.chain().focus().toggleUnderline().run()"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4v6a6 6 0 0 0 12 0V4"/><line x1="4" x2="20" y1="20" y2="20"/></svg>
+        </button>
+        <button
+          type="button"
+          :class="[
+            toolbarIconBtnClass,
+            editor.isActive('strike') ? 'bg-gray-200 text-[#4857FE]' : 'text-gray-500 hover:bg-gray-200',
+          ]"
+          :disabled="props.disabled"
+          title="Strikethrough"
+          @click="editor.chain().focus().toggleStrike().run()"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4H9a3 3 0 0 0-2.83 4"/><path d="M14 12a4 4 0 0 1 0 8H6"/><line x1="4" x2="20" y1="12" y2="12"/></svg>
+        </button>
+        <div class="w-px h-5 bg-gray-200 mx-1 shrink-0" aria-hidden="true"></div>
+        <button
+          type="button"
+          :class="[
+            toolbarIconBtnClass,
+            editor.isActive('bulletList') ? 'bg-gray-200 text-[#4857FE]' : 'text-gray-500 hover:bg-gray-200',
+          ]"
+          :disabled="props.disabled"
+          title="Bullet list"
+          @click="editor.chain().focus().toggleBulletList().run()"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>
+        </button>
+        <button
+          type="button"
+          :class="[
+            toolbarIconBtnClass,
+            editor.isActive('orderedList') ? 'bg-gray-200 text-[#4857FE]' : 'text-gray-500 hover:bg-gray-200',
+          ]"
+          :disabled="props.disabled"
+          title="Numbered list"
+          @click="editor.chain().focus().toggleOrderedList().run()"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" x2="21" y1="6" y2="6"/><line x1="10" x2="21" y1="12" y2="12"/><line x1="10" x2="21" y1="18" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg>
+        </button>
+        <div class="w-px h-5 bg-gray-200 mx-1 shrink-0" aria-hidden="true"></div>
+        <button
+          type="button"
+          :class="[
+            toolbarIconBtnClass,
+            editor.isActive('link') ? 'bg-gray-200 text-[#4857FE]' : 'text-gray-500 hover:bg-gray-200',
+          ]"
+          :disabled="linkToolDisabled"
+          title="Link"
+          @click="setLink"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </button>
+      </div>
       <EditorContent v-if="editor" :editor="editor" />
     </div>
 

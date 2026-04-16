@@ -24,9 +24,10 @@ const taskFields: FormFieldConfig[] = [
   { key: 'assigneeUserIds', label: 'Assignees', type: 'user_picker', required: false, visible: true, isBuiltIn: true, order: 6 },
   { key: 'reviewerUserIds', label: 'Reviewers', type: 'user_picker', required: false, visible: true, isBuiltIn: true, order: 7 },
   { key: 'estimateValue', label: 'Estimate (hours)', type: 'number', required: false, visible: true, isBuiltIn: true, order: 8 },
-  { key: 'dueAt', label: 'Due Date', type: 'date', required: false, visible: true, isBuiltIn: true, order: 9 },
-  { key: 'dependent', label: 'Dependencies', type: 'multi_select', required: false, visible: false, isBuiltIn: true, order: 10 },
-  { key: 'blockedReason', label: 'Blocked Reason', type: 'textarea', required: false, visible: false, isBuiltIn: true, order: 11 },
+  { key: 'startDate', label: 'Start date', type: 'date', required: false, visible: true, isBuiltIn: true, order: 9 },
+  { key: 'endDate', label: 'End date', type: 'date', required: false, visible: true, isBuiltIn: true, order: 10 },
+  { key: 'dependent', label: 'Dependencies', type: 'multi_select', required: false, visible: false, isBuiltIn: true, order: 11 },
+  { key: 'blockedReason', label: 'Blocked Reason', type: 'textarea', required: false, visible: false, isBuiltIn: true, order: 12 },
 ]
 
 const issueFields: FormFieldConfig[] = [

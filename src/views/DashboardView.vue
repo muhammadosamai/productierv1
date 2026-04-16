@@ -238,7 +238,8 @@ const newTaskTitle = ref('')
 const newTaskPriority = ref<'low' | 'medium' | 'high'>('medium')
 const newTaskType = ref<string>('')
 const newTaskEstimate = ref<string>('')
-const newTaskDueAt = ref<string>('')
+const newTaskStartDate = ref<string>('')
+const newTaskEndDate = ref<string>('')
 const newTaskDependent = ref<string>('')
 const newTaskBlockedReason = ref<string>('')
 const creatingTask = ref(false)
@@ -567,7 +568,8 @@ const typeIcons: Record<string, any> = {
   documentation: FileText,
 }
 
-function formatDate(dateStr: string) {
+function formatDate(dateStr: string | null | undefined) {
+  if (dateStr == null || dateStr === '') return '—'
   const date = new Date(dateStr)
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
@@ -611,7 +613,8 @@ async function handleCreateTask() {
       ? selectedTaskAssignees.value.map(u => u.id)
       : undefined,
     estimateValue: newTaskEstimate.value ? parseInt(newTaskEstimate.value) : undefined,
-    dueAt: newTaskDueAt.value || undefined,
+    startDate: newTaskStartDate.value || undefined,
+    endDate: newTaskEndDate.value || undefined,
     dependent: newTaskDependent.value ? [newTaskDependent.value] : undefined,
     blockedReason: newTaskBlockedReason.value.trim() || undefined,
   })
@@ -619,7 +622,8 @@ async function handleCreateTask() {
   newTaskPriority.value = 'medium'
   newTaskType.value = ''
   newTaskEstimate.value = ''
-  newTaskDueAt.value = ''
+  newTaskStartDate.value = ''
+  newTaskEndDate.value = ''
   newTaskDependent.value = ''
   newTaskBlockedReason.value = ''
   selectedTaskAssignees.value = []
@@ -994,7 +998,7 @@ function priorityBarColor(priority: string) {
               <ArrowDown v-else-if="sortColumn === 'createdAt' && sortDirection === 'desc'" :size="12" class="text-[#4857FE]" />
             </button>
             <button class="flex items-center gap-1 hover:text-gray-600 transition-colors" @click="toggleSort('delivery')">
-              Due Date
+              End date
               <ArrowUp v-if="sortColumn === 'delivery' && sortDirection === 'asc'" :size="12" class="text-[#4857FE]" />
               <ArrowDown v-else-if="sortColumn === 'delivery' && sortDirection === 'desc'" :size="12" class="text-[#4857FE]" />
             </button>
@@ -1074,7 +1078,7 @@ function priorityBarColor(priority: string) {
                 <p class="text-xs text-gray-400">{{ daysAgo(item.createdAt) }}</p>
               </div>
 
-              <!-- Due Date -->
+              <!-- End date -->
               <div>
                 <span class="text-sm text-gray-600">{{ item.delivery ? formatDate(item.delivery) : '—' }}</span>
               </div>
@@ -1239,7 +1243,7 @@ function priorityBarColor(priority: string) {
             <span>Status</span>
             <span class="text-center">Estimate</span>
             <span>Parent Story</span>
-            <span>Due Date</span>
+            <span>End date</span>
             <span class="text-center">Created</span>
           </div>
 
@@ -1337,9 +1341,11 @@ function priorityBarColor(priority: string) {
                 <span class="text-xs text-gray-500 truncate block">{{ task.storyTitle }}</span>
               </div>
 
-              <!-- Due Date -->
+              <!-- End date (or legacy due) -->
               <div>
-                <span class="text-sm text-gray-600">{{ task.dueAt ? formatDate(task.dueAt) : '—' }}</span>
+                <span class="text-sm text-gray-600">{{
+                  formatDate(task.endDate ?? (task.dueAt ? task.dueAt.slice(0, 10) : null))
+                }}</span>
               </div>
 
               <!-- Created date + delete -->
@@ -1500,8 +1506,8 @@ function priorityBarColor(priority: string) {
             </div>
           </div>
 
-          <!-- Estimate + Due Date -->
-          <div class="grid grid-cols-2 gap-3">
+          <!-- Estimate + Start / End date -->
+          <div class="grid grid-cols-3 gap-3">
             <div>
               <label class="text-sm font-medium text-gray-700 mb-1.5 block">Estimate (hours)</label>
               <input
@@ -1514,9 +1520,18 @@ function priorityBarColor(priority: string) {
               />
             </div>
             <div>
-              <label class="text-sm font-medium text-gray-700 mb-1.5 block">Due Date</label>
+              <label class="text-sm font-medium text-gray-700 mb-1.5 block">Start date</label>
               <input
-                v-model="newTaskDueAt"
+                v-model="newTaskStartDate"
+                type="date"
+                class="w-full text-sm bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#4857FE] transition-colors"
+                :disabled="creatingTask"
+              />
+            </div>
+            <div>
+              <label class="text-sm font-medium text-gray-700 mb-1.5 block">End date</label>
+              <input
+                v-model="newTaskEndDate"
                 type="date"
                 class="w-full text-sm bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#4857FE] transition-colors"
                 :disabled="creatingTask"

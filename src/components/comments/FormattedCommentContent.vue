@@ -2,11 +2,17 @@
 import { computed } from 'vue'
 import type { MentionUser } from '@/lib/commentMentions'
 import { parseCommentSegments } from '@/lib/commentMentions'
+import { renderStoredRichText } from '@/lib/richText'
+import { looksLikeLegacyPlainComment } from '@/lib/commentMentionEditor'
 
 const props = defineProps<{
   text: string
   users: MentionUser[]
 }>()
+
+const isLegacyPlain = computed(() => looksLikeLegacyPlainComment(props.text || ''))
+
+const richHtml = computed(() => renderStoredRichText(props.text || ''))
 
 const userById = computed(() => {
   const m = new Map<string, MentionUser>()
@@ -21,7 +27,12 @@ const segments = computed(() => parseCommentSegments(props.text || ''))
 </script>
 
 <template>
-  <span class="text-sm text-gray-600 leading-snug break-words">
+  <div
+    v-if="!isLegacyPlain"
+    class="text-sm text-gray-600 leading-snug break-words prose prose-sm max-w-none prose-p:my-0.5 prose-ul:my-0.5 prose-ol:my-0.5 prose-li:my-0 prose-a:text-[#4857FE]"
+    v-html="richHtml"
+  ></div>
+  <span v-else class="text-sm text-gray-600 leading-snug break-words">
     <template v-for="(seg, i) in segments" :key="i">
       <template v-if="seg.type === 'text'">{{ seg.value }}</template>
       <span

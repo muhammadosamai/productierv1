@@ -45,8 +45,13 @@ export const testCycleRoutes = new Elysia({ prefix: '/api/test-cycles' })
         createdByUser: true,
         delivery: true,
         release: true,
+        /** Legacy test-cycle-only issues table */
         issues: {
           with: { reportedByUser: true, assignedToUser: true, story: true },
+        },
+        /** Main issues board rows linked via `issues.test_cycle_id` (used by Test cycle detail UI) */
+        linkedIssues: {
+          columns: { id: true, status: true },
         },
       },
     })
@@ -63,6 +68,9 @@ export const testCycleRoutes = new Elysia({ prefix: '/api/test-cycles' })
         issues: {
           with: { reportedByUser: true, assignedToUser: true, story: true },
           orderBy: (i, { desc }) => [desc(i.createdAt)],
+        },
+        linkedIssues: {
+          columns: { id: true, status: true },
         },
       },
     })
@@ -93,7 +101,13 @@ export const testCycleRoutes = new Elysia({ prefix: '/api/test-cycles' })
 
     const full = await db.query.testCycles.findFirst({
       where: eq(testCycles.id, cycle!.id),
-      with: { createdByUser: true, delivery: true, release: true, issues: true },
+      with: {
+        createdByUser: true,
+        delivery: true,
+        release: true,
+        issues: true,
+        linkedIssues: { columns: { id: true, status: true } },
+      },
     })
     return full
   }, {
@@ -134,7 +148,13 @@ export const testCycleRoutes = new Elysia({ prefix: '/api/test-cycles' })
 
     const full = await db.query.testCycles.findFirst({
       where: eq(testCycles.id, updated!.id),
-      with: { createdByUser: true, delivery: true, release: true, issues: true },
+      with: {
+        createdByUser: true,
+        delivery: true,
+        release: true,
+        issues: true,
+        linkedIssues: { columns: { id: true, status: true } },
+      },
     })
     return full
   }, {

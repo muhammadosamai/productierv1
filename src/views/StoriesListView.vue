@@ -22,6 +22,7 @@ import AddStoryDialog from '@/components/backlog/AddStoryDialog.vue'
 import StoryDetailPanel from '@/components/backlog/StoryDetailPanel.vue'
 import FormBuilderDialog from '@/components/forms/FormBuilderDialog.vue'
 import type { Story, StoryStatus } from '@/types/backlog'
+import { richTextPreviewText } from '@/lib/richText'
 
 interface TeamUser {
   id: string
@@ -1313,12 +1314,12 @@ function formatDate(dateStr: string | null) {
 
                 <!-- Description -->
                 <div v-else-if="col.field === 'description'" class="text-sm text-gray-500 truncate">
-                  {{ story.description || '—' }}
+                  {{ richTextPreviewText(story.description) || '—' }}
                 </div>
 
                 <!-- Acceptance Criteria -->
                 <div v-else-if="col.field === 'acceptanceCriteria'" class="text-sm text-gray-500 truncate">
-                  {{ story.acceptanceCriteria || '—' }}
+                  {{ richTextPreviewText(story.acceptanceCriteria) || '—' }}
                 </div>
 
                 <!-- Created -->
@@ -1386,7 +1387,7 @@ function formatDate(dateStr: string | null) {
               </div>
 
               <!-- Description -->
-              <p v-if="story.description" class="text-sm text-gray-500 line-clamp-2 mb-4 leading-relaxed">{{ story.description }}</p>
+              <p v-if="story.description" class="text-sm text-gray-500 line-clamp-2 mb-4 leading-relaxed">{{ richTextPreviewText(story.description) }}</p>
               <p v-else class="text-sm text-gray-400 italic mb-4">No description</p>
 
               <!-- Initiative + Priority -->

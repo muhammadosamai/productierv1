@@ -413,10 +413,11 @@ watch(
             <input
               :value="form.estimateValue ?? ''"
               type="number"
-              step="0.5"
+              step="any"
+              inputmode="decimal"
               min="0"
               class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#4857FE]"
-              @input="form.estimateValue = ($event.target as HTMLInputElement).value === '' ? null : Number(($event.target as HTMLInputElement).value)"
+              @input="form.estimateValue = ($event.target as HTMLInputElement).value === '' ? null : Number.parseFloat(($event.target as HTMLInputElement).value)"
             />
           </div>
         </div>

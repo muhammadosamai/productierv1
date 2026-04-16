@@ -110,8 +110,9 @@ const ownerSearch = ref('')
 const reviewerSearch = ref('')
 const storySearchQuery = ref('')
 
-// Due date editing
-const editDueDate = ref('')
+// Start / end date editing (calendar YYYY-MM-DD)
+const editStartDate = ref('')
+const editEndDate = ref('')
 
 // Estimate editing
 const editEstimate = ref('')
@@ -419,15 +420,27 @@ async function selectType(type: TaskType) {
   await updateTaskField('type', type)
 }
 
-// Due date
-function startEditDueDate() {
+// Start / end dates
+function startEditStartDate() {
   if (!props.task) return
-  editDueDate.value = props.task.dueAt ? (new Date(props.task.dueAt).toISOString().split('T')[0] ?? '') : ''
-  editingField.value = 'dueAt'
+  editStartDate.value = taskDateWire(props.task.startDate)
+  editingField.value = 'startDate'
 }
 
-async function saveDueDate() {
-  await updateTaskField('dueAt', editDueDate.value || null)
+async function saveStartDate() {
+  const v = editStartDate.value.trim() || null
+  await updateTaskField('startDate', v)
+}
+
+function startEditEndDate() {
+  if (!props.task) return
+  editEndDate.value = taskDateWire(props.task.endDate ?? props.task.dueAt)
+  editingField.value = 'endDate'
+}
+
+async function saveEndDate() {
+  const v = editEndDate.value.trim() || null
+  await updateTaskField('endDate', v)
 }
 
 // Estimate
@@ -821,6 +834,13 @@ function formatDate(dateStr: string | null) {
   return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+function taskDateWire(iso: string | null | undefined): string {
+  if (!iso) return ''
+  if (typeof iso === 'string' && iso.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(iso)) return iso.slice(0, 10)
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10)
+}
+
 function formatRelativeTime(dateStr: string) {
   const d = new Date(dateStr)
   const now = new Date()
@@ -901,6 +921,8 @@ function changeFieldLabel(field: string): string {
     case 'blockedReason': return 'Blocked reason'
     case 'estimateValue': return 'Estimate'
     case 'dueAt': return 'Due date'
+    case 'startDate': return 'Start Date'
+    case 'endDate': return 'End Date'
     case 'dependent': return 'Dependency'
     case 'comment': return 'Comment'
     case 'attachment': return 'Attachment'
@@ -923,6 +945,8 @@ function changeFieldIcon(field: string) {
     case 'type': return Tag
     case 'estimateValue': return Hourglass
     case 'dueAt': return CalendarClock
+    case 'startDate': return CalendarDays
+    case 'endDate': return CalendarDays
     case 'dependent': return Link
     case 'ownerUserId': return User
     case 'assigneeUserIds': return Users
@@ -981,11 +1005,12 @@ function resolveUserValue(value: string | null): string | null {
 
 function formatChangeValue(field: string, value: string | null): string {
   if (!value) return '—'
-  if (field === 'dueAt') {
+  if (field === 'dueAt' || field === 'startDate' || field === 'endDate') {
     const d = new Date(value)
     if (!isNaN(d.getTime())) {
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     }
+    if (field !== 'dueAt' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value
   }
   if (field === 'estimateValue') {
     const n = parseFloat(value)
@@ -1504,29 +1529,57 @@ function onBackdropClick(e: MouseEvent) {
                 </div>
               </div>
 
-              <!-- Due Date (editable) -->
+              <!-- Start date (editable) -->
               <div class="flex items-center gap-3">
-                <span class="text-sm text-gray-500 w-24 shrink-0 flex items-center gap-1.5">
-                  <CalendarDays :size="13" class="text-gray-400" /> Due date
+                <span class="text-sm text-gray-500 w-32 shrink-0 flex items-center gap-1.5">
+                  <CalendarDays :size="13" class="text-gray-400" /> Start Date
                 </span>
                 <div @click.stop>
-                  <div v-if="editingField === 'dueAt'" class="flex items-center gap-2">
+                  <div v-if="editingField === 'startDate'" class="flex items-center gap-2">
                     <input
                       type="date"
-                      v-model="editDueDate"
+                      v-model="editStartDate"
                       class="text-sm text-gray-700 border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-[#4857FE]"
-                      @keydown.enter="saveDueDate"
+                      @keydown.enter="saveStartDate"
                       @keydown.escape="editingField = null"
                     />
-                    <button @click="saveDueDate" class="text-green-500 hover:text-green-600"><Check :size="14" /></button>
-                    <button @click="editingField = null" class="text-gray-400 hover:text-gray-600"><X :size="14" /></button>
+                    <button type="button" @click="saveStartDate" class="text-green-500 hover:text-green-600"><Check :size="14" /></button>
+                    <button type="button" @click="editingField = null" class="text-gray-400 hover:text-gray-600"><X :size="14" /></button>
                   </div>
                   <span
                     v-else
                     class="text-sm font-medium text-gray-700 cursor-pointer hover:text-[#4857FE] transition-colors"
-                    @click="startEditDueDate"
+                    @click="startEditStartDate"
                   >
-                    {{ formatDate(task.dueAt) }}
+                    {{ formatDate(task.startDate) }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- End date (editable) -->
+              <div class="flex items-center gap-3">
+                <span class="text-sm text-gray-500 w-32 shrink-0 flex items-center gap-1.5">
+                  <CalendarDays :size="13" class="text-gray-400" /> End Date
+                </span>
+                <div @click.stop>
+                  <div v-if="editingField === 'endDate'" class="flex items-center gap-2">
+                    <input
+                      type="date"
+                      v-model="editEndDate"
+                      class="text-sm text-gray-700 border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-[#4857FE]"
+                      @keydown.enter="saveEndDate"
+                      @keydown.escape="editingField = null"
+                    />
+                    <button type="button" @click="saveEndDate" class="text-green-500 hover:text-green-600"><Check :size="14" /></button>
+                    <button type="button" @click="editingField = null" class="text-gray-400 hover:text-gray-600"><X :size="14" /></button>
+                  </div>
+                  <span
+                    v-else
+                    class="text-sm font-medium text-gray-700 cursor-pointer hover:text-[#4857FE] transition-colors"
+                    :class="task.endDate && new Date(task.endDate + 'T12:00:00') < new Date() && task.status !== 'done' ? 'text-red-500' : ''"
+                    @click="startEditEndDate"
+                  >
+                    {{ formatDate(task.endDate ?? (task.dueAt ? taskDateWire(task.dueAt) : null)) }}
                   </span>
                 </div>
               </div>

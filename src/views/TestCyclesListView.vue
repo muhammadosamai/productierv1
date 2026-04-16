@@ -135,17 +135,29 @@ function formatPeriod(start: string | null, end: string | null) {
   return `${s} – ${e}`
 }
 
+/** Issues linked to a cycle: legacy `test_cycle_issues` plus main `issues` with `testCycleId`. */
+function cycleIssuesForCount(cycle: TestCycle): { status: string }[] {
+  const legacy = cycle.issues ?? []
+  const linked = cycle.linkedIssues ?? []
+  const byId = new Map<string, { status: string }>()
+  for (const i of legacy) {
+    byId.set(i.id, { status: i.status })
+  }
+  for (const i of linked) {
+    byId.set(i.id, { status: i.status })
+  }
+  return [...byId.values()]
+}
+
 function issueCount(cycle: TestCycle) {
-  return cycle.issues?.length || 0
+  return cycleIssuesForCount(cycle).length
 }
 
 function openCount(cycle: TestCycle) {
-  return (
-    cycle.issues?.filter(i => {
-      const t = issueStatusSemanticTone(i.status)
-      return t === 'open' || t === 'in_progress'
-    }).length || 0
-  )
+  return cycleIssuesForCount(cycle).filter(i => {
+    const t = issueStatusSemanticTone(i.status)
+    return t === 'open' || t === 'in_progress'
+  }).length
 }
 </script>
 

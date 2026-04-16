@@ -297,7 +297,7 @@ function tabCount(key: string): number {
                     <p class="text-sm text-gray-900 truncate">{{ item.title }}</p>
                     <p class="text-[10px] text-gray-400 mt-0.5">
                       {{ item.productId }}
-                      <span v-if="item.dueAt"> · Due {{ formatDate(item.dueAt) }}</span>
+                      <span v-if="item.endDate || item.dueAt"> · End {{ formatDate(item.endDate ?? (item.dueAt ? String(item.dueAt).slice(0, 10) : null)) }}</span>
                     </p>
                   </div>
                   <span

@@ -11,6 +11,7 @@ import { validateAttachmentFileName, validateAttachmentContent } from '../lib/al
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
 import { sanitizeCommentHtml } from '../lib/sanitizeCommentHtml'
 import { previewWithEllipsis } from '../lib/richTextPreview'
+import { normalizeTaskDateWireValue, serializeParentTaskRow, serializeParentTaskRows } from '../lib/taskDates'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -72,6 +73,8 @@ const taskBody = t.Object({
   blockedReason: t.Optional(t.Nullable(t.String())),
   deliveryId: t.Optional(t.Nullable(t.String())),
   dueAt: t.Optional(t.Nullable(t.String())),
+  startDate: t.Optional(t.Nullable(t.String())),
+  endDate: t.Optional(t.Nullable(t.String())),
 })
 
 const taskStatusLiterals = [
@@ -248,7 +251,7 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
 
   // GET /api/tasks/by-story/:storyId
   .get('/by-story/:storyId', async ({ params: { storyId } }) => {
-    return db.query.tasks.findMany({
+    const rows = await db.query.tasks.findMany({
       where: eq(tasks.storyId, storyId),
       orderBy: (t, { asc }) => [asc(t.createdAt)],
       with: {
@@ -262,6 +265,7 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
         },
       },
     })
+    return serializeParentTaskRows(rows as Record<string, unknown>[])
   })
 
   // POST /api/tasks/by-story/:storyId
@@ -274,7 +278,7 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     })
     if (!story) { set.status = 404; return { error: 'Story not found' } }
 
-    const { dueAt, subtasks: subtasksPayload, ...rest } = body
+    const { dueAt, startDate, endDate, subtasks: subtasksPayload, ...rest } = body
 
     // Auto-transition: if any role is assigned at creation, set status to 'assigned'
     const effectiveStatus = hasAnyRoleAssigned(rest) ? 'assigned' : 'created'
@@ -285,6 +289,22 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     })
     const normalizedProductId = product?.id || story.product
 
+    let dueAtForDb: Date | null = dueAt ? new Date(dueAt) : null
+    let startForDb: string | null | undefined
+    let endForDb: string | null | undefined
+
+    if (startDate !== undefined) {
+      const r = normalizeTaskDateWireValue(startDate)
+      if (!r.ok) { set.status = 400; return { error: r.error } }
+      startForDb = r.value
+    }
+    if (endDate !== undefined) {
+      const r = normalizeTaskDateWireValue(endDate)
+      if (!r.ok) { set.status = 400; return { error: r.error } }
+      endForDb = r.value
+      dueAtForDb = r.value ? null : (dueAt ? new Date(dueAt) : null)
+    }
+
     const [task] = await db.insert(tasks)
       .values({
         ...rest,
@@ -294,7 +314,9 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
         productId: normalizedProductId,
         initiativeId: null,
         createdByUserId: user.id,
-        dueAt: dueAt ? new Date(dueAt) : null,
+        dueAt: dueAtForDb,
+        ...(startForDb !== undefined ? { startDate: startForDb } : {}),
+        ...(endForDb !== undefined ? { endDate: endForDb } : {}),
       })
       .returning()
 
@@ -357,7 +379,7 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     }
 
     const full = await fetchTaskWithSubtasks(task.id)
-    return full || task
+    return serializeParentTaskRow((full || task) as Record<string, unknown>)
   }, { body: createTaskBody })
 
   // PUT /api/tasks/:id
@@ -365,10 +387,24 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     const old = await db.query.tasks.findFirst({ where: eq(tasks.id, id) })
     if (!old) { set.status = 404; return { error: 'Task not found' } }
 
-    const { dueAt, ...rest } = body
+    const { dueAt, startDate, endDate, ...rest } = body
     const updateData: Record<string, any> = { ...rest, updatedAt: new Date() }
 
-    if (dueAt !== undefined) {
+    if (startDate !== undefined) {
+      const r = normalizeTaskDateWireValue(startDate)
+      if (!r.ok) { set.status = 400; return { error: r.error } }
+      updateData.startDate = r.value
+    }
+    if (endDate !== undefined) {
+      const r = normalizeTaskDateWireValue(endDate)
+      if (!r.ok) { set.status = 400; return { error: r.error } }
+      updateData.endDate = r.value
+      if (r.value) {
+        updateData.dueAt = null
+      } else if (dueAt !== undefined) {
+        updateData.dueAt = dueAt ? new Date(dueAt) : null
+      }
+    } else if (dueAt !== undefined) {
       updateData.dueAt = dueAt ? new Date(dueAt) : null
     }
 
@@ -410,7 +446,11 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
       })
     }
 
-    const changes = computeChanges(old, body, ['title', 'status', 'priority', 'type', 'description', 'blockedReason', 'ownerUserId', 'assigneeUserIds', 'reviewerUserIds', 'estimateValue', 'dueAt', 'dependent'])
+    const changes = computeChanges(old, body, [
+      'title', 'status', 'priority', 'type', 'description', 'blockedReason',
+      'ownerUserId', 'assigneeUserIds', 'reviewerUserIds', 'estimateValue',
+      'startDate', 'endDate', 'dueAt', 'dependent',
+    ])
     if (changes.length > 0) {
       logActivity({
         product: updated!.productId,
@@ -487,7 +527,7 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     // Auto-compute story status based on child task states
     await recomputeStoryStatus(updated!.storyId)
 
-    return updated
+    return serializeParentTaskRow(updated! as Record<string, unknown>)
   }, { body: t.Partial(taskBody) })
 
   // DELETE /api/tasks/:id

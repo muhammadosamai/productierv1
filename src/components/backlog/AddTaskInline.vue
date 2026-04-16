@@ -19,13 +19,21 @@ const submitting = ref(false)
 const expanded = ref(false)
 const titleInputRef = ref<HTMLInputElement | null>(null)
 
+function parsedEstimateHours(raw: string): number | undefined {
+  const t = raw.trim()
+  if (!t) return undefined
+  const n = Number.parseFloat(t.replace(/,/g, '.'))
+  if (!Number.isFinite(n) || n < 0) return undefined
+  return n
+}
+
 async function handleAdd() {
   if (!taskTitle.value.trim()) return
   submitting.value = true
   await backlogStore.createTask(props.storyId, {
     title: taskTitle.value.trim(),
     description: taskDescription.value.trim() || undefined,
-    estimateValue: taskEstimate.value ? parseInt(taskEstimate.value) : undefined,
+    estimateValue: parsedEstimateHours(taskEstimate.value),
   })
   taskTitle.value = ''
   taskDescription.value = ''
@@ -80,6 +88,7 @@ async function handleAdd() {
         v-model="taskEstimate"
         type="number"
         min="0"
+        step="any"
         placeholder="Estimate (hours)"
         class="w-full text-sm bg-white border border-gray-200 rounded-lg px-3 py-1.5 outline-none focus:border-[#4857FE] placeholder:text-gray-400 transition-colors"
         :disabled="submitting"

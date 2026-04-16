@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
 import { sendWelcomeEmail, sendPasswordResetEmail } from '../services/email'
+import { effectiveTaskDeadlineUtcDay, serializeParentTaskRow } from '../lib/taskDates'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -342,7 +343,7 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
     const userDeliveries = allDeliveries.filter(d => d.createdByUserId === id)
 
     return {
-      tasks: userTasks,
+      tasks: userTasks.map(t => serializeParentTaskRow(t as Record<string, unknown>)),
       stories: userStories,
       initiatives: userInitiatives,
       deliveries: userDeliveries,
@@ -402,16 +403,17 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
 
     const overdueItems = enrichedTasks.filter(t => {
       if (['done', 'archived'].includes(t.status)) return false
-      if (!t.dueAt) return false
-      return new Date(t.dueAt) < now
+      const dl = effectiveTaskDeadlineUtcDay(t)
+      return !!(dl && dl.getTime() < now.getTime())
     }).length
     const blockedCount = enrichedTasks.filter(t => t.status === 'blocked').length
 
     // Task distribution by status (for gauge chart)
-    // Count overdue separately (tasks past dueAt that aren't done/archived)
+    // Count overdue separately (past effective deadline, not done/archived)
     const tasksByStatus: Record<string, number> = {}
     for (const t of enrichedTasks) {
-      const isOverdue = !['done', 'archived'].includes(t.status) && t.dueAt && new Date(t.dueAt) < now
+      const dl = effectiveTaskDeadlineUtcDay(t)
+      const isOverdue = !['done', 'archived'].includes(t.status) && !!(dl && dl.getTime() < now.getTime())
       if (isOverdue) {
         tasksByStatus['overdue'] = (tasksByStatus['overdue'] || 0) + 1
       } else {
@@ -460,19 +462,20 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
       ).length
     })
 
-    // Upcoming deadlines (tasks with dueAt in next 14 days)
+    // Upcoming deadlines (effective end in next 14 days)
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     const upcomingDeadlines = enrichedTasks
       .filter(t => {
         if (['done', 'archived'].includes(t.status)) return false
-        if (!t.dueAt) return false
-        const due = new Date(t.dueAt)
-        return due >= new Date(now.getFullYear(), now.getMonth(), now.getDate()) && due <= twoWeeksAhead
+        const due = effectiveTaskDeadlineUtcDay(t)
+        if (!due) return false
+        return due.getTime() >= todayStart.getTime() && due.getTime() <= twoWeeksAhead.getTime()
       })
       .map(t => ({
         id: t.id,
         title: t.title,
         type: 'task' as const,
-        dueAt: t.dueAt!,
+        dueAt: effectiveTaskDeadlineUtcDay(t)!.toISOString(),
         product: t.productName,
         status: t.status,
       }))
@@ -484,7 +487,7 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
       .filter(t => t.status === 'blocked')
       .slice(0, 5)
 
-    // Weekly timeline: tasks with dueAt in this week (Sun-Sat)
+    // Weekly timeline: tasks with effective deadline in this week (Sun-Sat)
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     const dayOfWeek = today.getDay() // 0=Sun
     const weekStartDate = new Date(today.getTime() - dayOfWeek * 24 * 60 * 60 * 1000)
@@ -493,14 +496,14 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
     const weeklyTimeline = enrichedTasks
       .filter(t => {
         if (['archived'].includes(t.status)) return false
-        if (!t.dueAt) return false
-        const due = new Date(t.dueAt)
-        return due >= weekStartDate && due < weekEndDate
+        const due = effectiveTaskDeadlineUtcDay(t)
+        if (!due) return false
+        return due.getTime() >= weekStartDate.getTime() && due.getTime() < weekEndDate.getTime()
       })
       .map(t => ({
         id: t.id,
         title: t.title,
-        dueAt: t.dueAt!,
+        dueAt: effectiveTaskDeadlineUtcDay(t)!.toISOString(),
         status: t.status,
         priority: t.priority,
         product: t.productName,

@@ -213,6 +213,8 @@ export const tasks = pgTable('tasks', {
   updatedAt: timestamp('updated_at').notNull().defaultNow().$onUpdate(() => new Date()),
   startedAt: timestamp('started_at'),
   completedAt: timestamp('completed_at'),
+  startDate: date('start_date'),
+  endDate: date('end_date'),
   dueAt: timestamp('due_at'),
 })
 

@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { Link2, Loader2, ChevronRight, ChevronDown, CheckCircle2, Circle, Trash2, ArrowLeft, Pencil, Check, X, Search } from 'lucide-vue-next'
 import TaskStatusIcon from '@/components/shared/TaskStatusIcon.vue'
+import TaskDetailPanel from '@/components/delivery/TaskDetailPanel.vue'
 import { useInitiativesStore } from '@/stores/initiatives'
 import { useBacklogStore } from '@/stores/backlog'
 import { useProductStore } from '@/stores/products'
@@ -10,7 +11,7 @@ import { useAuthStore } from '@/stores/auth'
 import { DateRangePicker } from '@/components/ui/date-range-picker'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import type { Initiative, InitiativeStatus, InitiativePriority } from '@/types/initiative'
-import type { TaskStatus } from '@/types/backlog'
+import type { Task, TaskStatus } from '@/types/backlog'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import { rewriteUploadUrlsInHtml, normalizeUploadUrlsForStorage } from '@/utils/uploadAssetUrl'
 
@@ -38,6 +39,53 @@ const expandedItems = ref<Set<string>>(new Set())
 
 const tabs = ['Initiative Overview', 'Stories & Backlog', 'Delivery Progress', 'Metrics']
 
+// Task detail panel (Stories & Backlog)
+interface TeamUser {
+  id: string
+  name: string
+  email: string
+  avatar: string | null
+}
+const selectedTask = ref<Task | null>(null)
+const showTaskPanel = ref(false)
+const fromStoryId = ref<string | null>(null)
+const teamMembers = ref<TeamUser[]>([])
+
+async function fetchTeamMembers() {
+  try {
+    const res = await fetch('/api/auth/users?q=', {
+      headers: { Authorization: `Bearer ${authStore.token}` },
+    })
+    if (res.ok) {
+      teamMembers.value = await res.json()
+    }
+  } catch {
+    teamMembers.value = []
+  }
+}
+
+function openTaskDetail(task: Task, storyId: string) {
+  selectedTask.value = task
+  fromStoryId.value = storyId
+  showTaskPanel.value = true
+}
+
+function closeTaskPanel() {
+  showTaskPanel.value = false
+  selectedTask.value = null
+  fromStoryId.value = null
+}
+
+async function onTaskUpdated() {
+  await backlogStore.fetchStories()
+  if (selectedTask.value) {
+    const fresh = backlogStore.allTasks.find(t => t.id === selectedTask.value!.id)
+    if (fresh) {
+      selectedTask.value = fresh
+    }
+  }
+}
+
 // Inline editing state
 const editingField = ref<string | null>(null)
 const editTitle = ref('')
@@ -57,7 +105,10 @@ const linkedStories = computed(() => {
 async function loadInitiative(id: string) {
   loading.value = true
   initiative.value = await initiativesStore.fetchInitiative(id)
-  await backlogStore.fetchStories()
+  await Promise.all([
+    backlogStore.fetchStories(),
+    fetchTeamMembers(),
+  ])
   loading.value = false
 }
 
@@ -722,8 +773,13 @@ function cycleTaskStatus(taskId: string, currentStatus: TaskStatus) {
 
                 <div v-if="expandedItems.has(item.id)" class="bg-gray-50/40 px-6 py-3 pl-14">
                   <div class="space-y-1">
-                    <div v-for="task in item.tasks" :key="task.id" class="flex items-center gap-3 py-2 px-3 rounded-lg hover:bg-white/80 transition-colors group/task">
-                      <button @click.stop="cycleTaskStatus(task.id, task.status)" class="shrink-0">
+                    <div
+                      v-for="task in item.tasks"
+                      :key="task.id"
+                      class="flex items-center gap-3 py-2 px-3 rounded-lg hover:bg-white/80 transition-colors group/task cursor-pointer"
+                      @click="openTaskDetail(task, item.id)"
+                    >
+                      <button type="button" @click.stop="cycleTaskStatus(task.id, task.status)" class="shrink-0">
                         <TaskStatusIcon :status="task.status" :size="16" />
                       </button>
                       <span class="text-sm flex-1" :class="task.status === 'done' ? 'text-gray-400 line-through' : 'text-gray-700'">{{ task.title }}</span>
@@ -765,6 +821,15 @@ function cycleTaskStatus(taskId: string, currentStatus: TaskStatus) {
         </div>
 
       </div>
+
+      <TaskDetailPanel
+        :task="selectedTask"
+        :open="showTaskPanel"
+        :team-members="teamMembers"
+        :from-story-id="fromStoryId"
+        @close="closeTaskPanel"
+        @updated="onTaskUpdated"
+      />
     </template>
   </div>
 </template>

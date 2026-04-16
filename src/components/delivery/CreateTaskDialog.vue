@@ -33,6 +33,7 @@ import {
   FileText,
   Rocket,
   Calendar,
+  Hourglass,
   Plus,
   ListTree,
 } from 'lucide-vue-next'
@@ -62,7 +63,10 @@ const description = ref('')
 const type = ref<TaskType>('development')
 const priority = ref<TaskPriority>('medium')
 const selectedStoryId = ref('')
-const dueAt = ref('')
+const startDate = ref('')
+const endDate = ref('')
+/** Hours; empty string → null on create */
+const estimateHours = ref('')
 const submitting = ref(false)
 
 // Story search
@@ -274,6 +278,8 @@ const draftParentTask = computed((): Task | null => {
     updatedAt: '',
     startedAt: null,
     completedAt: null,
+    startDate: null,
+    endDate: null,
     dueAt: null,
   } as unknown as Task
 })
@@ -355,7 +361,9 @@ function resetForm() {
   selectedStoryId.value = ''
   storySearchQuery.value = ''
   showStoryDropdown.value = false
-  dueAt.value = ''
+  startDate.value = ''
+  endDate.value = ''
+  estimateHours.value = ''
   ownerUserId.value = null
   cachedOwner.value = null
   ownerSearchQuery.value = ''
@@ -401,6 +409,11 @@ async function handleSubmit() {
       sortOrder: i,
     }))
 
+  // `v-model` on type="number" may bind a number; normalize before trim/parse.
+  const estRaw = String(estimateHours.value ?? '').trim()
+  const estParsed = estRaw === '' ? null : Number.parseFloat(estRaw)
+  const estimateValue = estParsed !== null && Number.isFinite(estParsed) ? estParsed : null
+
   await backlogStore.createTask(selectedStoryId.value, {
     title: title.value.trim(),
     description: description.value || null,
@@ -408,7 +421,9 @@ async function handleSubmit() {
     priority: priority.value,
     ownerUserId: ownerUserId.value,
     assigneeUserIds: assigneeUserIds.value.length > 0 ? assigneeUserIds.value : null,
-    dueAt: dueAt.value || null,
+    startDate: startDate.value || null,
+    endDate: endDate.value || null,
+    estimateValue,
     subtasks: subtasksPayload.length > 0 ? subtasksPayload : undefined,
   })
 
@@ -421,7 +436,7 @@ async function handleSubmit() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-[560px] !overflow-x-hidden !overflow-y-visible max-h-[90vh] overflow-y-auto">
+    <DialogContent class="sm:max-w-[640px] !overflow-x-hidden !overflow-y-visible max-h-[90vh] overflow-y-auto">
       <DialogHeader>
         <DialogTitle>Create Task</DialogTitle>
         <DialogDescription>Create a new task under a story.</DialogDescription>
@@ -662,13 +677,11 @@ async function handleSubmit() {
           </div>
         </div>
 
-        <!-- Assignees & Due Date row -->
-        <div class="grid grid-cols-2 gap-3">
-          <!-- Assignees (multi-select) -->
-          <div class="space-y-1.5">
-            <label class="text-sm font-medium text-gray-700">Assignees</label>
-            <!-- Selected assignees chips -->
-            <div v-if="cachedAssignees.length > 0" class="flex flex-wrap gap-1.5 mb-1.5">
+        <!-- Assignees -->
+        <div class="space-y-1.5 min-w-0">
+          <label class="text-sm font-medium text-gray-700">Assignees</label>
+          <!-- Selected assignees chips -->
+          <div v-if="cachedAssignees.length > 0" class="flex flex-wrap gap-1.5 mb-1.5">
               <div
                 v-for="u in cachedAssignees"
                 :key="u.id"
@@ -684,63 +697,91 @@ async function handleSubmit() {
                 </button>
               </div>
             </div>
-            <!-- Assignee search input -->
-            <div class="relative">
-              <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-2.5 py-1.5 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white">
-                <Search :size="14" class="text-gray-400 shrink-0" />
-                <input
-                  v-model="assigneeSearchQuery"
-                  class="text-sm text-gray-900 bg-transparent outline-none w-full placeholder-gray-400"
-                  placeholder="Add assignees..."
-                  @input="onAssigneeInput"
-                  @focus="onAssigneeFocus"
-                  @blur="hideAssigneeDropdownWithDelay"
-                />
-                <Loader2 v-if="assigneeSearchLoading" :size="14" class="text-gray-400 animate-spin shrink-0" />
-              </div>
-              <div
-                v-if="showAssigneeDropdown && assigneeSearchResults.length > 0"
-                class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[180px] overflow-auto z-[100]"
-                @mousedown.prevent
+          <!-- Assignee search input -->
+          <div class="relative">
+            <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-2.5 py-1.5 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white">
+              <Search :size="14" class="text-gray-400 shrink-0" />
+              <input
+                v-model="assigneeSearchQuery"
+                class="text-sm text-gray-900 bg-transparent outline-none w-full placeholder-gray-400"
+                placeholder="Add assignees..."
+                @input="onAssigneeInput"
+                @focus="onAssigneeFocus"
+                @blur="hideAssigneeDropdownWithDelay"
+              />
+              <Loader2 v-if="assigneeSearchLoading" :size="14" class="text-gray-400 animate-spin shrink-0" />
+            </div>
+            <div
+              v-if="showAssigneeDropdown && assigneeSearchResults.length > 0"
+              class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[180px] overflow-auto z-[100]"
+              @mousedown.prevent
+            >
+              <button
+                v-for="user in assigneeSearchResults"
+                :key="user.id"
+                type="button"
+                class="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
+                :class="assigneeUserIds.includes(user.id) ? 'bg-[#4857FE]/5' : ''"
+                @click="toggleAssignee(user)"
               >
-                <button
-                  v-for="user in assigneeSearchResults"
-                  :key="user.id"
-                  type="button"
-                  class="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
-                  :class="assigneeUserIds.includes(user.id) ? 'bg-[#4857FE]/5' : ''"
-                  @click="toggleAssignee(user)"
-                >
-                  <div class="w-5 h-5 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-medium overflow-hidden shrink-0">
-                    <UploadAssetImg v-if="user.avatar" :src="user.avatar" class="w-5 h-5 rounded-full object-cover" :alt="user.name" />
-                    <span v-else>{{ user.name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2) }}</span>
-                  </div>
-                  <div class="flex flex-col min-w-0 flex-1">
-                    <span class="text-sm font-medium text-gray-900 truncate">{{ user.name }}</span>
-                    <span class="text-[10px] text-gray-400 truncate">{{ user.email }}</span>
-                  </div>
-                  <svg v-if="assigneeUserIds.includes(user.id)" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-[#4857FE] shrink-0"><polyline points="20 6 9 17 4 12"/></svg>
-                </button>
-              </div>
-              <div
-                v-else-if="showAssigneeDropdown && assigneeSearchQuery && !assigneeSearchLoading && assigneeSearchResults.length === 0"
-                class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-[100]"
-              >
-                <p class="text-xs text-gray-400 text-center">No users found</p>
-              </div>
+                <div class="w-5 h-5 rounded-full bg-[#7C5CFC] flex items-center justify-center text-white text-[8px] font-medium overflow-hidden shrink-0">
+                  <UploadAssetImg v-if="user.avatar" :src="user.avatar" class="w-5 h-5 rounded-full object-cover" :alt="user.name" />
+                  <span v-else>{{ user.name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2) }}</span>
+                </div>
+                <div class="flex flex-col min-w-0 flex-1">
+                  <span class="text-sm font-medium text-gray-900 truncate">{{ user.name }}</span>
+                  <span class="text-[10px] text-gray-400 truncate">{{ user.email }}</span>
+                </div>
+                <svg v-if="assigneeUserIds.includes(user.id)" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-[#4857FE] shrink-0"><polyline points="20 6 9 17 4 12"/></svg>
+              </button>
+            </div>
+            <div
+              v-else-if="showAssigneeDropdown && assigneeSearchQuery && !assigneeSearchLoading && assigneeSearchResults.length === 0"
+              class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-[100]"
+            >
+              <p class="text-xs text-gray-400 text-center">No users found</p>
             </div>
           </div>
+        </div>
 
-          <!-- Due Date -->
-          <div class="space-y-1.5">
-            <label class="text-sm font-medium text-gray-700">Due Date</label>
-            <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-2.5 py-1.5 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white">
+        <!-- Start Date, End Date, Estimate (one row) -->
+        <div class="grid grid-cols-3 gap-2 sm:gap-3 min-w-0">
+          <div class="space-y-1.5 min-w-0">
+            <label class="text-sm font-medium text-gray-700">Start Date</label>
+            <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-2.5 py-1.5 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white min-w-0">
               <Calendar :size="14" class="text-gray-400 shrink-0" />
               <input
-                v-model="dueAt"
+                v-model="startDate"
                 type="date"
-                class="text-sm text-gray-900 bg-transparent outline-none w-full placeholder-gray-400"
+                class="text-sm text-gray-900 bg-transparent outline-none w-full min-w-0 placeholder-gray-400"
               />
+            </div>
+          </div>
+          <div class="space-y-1.5 min-w-0">
+            <label class="text-sm font-medium text-gray-700">End Date</label>
+            <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-2.5 py-1.5 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white min-w-0">
+              <Calendar :size="14" class="text-gray-400 shrink-0" />
+              <input
+                v-model="endDate"
+                type="date"
+                class="text-sm text-gray-900 bg-transparent outline-none w-full min-w-0 placeholder-gray-400"
+              />
+            </div>
+          </div>
+          <div class="space-y-1.5 min-w-0">
+            <label class="text-sm font-medium text-gray-700">Estimate</label>
+            <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-2.5 py-1.5 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white min-w-0">
+              <Hourglass :size="14" class="text-gray-400 shrink-0" />
+              <input
+                v-model="estimateHours"
+                type="number"
+                min="0"
+                step="any"
+                inputmode="decimal"
+                placeholder="e.g. 2.5 or 0.25"
+                class="text-sm text-gray-900 bg-transparent outline-none w-full min-w-0 placeholder-gray-400"
+              />
+              <span class="text-xs text-gray-400 shrink-0">h</span>
             </div>
           </div>
         </div>

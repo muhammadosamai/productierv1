@@ -18,7 +18,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   taskClick: [task: Task]
-  taskDueChange: [taskId: string, dueAt: string]
+  /** `dateWire` is calendar end date YYYY-MM-DD (maps to task `endDate`). */
+  taskDueChange: [taskId: string, dateWire: string]
 }>()
 
 function getUserById(id: string): TeamUser | undefined {
@@ -89,6 +90,14 @@ function isWeekend(date: Date) {
 // ============ TASK POSITIONING ============
 
 function getTaskDate(task: Task): Date | null {
+  const end = task.endDate?.slice(0, 10)
+  if (end) {
+    const parts = end.split('-').map(Number)
+    const y = parts[0], mo = parts[1], da = parts[2]
+    if (y != null && mo != null && da != null && Number.isFinite(y) && Number.isFinite(mo) && Number.isFinite(da)) {
+      return new Date(y, mo - 1, da, 12, 0, 0, 0)
+    }
+  }
   if (task.dueAt) return new Date(task.dueAt)
   if (task.completedAt && task.status === 'done') return new Date(task.completedAt)
   if (task.startedAt) return new Date(task.startedAt)
@@ -132,16 +141,15 @@ const visibleTaskCount = computed(() => {
   return count
 })
 
-// When a task is dropped into a day column, update its dueAt
+// When a task is dropped into a day column, set calendar end date (YYYY-MM-DD)
 function onDayChange(date: Date, evt: any) {
   if (!evt.added) return
   const task = evt.added.element as Task
-  // Build ISO date string for the target day (noon to avoid timezone issues)
   const y = date.getFullYear()
   const m = String(date.getMonth() + 1).padStart(2, '0')
   const d = String(date.getDate()).padStart(2, '0')
-  const newDueAt = `${y}-${m}-${d}T12:00:00.000Z`
-  emit('taskDueChange', task.id, newDueAt)
+  const dateWire = `${y}-${m}-${d}`
+  emit('taskDueChange', task.id, dateWire)
 }
 
 // ============ STYLING ============

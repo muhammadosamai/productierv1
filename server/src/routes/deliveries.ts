@@ -5,6 +5,7 @@ import { eq, count } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
+import { serializeParentTaskRow } from '../lib/taskDates'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -110,14 +111,16 @@ export const deliveryRoutes = new Elysia({ prefix: '/api/deliveries' })
       },
     })
     if (!delivery) { set.status = 404; return { error: 'Delivery not found' } }
+    const mappedTasks = delivery.tasks.map(t => serializeParentTaskRow(t as Record<string, unknown>))
     return {
       ...delivery,
+      tasks: mappedTasks,
       initiatives: delivery.deliveryInitiatives.map(di => di.initiative),
       deliveryInitiatives: undefined,
-      totalTasks: delivery.tasks.length,
-      completedTasks: delivery.tasks.filter(t => t.status === 'done').length,
-      progress: delivery.tasks.length > 0
-        ? Math.round((delivery.tasks.filter(t => t.status === 'done').length / delivery.tasks.length) * 100)
+      totalTasks: mappedTasks.length,
+      completedTasks: mappedTasks.filter(t => t.status === 'done').length,
+      progress: mappedTasks.length > 0
+        ? Math.round((mappedTasks.filter(t => t.status === 'done').length / mappedTasks.length) * 100)
         : 0,
     }
   })

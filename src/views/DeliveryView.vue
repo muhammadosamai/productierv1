@@ -232,9 +232,9 @@ async function onColumnChange(colKey: string, evt: any) {
   }
 }
 
-// Timeline drag: update task due date
-async function onTaskDueChange(taskId: string, dueAt: string) {
-  await backlogStore.updateTask(taskId, { dueAt })
+// Timeline drag: update task end date (calendar)
+async function onTaskDueChange(taskId: string, endDateWire: string) {
+  await backlogStore.updateTask(taskId, { endDate: endDateWire || null })
   if (delivery.value) {
     delivery.value = await deliveriesStore.fetchDelivery(delivery.value.id)
   }

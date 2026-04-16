@@ -8,6 +8,7 @@ import { validateAttachmentFileName, validateAttachmentContent } from '../lib/al
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
 import { sanitizeCommentHtml } from '../lib/sanitizeCommentHtml'
 import { previewWithEllipsis } from '../lib/richTextPreview'
+import { serializeParentTaskRow } from '../lib/taskDates'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
@@ -78,7 +79,7 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
   // GET /api/stories
   .get('/', async ({ query }) => {
     const product = query.product
-    return db.query.stories.findMany({
+    const storyRows = await db.query.stories.findMany({
       where: product ? eq(stories.product, product) : undefined,
       orderBy: (s, { desc }) => [desc(s.createdAt)],
       with: {
@@ -108,6 +109,10 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
         comments: { with: { user: true } },
       },
     })
+    return storyRows.map(s => ({
+      ...s,
+      tasks: (s.tasks || []).map(t => serializeParentTaskRow(t as Record<string, unknown>)),
+    }))
   })
 
   // POST /api/stories
@@ -198,7 +203,10 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
       },
     })
     if (!story) { set.status = 404; return { error: 'Story not found' } }
-    return story
+    return {
+      ...story,
+      tasks: (story.tasks || []).map(t => serializeParentTaskRow(t as Record<string, unknown>)),
+    }
   })
 
   // PUT /api/stories/:id

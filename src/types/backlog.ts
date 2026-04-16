@@ -83,6 +83,11 @@ export interface Task {
   updatedAt: string
   startedAt: string | null
   completedAt: string | null
+  /** Calendar date YYYY-MM-DD */
+  startDate: string | null
+  /** Calendar date YYYY-MM-DD */
+  endDate: string | null
+  /** Legacy deadline timestamp; may be derived from `endDate` in API responses */
   dueAt: string | null
   comments?: TaskComment[]
   attachments?: TaskAttachment[]
@@ -184,7 +189,10 @@ export interface CreateTaskPayload {
   dependent?: string[] | null
   blockedReason?: string | null
   deliveryId?: string | null
+  /** @deprecated Prefer startDate/endDate; still accepted by API for compatibility */
   dueAt?: string | null
+  startDate?: string | null
+  endDate?: string | null
   subtasks?: CreateTaskSubtaskPayload[]
 }
 

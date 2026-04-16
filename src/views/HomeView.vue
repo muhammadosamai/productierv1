@@ -380,7 +380,7 @@ function getInitials(name: string) {
               <!-- Tasks for this day -->
               <div class="p-1.5 space-y-1.5 min-h-[80px]">
                 <div
-                  v-for="task in homeData.weekTimeline.tasks.filter((t: any) => t.dueAt?.startsWith(day.date))"
+                  v-for="task in homeData.weekTimeline.tasks.filter((t: any) => (t.endDate?.slice(0, 10) || (t.dueAt ? String(t.dueAt).slice(0, 10) : '')) === day.date)"
                   :key="task.id"
                   class="rounded-lg px-2.5 py-2 text-sm cursor-pointer transition-all hover:shadow-sm"
                   :class="{

@@ -2,6 +2,7 @@ import { db } from '../db'
 import { tasks, deliveries } from '../db/schema'
 import { and, gte, lte, notInArray } from 'drizzle-orm'
 import { sendNotificationIfEnabled } from './notificationEmails'
+import { effectiveTaskDeadlineUtcDay } from '../lib/taskDates'
 
 const REMINDER_INTERVAL_MS = 60 * 60 * 1000 // 1 hour
 const LOOKAHEAD_MS = 24 * 60 * 60 * 1000 // 24 hours
@@ -18,20 +19,23 @@ async function checkDeadlines() {
     const now = new Date()
     const lookahead = new Date(now.getTime() + LOOKAHEAD_MS)
 
-    // Tasks with upcoming dueAt
-    const upcomingTasks = await db.select().from(tasks)
-      .where(and(
-        gte(tasks.dueAt, now),
-        lte(tasks.dueAt, lookahead),
-        notInArray(tasks.status, ['done', 'archived']),
-      ))
+    // Tasks with deadline (endDate or legacy dueAt) in the next lookahead window
+    const activeTasks = await db.select().from(tasks).where(
+      notInArray(tasks.status, ['done', 'archived']),
+    )
+    const upcomingTasks = activeTasks.filter(t => {
+      const d = effectiveTaskDeadlineUtcDay(t)
+      if (!d) return false
+      return d.getTime() >= now.getTime() && d.getTime() <= lookahead.getTime()
+    })
 
     for (const task of upcomingTasks) {
       const notifyIds = new Set<string>()
       if (task.ownerUserId) notifyIds.add(task.ownerUserId)
       if (task.assigneeUserIds) task.assigneeUserIds.forEach(id => notifyIds.add(id))
 
-      const dueStr = task.dueAt ? new Date(task.dueAt).toLocaleDateString('en-US', {
+      const deadline = effectiveTaskDeadlineUtcDay(task)
+      const dueStr = deadline ? deadline.toLocaleDateString('en-US', {
         weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
       }) : undefined
 

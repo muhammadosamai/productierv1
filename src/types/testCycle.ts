@@ -19,6 +19,12 @@ export interface TestCycleIssue {
   story?: { id: string; title: string } | null
 }
 
+/** Minimal row from main `issues` table when `testCycleId` is set (list counts / open counts). */
+export interface TestCycleLinkedIssueRef {
+  id: string
+  status: string
+}
+
 export interface TestCycle {
   id: string
   title: string
@@ -35,7 +41,10 @@ export interface TestCycle {
   createdByUser?: { id: string; name: string; email: string; avatar: string | null }
   delivery?: { id: string; title: string } | null
   release?: { id: string; title: string; version: string | null } | null
+  /** Legacy `test_cycle_issues` rows */
   issues?: TestCycleIssue[]
+  /** Main product issues linked to this cycle (`issues.test_cycle_id`) */
+  linkedIssues?: TestCycleLinkedIssueRef[]
 }
 
 export interface CreateTestCyclePayload {

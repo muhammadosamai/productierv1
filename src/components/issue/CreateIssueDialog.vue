@@ -50,7 +50,12 @@ import { resolveApiPath } from '@/utils/uploadAssetUrl'
 import { toast } from 'vue-sonner'
 
 const open = defineModel<boolean>('open', { default: false })
-const props = defineProps<{ storyId?: string | null }>()
+const props = defineProps<{
+  storyId?: string | null
+  /** When set (e.g. Test Cycle page), issue is created linked to this cycle; UI does not allow changing it. */
+  testCycleId?: string | null
+  testCycleTitle?: string | null
+}>()
 const emit = defineEmits<{ created: [id: string] }>()  
 
 const issuesStore = useIssuesStore()
@@ -312,8 +317,8 @@ function clearForm() {
   linkedStoryId.value = props.storyId || null
   linkedStoryTitle.value = props.storyId ? linkedStoryTitle.value : ''
   linkedTaskId.value = null; linkedTaskTitle.value = ''
-  linkedTestCycleId.value = null
-  linkedTestCycleTitle.value = ''
+  linkedTestCycleId.value = props.testCycleId || null
+  linkedTestCycleTitle.value = props.testCycleId ? (props.testCycleTitle || linkedTestCycleTitle.value) : ''
   testCycleSearch.value = ''
   resetCustomFieldValues()
 }
@@ -331,6 +336,30 @@ watch(() => props.storyId, async (id) => {
     }
   } catch { linkedStoryTitle.value = '' }
 }, { immediate: true })
+
+watch(
+  () => [props.testCycleId, props.testCycleTitle] as const,
+  async ([id, title]) => {
+    if (!id) return
+    linkedTestCycleId.value = id
+    if (title?.trim()) {
+      linkedTestCycleTitle.value = title.trim()
+      return
+    }
+    try {
+      const res = await fetch(`/api/test-cycles/${id}`)
+      if (res.ok) {
+        const c = await res.json()
+        linkedTestCycleTitle.value = c?.title || ''
+      } else {
+        linkedTestCycleTitle.value = ''
+      }
+    } catch {
+      linkedTestCycleTitle.value = ''
+    }
+  },
+  { immediate: true },
+)
 
 watch(open, (val) => { if (!val) clearForm() })
 
@@ -494,7 +523,7 @@ async function handleSubmit() {
       <DialogHeader class="shrink-0">
         <DialogTitle class="flex items-center gap-2">
           <Bug :size="20" class="text-red-500" />
-          Report a Bug
+          Create Issue
         </DialogTitle>
         <DialogDescription>Fill in all relevant details to help us fix it faster.</DialogDescription>
       </DialogHeader>
@@ -841,12 +870,18 @@ async function handleSubmit() {
                 <span class="text-[10px] font-bold text-violet-700 bg-violet-100 rounded px-1.5 py-0.5 shrink-0">CYCLE</span>
                 <span class="text-sm text-violet-900 truncate">{{ linkedTestCycleTitle }}</span>
               </div>
-              <button type="button" class="text-violet-400 hover:text-violet-700 shrink-0" title="Remove link" @click="removeTestCycleLink">
+              <button
+                v-if="!props.testCycleId"
+                type="button"
+                class="text-violet-400 hover:text-violet-700 shrink-0"
+                title="Remove link"
+                @click="removeTestCycleLink"
+              >
                 <X :size="14" />
               </button>
             </div>
 
-            <div class="relative">
+            <div v-if="!props.testCycleId" class="relative">
               <div class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 focus-within:border-[#4857FE] focus-within:ring-1 focus-within:ring-[#4857FE]/20 bg-white">
                 <Search :size="14" class="text-gray-400 shrink-0" />
                 <input
@@ -874,7 +909,13 @@ async function handleSubmit() {
               </div>
             </div>
 
-            <p class="text-xs text-gray-400">Optional — link this issue to a testing cycle (archived cycles are hidden).</p>
+            <p class="text-xs text-gray-400">
+              {{
+                props.testCycleId
+                  ? 'This issue is linked to the test cycle you opened it from.'
+                  : 'Optional — link this issue to a testing cycle (archived cycles are hidden).'
+              }}
+            </p>
           </fieldset>
 
           <!-- Custom fields from form builder -->

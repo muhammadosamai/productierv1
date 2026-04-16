@@ -65,7 +65,7 @@ const taskStatusOptions = ['created', 'assigned', 'in_progress', 'in_review', 'd
 const taskPriorityOptions = ['high', 'medium', 'low'] as const
 const taskTypeOptions = ['design', 'development', 'testing', 'review', 'research', 'fix', 'documentation', 'deployment'] as const
 
-const taskEditableFields = new Set(['title', 'status', 'priority', 'type', 'owner', 'assignees', 'reviewers', 'estimate', 'dueAt', 'blockedReason'])
+const taskEditableFields = new Set(['title', 'status', 'priority', 'type', 'owner', 'assignees', 'reviewers', 'estimate', 'startDate', 'endDate', 'blockedReason'])
 
 function isEditing(id: string, field: string) {
   return editingCell.value?.id === id && editingCell.value?.field === field
@@ -259,7 +259,7 @@ const filteredTasks = computed(() => {
 })
 
 // Sorting
-type SortField = 'title' | 'status' | 'priority' | 'type' | 'story' | 'owner' | 'assignees' | 'reviewers' | 'estimate' | 'dueAt' | 'description' | 'createdBy' | 'createdAt' | 'updatedAt' | 'startedAt' | 'completedAt' | 'dependent' | 'blockedReason' | 'comments' | 'attachments'
+type SortField = 'title' | 'status' | 'priority' | 'type' | 'story' | 'owner' | 'assignees' | 'reviewers' | 'estimate' | 'startDate' | 'endDate' | 'description' | 'createdBy' | 'createdAt' | 'updatedAt' | 'startedAt' | 'completedAt' | 'dependent' | 'blockedReason' | 'comments' | 'attachments'
 const sortField = ref<SortField | null>(null)
 const sortDirection = ref<'asc' | 'desc'>('asc')
 
@@ -289,6 +289,19 @@ function compareDate(a: string | null | undefined, b: string | null | undefined)
   const da = a ? new Date(a).getTime() : 0
   const db = b ? new Date(b).getTime() : 0
   return da - db
+}
+
+/** Table sort/display: calendar end from `endDate` or legacy `dueAt`. */
+function effectiveTaskEndWire(t: Task): string {
+  if (t.endDate) return t.endDate.slice(0, 10)
+  if (t.dueAt) return t.dueAt.slice(0, 10)
+  return ''
+}
+
+function isTaskEndOverdueRow(t: Task): boolean {
+  const end = effectiveTaskEndWire(t)
+  if (!end || t.status === 'done') return false
+  return new Date(end + 'T23:59:59').getTime() < Date.now()
 }
 function compareUserName(id: string | null | undefined): string {
   if (!id) return ''
@@ -335,8 +348,11 @@ const sortedTasks = computed(() => {
       case 'estimate':
         cmp = (a.estimateValue || 0) - (b.estimateValue || 0)
         break
-      case 'dueAt':
-        cmp = compareDate(a.dueAt, b.dueAt)
+      case 'startDate':
+        cmp = compareDate(a.startDate, b.startDate)
+        break
+      case 'endDate':
+        cmp = compareDate(a.endDate ?? (a.dueAt ? a.dueAt.slice(0, 10) : null), b.endDate ?? (b.dueAt ? b.dueAt.slice(0, 10) : null))
         break
       case 'description':
         cmp = compareStr(a.description, b.description)
@@ -392,7 +408,8 @@ const defaultColumns: ColumnConfig[] = [
   { field: 'assignees', label: 'Assignees', width: '160px', visible: true },
   { field: 'reviewers', label: 'Reviewers', width: '160px', visible: false },
   { field: 'estimate', label: 'Estimate', width: '90px', visible: false },
-  { field: 'dueAt', label: 'Due Date', width: '110px', visible: false },
+  { field: 'startDate', label: 'Start date', width: '110px', visible: false },
+  { field: 'endDate', label: 'End date', width: '110px', visible: false },
   { field: 'description', label: 'Description', width: '200px', visible: false },
   { field: 'createdBy', label: 'Created By', width: '140px', visible: false },
   { field: 'comments', label: 'Comments', width: '80px', visible: true },
@@ -414,10 +431,21 @@ function mergeWithDefaults(saved: ColumnConfig[]): ColumnConfig[] {
   return merged
 }
 
+function migrateSavedTaskColumns(raw: ColumnConfig[]): ColumnConfig[] {
+  return raw.map(c =>
+    (c.field as string) === 'dueAt'
+      ? { ...c, field: 'endDate', label: 'End date' }
+      : c,
+  )
+}
+
 function loadColumnConfig(): ColumnConfig[] {
   try {
     const saved = localStorage.getItem('tasks-column-config')
-    if (saved) return mergeWithDefaults(JSON.parse(saved) as ColumnConfig[])
+    if (saved) {
+      const parsed = migrateSavedTaskColumns(JSON.parse(saved) as ColumnConfig[])
+      return mergeWithDefaults(parsed)
+    }
   } catch { /* ignore */ }
   return defaultColumns.map(c => ({ ...c }))
 }
@@ -461,7 +489,7 @@ async function loadUserSettings() {
     const settings = await res.json()
 
     if (settings['tasks-column-config']) {
-      const serverCols = mergeWithDefaults(settings['tasks-column-config'] as ColumnConfig[])
+      const serverCols = mergeWithDefaults(migrateSavedTaskColumns(settings['tasks-column-config'] as ColumnConfig[]))
       columns.value = serverCols
       localStorage.setItem('tasks-column-config', JSON.stringify(serverCols))
     }
@@ -532,6 +560,10 @@ function loadColumnWidths(): Record<string, number> {
       const parsed = JSON.parse(saved) as Record<string, number>
       for (const [k, v] of Object.entries(parsed)) {
         if (typeof v === 'number' && v >= 60) widths[k] = v
+      }
+      if (widths.dueAt && !widths.endDate) {
+        widths.endDate = widths.dueAt
+        delete widths.dueAt
       }
     }
   } catch { /* ignore */ }
@@ -770,6 +802,8 @@ function changeFieldLabel(field: string): string {
     case 'blockedReason': return 'Blocked reason'
     case 'estimateValue': return 'Estimate'
     case 'dueAt': return 'Due date'
+    case 'startDate': return 'Start date'
+    case 'endDate': return 'End date'
     case 'dependent': return 'Dependency'
     default: return activityFormatField(field)
   }
@@ -809,6 +843,8 @@ function changeFieldIcon(field: string) {
     case 'type': return Tag
     case 'estimateValue': return Hourglass
     case 'dueAt': return CalendarClock
+    case 'startDate': return CalendarClock
+    case 'endDate': return CalendarClock
     case 'dependent': return Link
     case 'ownerUserId': return User
     case 'assigneeUserIds': return Users
@@ -837,11 +873,12 @@ function changeDescription(change: { field: string; from: string | null; to: str
 // Format a change value for display (dates, enums, etc.)
 function formatChangeValue(field: string, value: string | null): string {
   if (!value) return '—'
-  if (field === 'dueAt') {
+  if (field === 'dueAt' || field === 'startDate' || field === 'endDate') {
     const d = new Date(value)
     if (!isNaN(d.getTime())) {
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     }
+    if ((field === 'startDate' || field === 'endDate') && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value
   }
   if (field === 'estimateValue') {
     const n = parseFloat(value)
@@ -1796,21 +1833,38 @@ function renderUserAvatar(userId: string | null) {
                   </template>
                 </div>
 
-                <!-- Due Date -->
-                <div v-else-if="col.field === 'dueAt'" class="min-w-0 inline-edit-cell"
-                  :class="inlineEditMode && !isEditing(task.id, 'dueAt') ? 'hover:bg-gray-100/60 rounded px-1 -mx-1 cursor-text' : ''"
-                  @click="startTaskEditing(task.id, 'dueAt', task.dueAt ? task.dueAt.slice(0, 10) : '', $event)"
+                <!-- Start date -->
+                <div v-else-if="col.field === 'startDate'" class="min-w-0 inline-edit-cell"
+                  :class="inlineEditMode && !isEditing(task.id, 'startDate') ? 'hover:bg-gray-100/60 rounded px-1 -mx-1 cursor-text' : ''"
+                  @click="startTaskEditing(task.id, 'startDate', task.startDate ? task.startDate.slice(0, 10) : '', $event)"
                 >
-                  <input v-if="isEditing(task.id, 'dueAt')"
+                  <input v-if="isEditing(task.id, 'startDate')"
                     v-model="editValue"
                     type="date"
                     class="inline-edit-input w-full text-sm text-gray-600 bg-white border border-[#4857FE]/30 rounded px-2 py-1 outline-none ring-2 ring-[#4857FE]/20"
-                    @blur="saveTaskInlineEdit(task.id, 'dueAt', editValue || null)"
-                    @keydown.enter.prevent="saveTaskInlineEdit(task.id, 'dueAt', editValue || null)"
+                    @blur="saveTaskInlineEdit(task.id, 'startDate', editValue || null)"
+                    @keydown.enter.prevent="saveTaskInlineEdit(task.id, 'startDate', editValue || null)"
                     @keydown.escape.prevent="cancelTaskEdit()"
                     @click.stop
                   />
-                  <span v-else class="text-sm" :class="task.dueAt && new Date(task.dueAt) < new Date() && task.status !== 'done' ? 'text-red-500 font-medium' : 'text-gray-500'">{{ formatDate(task.dueAt) }}</span>
+                  <span v-else class="text-sm text-gray-500">{{ formatDate(task.startDate) }}</span>
+                </div>
+
+                <!-- End date -->
+                <div v-else-if="col.field === 'endDate'" class="min-w-0 inline-edit-cell"
+                  :class="inlineEditMode && !isEditing(task.id, 'endDate') ? 'hover:bg-gray-100/60 rounded px-1 -mx-1 cursor-text' : ''"
+                  @click="startTaskEditing(task.id, 'endDate', effectiveTaskEndWire(task), $event)"
+                >
+                  <input v-if="isEditing(task.id, 'endDate')"
+                    v-model="editValue"
+                    type="date"
+                    class="inline-edit-input w-full text-sm text-gray-600 bg-white border border-[#4857FE]/30 rounded px-2 py-1 outline-none ring-2 ring-[#4857FE]/20"
+                    @blur="saveTaskInlineEdit(task.id, 'endDate', editValue || null)"
+                    @keydown.enter.prevent="saveTaskInlineEdit(task.id, 'endDate', editValue || null)"
+                    @keydown.escape.prevent="cancelTaskEdit()"
+                    @click.stop
+                  />
+                  <span v-else class="text-sm" :class="isTaskEndOverdueRow(task) ? 'text-red-500 font-medium' : 'text-gray-500'">{{ formatDate(effectiveTaskEndWire(task) || null) }}</span>
                 </div>
 
                 <!-- Description -->

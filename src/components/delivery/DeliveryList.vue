@@ -164,7 +164,7 @@ function taskShortId(task: Task) {
             <div class="grid grid-cols-[1fr_1.2fr_120px_100px_100px_40px] gap-x-3 items-center px-5 py-2 border-t border-b border-gray-100 bg-gray-50/50">
               <span class="text-[11px] font-medium text-gray-400 tracking-wide">Task Name</span>
               <span class="text-[11px] font-medium text-gray-400 tracking-wide">Description</span>
-              <span class="text-[11px] font-medium text-gray-400 tracking-wide">Deadline</span>
+              <span class="text-[11px] font-medium text-gray-400 tracking-wide">End date</span>
               <span class="text-[11px] font-medium text-gray-400 tracking-wide">People</span>
               <span class="text-[11px] font-medium text-gray-400 tracking-wide">Priority</span>
               <span></span>
@@ -188,9 +188,9 @@ function taskShortId(task: Task) {
                   <span class="text-sm text-gray-500 truncate block">{{ richTextPreviewText(task.description) || '—' }}</span>
                 </div>
 
-                <!-- Deadline -->
+                <!-- End date -->
                 <div>
-                  <span class="text-sm text-gray-600">{{ formatDate(task.dueAt) }}</span>
+                  <span class="text-sm text-gray-600">{{ formatDate(task.endDate ?? (task.dueAt ? task.dueAt.slice(0, 10) : null)) }}</span>
                 </div>
 
                 <!-- People -->

@@ -6,6 +6,8 @@ import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
+import { sanitizeCommentHtml } from '../lib/sanitizeCommentHtml'
+import { previewWithEllipsis } from '../lib/richTextPreview'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
@@ -295,20 +297,25 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
   .post('/:id/comments', async ({ params: { id }, body, jwt, headers, set }) => {
     const user = await getUserFromHeader(jwt.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+    const content = sanitizeCommentHtml(body.content)
+    if (!content.trim()) {
+      set.status = 400
+      return { error: 'Comment content is required' }
+    }
 
     const story = await db.query.stories.findFirst({ where: eq(stories.id, id) })
 
     const [comment] = await db.insert(storyComments).values({
       storyId: id,
       userId: user.id,
-      content: body.content,
+      content,
     }).returning()
 
     // Notify story owner about the comment
     if (story?.owner) {
       const ownerUser = await db.query.users.findFirst({ where: eq(users.name, story.owner) })
       if (ownerUser) {
-        const preview = body.content.length > 100 ? body.content.slice(0, 100) + '...' : body.content
+        const preview = previewWithEllipsis(content, 100)
         sendNotificationIfEnabled({
           targetUserId: ownerUser.id,
           actorUserId: user.id,

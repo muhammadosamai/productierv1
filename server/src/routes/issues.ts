@@ -8,6 +8,8 @@ import { logActivity, computeChanges } from '../lib/logActivity'
 import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
 import { recomputeStoryStatus } from '../lib/storyStatus'
+import { sanitizeCommentHtml } from '../lib/sanitizeCommentHtml'
+import { previewWithEllipsis } from '../lib/richTextPreview'
 import {
   getAllowedIssueStatusStoredValues,
   mergeIssueFormConfigForProduct,
@@ -790,6 +792,11 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
   .post('/:id/comments', async ({ params: { id }, body, set, jwt: jwtInstance, headers }) => {
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+    const content = sanitizeCommentHtml(body.content)
+    if (!content.trim()) {
+      set.status = 400
+      return { error: 'Comment content is required' }
+    }
 
     const accessible = await issueRowForAccess(id, user)
     if (!accessible) {
@@ -802,7 +809,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const [comment] = await db.insert(issueComments).values({
       issueId: id,
       userId: user.id,
-      content: body.content,
+      content,
     }).returning()
 
     // Notify assignee and reporter about the comment
@@ -810,7 +817,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       const notifyIds = new Set<string>()
       if (issue.assignedToUserId) notifyIds.add(issue.assignedToUserId)
       if (issue.reportedByUserId) notifyIds.add(issue.reportedByUserId)
-      const preview = body.content.length > 100 ? body.content.slice(0, 100) + '...' : body.content
+      const preview = previewWithEllipsis(content, 100)
       for (const uid of notifyIds) {
         sendNotificationIfEnabled({
           targetUserId: uid,

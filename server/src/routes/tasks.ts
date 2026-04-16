@@ -9,6 +9,8 @@ import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
+import { sanitizeCommentHtml } from '../lib/sanitizeCommentHtml'
+import { previewWithEllipsis } from '../lib/richTextPreview'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -648,6 +650,11 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
   .post('/:id/comments', async ({ params: { id }, body, set, jwt: jwtInstance, headers }) => {
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
+    const content = sanitizeCommentHtml(body.content)
+    if (!content.trim()) {
+      set.status = 400
+      return { error: 'Comment content is required' }
+    }
 
     const task = await db.query.tasks.findFirst({ where: eq(tasks.id, id) })
     if (!task) { set.status = 404; return { error: 'Task not found' } }
@@ -656,7 +663,7 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
       .values({
         taskId: id,
         userId: user.id,
-        content: body.content,
+        content,
       })
       .returning()
 
@@ -669,14 +676,14 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
       entityType: 'task',
       entityId: task.id,
       entityTitle: task.title,
-      changes: [{ field: 'comment', from: null, to: body.content.length > 80 ? body.content.slice(0, 80) + '…' : body.content }],
+      changes: [{ field: 'comment', from: null, to: previewWithEllipsis(content, 80) }],
     })
 
     // Notify task owner and assignees about the comment
     const commentNotifyIds = new Set<string>()
     if (task.ownerUserId) commentNotifyIds.add(task.ownerUserId)
     if (task.assigneeUserIds) task.assigneeUserIds.forEach(uid => commentNotifyIds.add(uid))
-    const preview = body.content.length > 100 ? body.content.slice(0, 100) + '...' : body.content
+    const preview = previewWithEllipsis(content, 100)
     for (const uid of commentNotifyIds) {
       sendNotificationIfEnabled({
         targetUserId: uid,

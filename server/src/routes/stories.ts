@@ -206,15 +206,30 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
     const old = await db.query.stories.findFirst({ where: eq(stories.id, id) })
     if (!old) { set.status = 404; return { error: 'Story not found' } }
 
-    // Strip estimate & delivery — these are computed from child tasks
-    const { estimate: _est, delivery: _del, ...updateFields } = body
+    // Strip delivery — not updated via this payload shape
+    const { delivery: _del, ...updateFields } = body
+
+    if ('estimate' in updateFields) {
+      const raw = updateFields.estimate
+      if (raw === null || raw === undefined || String(raw).trim() === '') {
+        updateFields.estimate = null
+      } else {
+        const n = Number.parseFloat(String(raw).trim().replace(/,/g, '.'))
+        if (!Number.isFinite(n) || n <= 0) {
+          set.status = 400
+          return { error: 'Estimate hours must be a positive number (decimals allowed), or empty to clear' }
+        }
+        updateFields.estimate = String(n)
+      }
+    }
+
     const [updated] = await db.update(stories)
       .set({ ...updateFields, updatedAt: new Date() })
       .where(eq(stories.id, id))
       .returning()
 
     const user = await getUserFromHeader(jwt.verify, headers)
-    const changes = computeChanges(old, body, ['title', 'status', 'priority', 'type', 'owner', 'initiative', 'description'])
+    const changes = computeChanges(old, body, ['title', 'status', 'priority', 'type', 'owner', 'initiative', 'description', 'estimate'])
     if (changes.length > 0) {
       logActivity({
         product: updated!.product,

@@ -132,13 +132,9 @@ const ownerSearchQuery = ref('')
 const editDescription = ref('')
 const editAcceptanceCriteria = ref('')
 const editInitiative = ref('')
+const editEstimateHours = ref('')
 const calendarOpen = ref(false)
 const calendarValue = ref<DateValue | undefined>()
-
-const totalEstimatedHours = computed(() => {
-  if (!props.story?.tasks?.length) return 0
-  return props.story.tasks.reduce((sum, t) => sum + (t.estimateValue || 0), 0)
-})
 
 // Activities
 const activities = ref<Activity[]>([])
@@ -587,6 +583,56 @@ async function saveInitiative() {
   await updateField('initiative', editInitiative.value || null)
 }
 
+function startEditEstimateHours() {
+  if (!props.story) return
+  editEstimateHours.value = props.story.estimate?.trim() ? props.story.estimate.trim() : ''
+  editingField.value = 'estimateHours'
+}
+
+function parseStoryEstimateHoursInput(raw: string): { ok: true; value: string | null } | { ok: false } {
+  const t = raw.trim()
+  if (t === '') return { ok: true, value: null }
+  const n = Number.parseFloat(t.replace(/,/g, '.'))
+  if (!Number.isFinite(n) || n <= 0) return { ok: false }
+  return { ok: true, value: String(n) }
+}
+
+/** Canonical positive hours string for compare, or null if not a positive number. */
+function positiveHoursCanonical(raw: string | null | undefined): string | null {
+  const t = (raw ?? '').trim()
+  if (t === '') return null
+  const n = Number.parseFloat(t.replace(/,/g, '.'))
+  if (!Number.isFinite(n) || n <= 0) return null
+  return String(n)
+}
+
+async function saveEstimateHours() {
+  if (!props.story) return
+  const parsed = parseStoryEstimateHoursInput(editEstimateHours.value)
+  if (!parsed.ok) {
+    toast.error('Enter a positive number of hours (decimals allowed), or leave empty to clear')
+    return
+  }
+  const next = parsed.value
+  const prev = props.story.estimate?.trim() ?? ''
+
+  if (next === null) {
+    if (prev === '') {
+      editingField.value = null
+      return
+    }
+    await updateField('estimate', null)
+    return
+  }
+
+  const prevPositive = positiveHoursCanonical(prev)
+  if (prevPositive !== null && next === prevPositive) {
+    editingField.value = null
+    return
+  }
+  await updateField('estimate', next)
+}
+
 // Required By (calendar)
 function isoToCalendarDate(iso: string | null): DateValue | undefined {
   if (!iso) return undefined
@@ -808,7 +854,7 @@ function changeFieldLabel(field: string): string {
     case 'ownerAvatar': return 'Owner avatar'
     case 'initiative': return 'Initiative'
     case 'delivery': return 'Delivery'
-    case 'estimate': return 'Estimate'
+    case 'estimate': return 'Est. hours'
     case 'acceptanceCriteria': return 'Acceptance criteria'
     default: return activityFormatField(field)
   }
@@ -1484,14 +1530,43 @@ async function deleteComment(comment: UnifiedComment) {
                 </div>
               </div>
 
-              <!-- Estimated Hours (computed from child tasks, read-only) -->
+              <!-- Est. Hours (story estimate; positive decimals, or clear) -->
               <div class="flex items-center gap-3">
                 <span class="text-sm text-gray-500 w-28 shrink-0 flex items-center gap-1.5">
                   <Hourglass :size="13" class="text-gray-400" /> Est. Hours
                 </span>
-                <span class="text-sm font-medium text-gray-700">
-                  {{ totalEstimatedHours > 0 ? `${totalEstimatedHours}h` : '—' }}
-                </span>
+                <div @click.stop>
+                  <div v-if="editingField === 'estimateHours'" class="flex items-center gap-2">
+                    <input
+                      v-model="editEstimateHours"
+                      type="text"
+                      inputmode="decimal"
+                      autocomplete="off"
+                      class="text-sm text-gray-700 border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-[#4857FE] w-28 tabular-nums"
+                      placeholder="e.g. 8.5"
+                      autofocus
+                      @keydown.enter="saveEstimateHours"
+                      @keydown.escape="editingField = null"
+                    />
+                    <button type="button" class="text-green-500 hover:text-green-600" title="Save" @click="saveEstimateHours">
+                      <Check :size="14" />
+                    </button>
+                    <button type="button" class="text-gray-400 hover:text-gray-600" title="Cancel" @click="editingField = null">
+                      <X :size="14" />
+                    </button>
+                  </div>
+                  <button
+                    v-else
+                    type="button"
+                    class="text-sm font-medium text-gray-700 cursor-pointer hover:text-[#4857FE] transition-colors text-left tabular-nums"
+                    @click="startEditEstimateHours"
+                  >
+                    <template v-if="story.estimate?.trim()">
+                      {{ story.estimate.trim() }}h
+                    </template>
+                    <span v-else class="text-gray-400">—</span>
+                  </button>
+                </div>
               </div>
 
               <!-- Tasks Progress -->

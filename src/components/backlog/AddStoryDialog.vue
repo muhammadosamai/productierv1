@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import {
   Select,
   SelectContent,
@@ -369,7 +370,7 @@ async function handleSubmit(withBreakdown = false) {
 
   const created = await backlogStore.createStory({
     title: title.value.trim(),
-    description: description.value.trim() || undefined,
+    description: description.value || undefined,
     acceptanceCriteria: acceptanceCriteria.value.trim() || undefined,
     type: type.value,
     priority: priority.value,
@@ -438,10 +439,9 @@ async function handleSubmit(withBreakdown = false) {
         <!-- Description -->
         <div class="space-y-1.5">
           <label class="text-sm font-medium text-gray-700">Description</label>
-          <Textarea
+          <RichTextEditor
             v-model="description"
             placeholder="Describe the requirement or feature..."
-            :rows="3"
           />
         </div>
 

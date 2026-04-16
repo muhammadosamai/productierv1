@@ -36,6 +36,7 @@ import {
 import { ISSUE_STATUS_ID_CLOSED, ISSUE_STATUS_ID_OPEN, issueStatusSemanticTone } from '@/lib/issueStatusId'
 import type { Issue, IssueStatus } from '@/types/issue'
 import { ISSUE_TYPES, ISSUE_TYPE_ORDER } from '@shared/issueTypes'
+import { richTextPreviewText } from '@/lib/richText'
 
 interface TeamUser {
   id: string
@@ -2337,7 +2338,7 @@ function formatDate(dateStr: string | null) {
               </div>
 
               <!-- Description -->
-              <p v-if="issue.description" class="text-sm text-gray-500 line-clamp-2 mb-4 leading-relaxed">{{ issue.description }}</p>
+              <p v-if="issue.description" class="text-sm text-gray-500 line-clamp-2 mb-4 leading-relaxed">{{ richTextPreviewText(issue.description) }}</p>
               <p v-else class="text-sm text-gray-400 italic mb-4">No description</p>
 
               <!-- Priority + Status -->

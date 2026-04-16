@@ -48,6 +48,8 @@ import { issueStatusSemanticTone } from '@/lib/issueStatusId'
 import MentionTextarea from '@/components/comments/MentionTextarea.vue'
 import FormattedCommentContent from '@/components/comments/FormattedCommentContent.vue'
 import type { MentionUser } from '@/lib/commentMentions'
+import RichTextEditor from '@/components/ui/RichTextEditor.vue'
+import { renderStoredRichText } from '@/lib/richText'
 
 interface TeamUser {
   id: string
@@ -1447,21 +1449,21 @@ async function deleteComment(comment: UnifiedComment) {
                   >Edit</button>
                 </div>
                 <div v-if="editingField === 'description'">
-                  <textarea
+                  <RichTextEditor
                     v-model="editDescription"
-                    rows="5"
-                    class="w-full text-sm text-gray-600 border border-gray-200 rounded-lg px-3 py-2 outline-none resize-none focus:border-[#4857FE] focus:ring-1 focus:ring-[#4857FE]/20 leading-relaxed"
                     placeholder="Add a description..."
-                    @keydown.escape="editingField = null"
-                  ></textarea>
+                  />
                   <div class="flex items-center gap-2 mt-2">
                     <button class="px-3 py-1 text-xs font-medium text-white bg-[#4857FE] rounded-md hover:bg-[#3a46d9] transition-colors cursor-pointer" @click="saveDescription">Save</button>
                     <button class="px-3 py-1 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors cursor-pointer" @click="editingField = null">Cancel</button>
                   </div>
                 </div>
-                <p v-else-if="story.description" class="text-sm text-gray-600 leading-relaxed cursor-pointer hover:bg-gray-50 rounded-lg p-2 -mx-2 transition-colors whitespace-pre-wrap" @click="startEditDescription">
-                  {{ story.description }}
-                </p>
+                <div
+                  v-else-if="story.description"
+                  class="text-sm text-gray-600 leading-relaxed cursor-pointer hover:bg-gray-50 rounded-lg p-2 -mx-2 transition-colors prose prose-sm max-w-none"
+                  @click="startEditDescription"
+                  v-html="renderStoredRichText(story.description)"
+                />
                 <p v-else class="text-sm text-gray-400 italic cursor-pointer hover:text-[#4857FE] transition-colors" @click="startEditDescription">
                   Click to add a description...
                 </p>

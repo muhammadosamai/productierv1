@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { ChevronUp, ChevronDown, MoreHorizontal, Plus, Search, Filter } from 'lucide-vue-next'
 import type { Task, TaskPriority, TaskStatus } from '@/types/backlog'
+import { richTextPreviewText } from '@/lib/richText'
 
 interface TeamUser {
   id: string
@@ -184,7 +185,7 @@ function taskShortId(task: Task) {
 
                 <!-- Description -->
                 <div class="min-w-0">
-                  <span class="text-sm text-gray-500 truncate block">{{ task.description || '—' }}</span>
+                  <span class="text-sm text-gray-500 truncate block">{{ richTextPreviewText(task.description) || '—' }}</span>
                 </div>
 
                 <!-- Deadline -->

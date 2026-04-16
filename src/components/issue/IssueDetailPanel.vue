@@ -50,6 +50,8 @@ import DynamicField from '@/components/forms/DynamicField.vue'
 import { issueStatusSemanticTone } from '@/lib/issueStatusId'
 import { fetchDistinctIssueModules } from '@/lib/issueModulesApi'
 import SearchableStringCombobox from '@/components/shared/SearchableStringCombobox.vue'
+import RichTextEditor from '@/components/ui/RichTextEditor.vue'
+import { renderStoredRichText } from '@/lib/richText'
 
 const router = useRouter()
 const { copied, copyLink } = useCopyLink()
@@ -2410,21 +2412,21 @@ const groupedActivities = computed(() => {
                   >Edit</button>
                 </div>
                 <div v-if="editingField === 'description'">
-                  <textarea
+                  <RichTextEditor
                     v-model="editDescription"
-                    rows="6"
-                    class="w-full text-sm text-gray-600 border border-gray-200 rounded-lg px-3 py-2 outline-none resize-none focus:border-[#4857FE] focus:ring-1 focus:ring-[#4857FE]/20 leading-relaxed"
                     placeholder="Add a description..."
-                    @keydown.escape="editingField = null"
-                  ></textarea>
+                  />
                   <div class="flex items-center gap-2 mt-2">
                     <button class="px-3 py-1 text-xs font-medium text-white bg-[#4857FE] rounded-md hover:bg-[#3a46d9] transition-colors cursor-pointer" @click="saveDescription">Save</button>
                     <button class="px-3 py-1 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors cursor-pointer" @click="editingField = null">Cancel</button>
                   </div>
                 </div>
-                <p v-else-if="issue.description" class="text-sm text-gray-600 leading-relaxed cursor-pointer hover:bg-gray-50 rounded-lg p-2 -mx-2 transition-colors whitespace-pre-wrap" @click="startEditDescription">
-                  {{ issue.description }}
-                </p>
+                <div
+                  v-else-if="issue.description"
+                  class="text-sm text-gray-600 leading-relaxed cursor-pointer hover:bg-gray-50 rounded-lg p-2 -mx-2 transition-colors prose prose-sm max-w-none"
+                  @click="startEditDescription"
+                  v-html="renderStoredRichText(issue.description)"
+                />
                 <p v-else class="text-sm text-gray-400 italic cursor-pointer hover:text-[#4857FE] transition-colors" @click="startEditDescription">
                   Click to add a description...
                 </p>

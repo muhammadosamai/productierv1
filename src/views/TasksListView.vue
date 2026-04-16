@@ -22,6 +22,7 @@ import TaskStatusIcon from '@/components/shared/TaskStatusIcon.vue'
 import CreateTaskDialog from '@/components/delivery/CreateTaskDialog.vue'
 import FormBuilderDialog from '@/components/forms/FormBuilderDialog.vue'
 import type { Task } from '@/types/backlog'
+import { richTextPreviewText } from '@/lib/richText'
 
 interface TeamUser {
   id: string
@@ -1814,7 +1815,7 @@ function renderUserAvatar(userId: string | null) {
 
                 <!-- Description -->
                 <div v-else-if="col.field === 'description'" class="text-sm text-gray-500 truncate">
-                  {{ task.description || '—' }}
+                  {{ richTextPreviewText(task.description) || '—' }}
                 </div>
 
                 <!-- Created By -->
@@ -1948,7 +1949,7 @@ function renderUserAvatar(userId: string | null) {
               </div>
 
               <!-- Row 3: Description -->
-              <p v-if="task.description" class="text-sm text-gray-500 line-clamp-2 mb-4 leading-relaxed">{{ task.description }}</p>
+              <p v-if="task.description" class="text-sm text-gray-500 line-clamp-2 mb-4 leading-relaxed">{{ richTextPreviewText(task.description) }}</p>
               <p v-else class="text-sm text-gray-400 italic mb-4">No description</p>
 
               <!-- Row 4: Story + Priority -->

@@ -25,6 +25,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import {
   Select,
   SelectContent,
@@ -537,7 +538,7 @@ async function handleSubmit() {
 
             <div v-if="issueFieldVisible('description')" class="space-y-1.5">
               <label class="text-sm font-medium text-gray-700">Description</label>
-              <Textarea v-model="description" placeholder="Describe the bug in detail..." :rows="3" />
+              <RichTextEditor v-model="description" placeholder="Describe the bug in detail..." />
             </div>
 
             <div

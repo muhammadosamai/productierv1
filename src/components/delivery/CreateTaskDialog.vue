@@ -12,7 +12,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
+import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import {
   Select,
   SelectContent,
@@ -403,7 +403,7 @@ async function handleSubmit() {
 
   await backlogStore.createTask(selectedStoryId.value, {
     title: title.value.trim(),
-    description: description.value.trim() || null,
+    description: description.value || null,
     type: type.value,
     priority: priority.value,
     ownerUserId: ownerUserId.value,
@@ -446,10 +446,9 @@ async function handleSubmit() {
         <!-- Description -->
         <div class="space-y-1.5">
           <label class="text-sm font-medium text-gray-700">Description</label>
-          <Textarea
+          <RichTextEditor
             v-model="description"
             placeholder="Describe the task..."
-            :rows="2"
           />
         </div>
 

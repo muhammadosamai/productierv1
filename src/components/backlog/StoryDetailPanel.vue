@@ -104,11 +104,21 @@ const origin = typeof window !== 'undefined' ? window.location.origin : ''
 
 // Active tab
 const activeTab = ref<'description' | 'tasks' | 'issues' | 'comments' | 'activities' | 'attachments'>('description')
+type StoryDetailTabKey = 'description' | 'tasks' | 'issues' | 'comments' | 'activities' | 'attachments'
+const tabStripRef = ref<HTMLElement | null>(null)
+const tabStripGrabbing = ref(false)
+const tabStripCanScrollLeft = ref(false)
+const tabStripCanScrollRight = ref(false)
+let tabStripDrag: { startX: number; scrollLeft: number } | null = null
+let tabStripSuppressTabClickUntil = 0
+let tabStripResizeObserver: ResizeObserver | null = null
 
 // Editing state
 const editingField = ref<string | null>(null)
 const editTitle = ref('')
 const titleInputRef = ref<HTMLInputElement | null>(null)
+const descriptionEditorRef = ref<HTMLElement | null>(null)
+const acceptanceEditorRef = ref<HTMLElement | null>(null)
 const saving = ref(false)
 
 // Dropdown states
@@ -350,6 +360,8 @@ watch(() => props.story?.id, async (id) => {
 
 onBeforeUnmount(() => {
   revokeAllAttachmentPreviewUrls()
+  tabStripResizeObserver?.disconnect()
+  tabStripResizeObserver = null
 })
 
 function onDragOver(e: DragEvent) { e.preventDefault(); isDragging.value = true }
@@ -387,6 +399,73 @@ function formatRelativeTime(dateStr: string) {
   return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
 }
 
+function updateTabStripOverflowEdges() {
+  const el = tabStripRef.value
+  if (!el) {
+    tabStripCanScrollLeft.value = false
+    tabStripCanScrollRight.value = false
+    return
+  }
+  const { scrollLeft, scrollWidth, clientWidth } = el
+  const maxScroll = scrollWidth - clientWidth
+  const eps = 2
+  tabStripCanScrollLeft.value = scrollLeft > eps
+  tabStripCanScrollRight.value = maxScroll > eps && scrollLeft < maxScroll - eps
+}
+
+function scrollTabStripByArrow(dir: 'left' | 'right') {
+  const el = tabStripRef.value
+  if (!el) return
+  const step = Math.max(100, Math.round(el.clientWidth * 0.5))
+  el.scrollBy({ left: dir === 'right' ? step : -step, behavior: 'smooth' })
+  const refresh = () => updateTabStripOverflowEdges()
+  requestAnimationFrame(refresh)
+  setTimeout(refresh, 400)
+}
+
+function onTabStripPointerDown(e: PointerEvent) {
+  const el = (e.currentTarget as HTMLElement) || tabStripRef.value
+  if (!el || e.button !== 0) return
+  const target = e.target as HTMLElement | null
+  if (target?.closest('button, a, input, select, textarea')) return
+  tabStripDrag = { startX: e.clientX, scrollLeft: el.scrollLeft }
+  tabStripGrabbing.value = true
+  el.setPointerCapture(e.pointerId)
+}
+
+function onTabStripPointerMove(e: PointerEvent) {
+  if (!tabStripDrag) return
+  const el = (e.currentTarget as HTMLElement) || tabStripRef.value
+  if (!el) return
+  const dx = e.clientX - tabStripDrag.startX
+  el.scrollLeft = tabStripDrag.scrollLeft - dx
+  updateTabStripOverflowEdges()
+  if (Math.abs(dx) > 4) {
+    tabStripSuppressTabClickUntil = Date.now() + 320
+    e.preventDefault()
+  }
+}
+
+function onTabStripPointerEnd(e: PointerEvent) {
+  const el = (e.currentTarget as HTMLElement) || tabStripRef.value
+  if (tabStripDrag && el) {
+    try {
+      el.releasePointerCapture(e.pointerId)
+    } catch {
+      /* already released */
+    }
+  }
+  tabStripDrag = null
+  tabStripGrabbing.value = false
+  updateTabStripOverflowEdges()
+}
+
+function onStoryDetailTabActivate(tabKey: StoryDetailTabKey) {
+  if (Date.now() < tabStripSuppressTabClickUntil) return
+  activeTab.value = tabKey
+  void nextTick(() => updateTabStripOverflowEdges())
+}
+
 // Lazy-load activities/attachments on tab switch
 watch(activeTab, (tab) => {
   if (tab === 'activities' && props.story) {
@@ -398,7 +477,28 @@ watch(activeTab, (tab) => {
   if (tab === 'issues' && props.story) {
     loadStoryIssues(props.story.id)
   }
+  void nextTick(() => updateTabStripOverflowEdges())
 })
+
+watch(
+  tabStripRef,
+  el => {
+    tabStripResizeObserver?.disconnect()
+    tabStripResizeObserver = null
+    if (!el) return
+    tabStripResizeObserver = new ResizeObserver(() => updateTabStripOverflowEdges())
+    tabStripResizeObserver.observe(el)
+    void nextTick(() => updateTabStripOverflowEdges())
+  },
+  { flush: 'post' },
+)
+
+watch(
+  () => props.open,
+  open => {
+    if (open) void nextTick(() => updateTabStripOverflowEdges())
+  },
+)
 
 async function loadActivities(storyId: string) {
   activitiesLoading.value = true
@@ -565,6 +665,14 @@ async function saveDescription() {
   await updateField('description', editDescription.value || null)
 }
 
+function onDescriptionEditorFocusOut(e: FocusEvent) {
+  if (editingField.value !== 'description') return
+  const current = e.currentTarget as HTMLElement | null
+  const next = e.relatedTarget as Node | null
+  if (current && next && current.contains(next)) return
+  void saveDescription()
+}
+
 // Acceptance Criteria
 function startEditAcceptanceCriteria() {
   if (!props.story) return
@@ -579,6 +687,14 @@ async function saveAcceptanceCriteria() {
     return
   }
   await updateField('acceptanceCriteria', editAcceptanceCriteria.value || null)
+}
+
+function onAcceptanceEditorFocusOut(e: FocusEvent) {
+  if (editingField.value !== 'acceptanceCriteria') return
+  const current = e.currentTarget as HTMLElement | null
+  const next = e.relatedTarget as Node | null
+  if (current && next && current.contains(next)) return
+  void saveAcceptanceCriteria()
 }
 
 // Archive
@@ -918,6 +1034,11 @@ const allComments = computed(() => {
     new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   )
 })
+
+watch(
+  () => `${props.story?.tasks.length ?? 0}|${props.story?.issues?.length ?? 0}|${allComments.value.length}|${attachments.value.length}`,
+  () => void nextTick(() => updateTabStripOverflowEdges()),
+)
 
 /** Team list + everyone who has commented (fixes @mentions when user is outside `/api/auth/users?` limit). */
 const mentionUsersForDisplay = computed<MentionUser[]>(() => {
@@ -1402,8 +1523,17 @@ async function deleteComment(comment: UnifiedComment) {
           </div>
 
           <!-- Sticky Tabs (sticks below title on scroll) -->
-          <div class="sticky top-[44px] z-10 bg-white border-t border-b border-gray-100">
-            <div class="flex px-6 gap-0">
+          <div class="sticky top-[44px] z-10 bg-white border-t border-b border-gray-100 relative">
+            <div
+              ref="tabStripRef"
+              class="flex px-6 gap-0 overflow-x-auto select-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+              :class="tabStripGrabbing ? 'cursor-grabbing' : 'cursor-grab'"
+              @scroll="updateTabStripOverflowEdges"
+              @pointerdown="onTabStripPointerDown"
+              @pointermove="onTabStripPointerMove"
+              @pointerup="onTabStripPointerEnd"
+              @pointercancel="onTabStripPointerEnd"
+            >
               <button
                 v-for="tab in ([
                   { key: 'description', label: 'Description', icon: FileText, count: 0 },
@@ -1414,13 +1544,14 @@ async function deleteComment(comment: UnifiedComment) {
                   { key: 'activities', label: 'Activities', icon: History, count: 0 },
                 ] as const)"
                 :key="tab.key"
-                class="px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer"
+                type="button"
+                class="shrink-0 px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap"
                 :class="activeTab === tab.key
                   ? 'text-[#F97316] border-[#F97316]'
                   : 'text-gray-400 border-transparent hover:text-gray-600'"
-                @click="activeTab = tab.key as any; tab.key === 'activities' && story && loadActivities(story.id); tab.key === 'attachments' && story && loadAttachments(story.id)"
+                @click="onStoryDetailTabActivate(tab.key)"
               >
-                <span class="flex items-center gap-1.5">
+                <span class="inline-flex items-center gap-1.5 whitespace-nowrap">
                   <component :is="tab.icon" :size="14" />
                   {{ tab.label }}
                   <span
@@ -1431,6 +1562,24 @@ async function deleteComment(comment: UnifiedComment) {
                 </span>
               </button>
             </div>
+            <button
+              v-if="tabStripCanScrollLeft"
+              type="button"
+              class="absolute inset-y-0 left-0 z-[2] w-12 flex items-center justify-start pl-1 border-0 bg-gradient-to-r from-gray-50 from-45% via-gray-50/85 to-transparent cursor-pointer hover:from-gray-100/95 hover:via-gray-100/80 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#4857FE]/30 focus-visible:ring-inset"
+              aria-label="Scroll tabs left"
+              @click.stop="scrollTabStripByArrow('left')"
+            >
+              <ChevronLeft :size="18" class="text-gray-500 shrink-0 drop-shadow-sm pointer-events-none" />
+            </button>
+            <button
+              v-if="tabStripCanScrollRight"
+              type="button"
+              class="absolute inset-y-0 right-0 z-[2] w-12 flex items-center justify-end pr-1 border-0 bg-gradient-to-l from-gray-50 from-45% via-gray-50/85 to-transparent cursor-pointer hover:from-gray-100/95 hover:via-gray-100/80 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#4857FE]/30 focus-visible:ring-inset"
+              aria-label="Scroll tabs right"
+              @click.stop="scrollTabStripByArrow('right')"
+            >
+              <ChevRight :size="18" class="text-gray-500 shrink-0 drop-shadow-sm pointer-events-none" />
+            </button>
           </div>
 
           <!-- Tab Content -->
@@ -1449,13 +1598,14 @@ async function deleteComment(comment: UnifiedComment) {
                   >Edit</button>
                 </div>
                 <div v-if="editingField === 'description'">
-                  <RichTextEditor
-                    v-model="editDescription"
-                    placeholder="Add a description..."
-                  />
-                  <div class="flex items-center gap-2 mt-2">
-                    <button class="px-3 py-1 text-xs font-medium text-white bg-[#4857FE] rounded-md hover:bg-[#3a46d9] transition-colors cursor-pointer" @click="saveDescription">Save</button>
-                    <button class="px-3 py-1 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors cursor-pointer" @click="editingField = null">Cancel</button>
+                  <div
+                    ref="descriptionEditorRef"
+                    @focusout="onDescriptionEditorFocusOut"
+                  >
+                    <RichTextEditor
+                      v-model="editDescription"
+                      placeholder="Add a description..."
+                    />
                   </div>
                 </div>
                 <div
@@ -1480,21 +1630,22 @@ async function deleteComment(comment: UnifiedComment) {
                   >Edit</button>
                 </div>
                 <div v-if="editingField === 'acceptanceCriteria'">
-                  <textarea
-                    v-model="editAcceptanceCriteria"
-                    rows="5"
-                    class="w-full text-sm text-gray-600 border border-gray-200 rounded-lg px-3 py-2 outline-none resize-none focus:border-[#4857FE] focus:ring-1 focus:ring-[#4857FE]/20 leading-relaxed"
-                    placeholder="Add acceptance criteria..."
-                    @keydown.escape="editingField = null"
-                  ></textarea>
-                  <div class="flex items-center gap-2 mt-2">
-                    <button class="px-3 py-1 text-xs font-medium text-white bg-[#4857FE] rounded-md hover:bg-[#3a46d9] transition-colors cursor-pointer" @click="saveAcceptanceCriteria">Save</button>
-                    <button class="px-3 py-1 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors cursor-pointer" @click="editingField = null">Cancel</button>
+                  <div
+                    ref="acceptanceEditorRef"
+                    @focusout="onAcceptanceEditorFocusOut"
+                  >
+                    <RichTextEditor
+                      v-model="editAcceptanceCriteria"
+                      placeholder="Add acceptance criteria..."
+                    />
                   </div>
                 </div>
-                <p v-else-if="story.acceptanceCriteria" class="text-sm text-gray-600 leading-relaxed cursor-pointer hover:bg-gray-50 rounded-lg p-2 -mx-2 transition-colors whitespace-pre-wrap" @click="startEditAcceptanceCriteria">
-                  {{ story.acceptanceCriteria }}
-                </p>
+                <div
+                  v-else-if="story.acceptanceCriteria"
+                  class="text-sm text-gray-600 leading-relaxed cursor-pointer hover:bg-gray-50 rounded-lg p-2 -mx-2 transition-colors prose prose-sm max-w-none"
+                  @click="startEditAcceptanceCriteria"
+                  v-html="renderStoredRichText(story.acceptanceCriteria)"
+                />
                 <p v-else class="text-sm text-gray-400 italic cursor-pointer hover:text-[#4857FE] transition-colors" @click="startEditAcceptanceCriteria">
                   Click to add acceptance criteria...
                 </p>

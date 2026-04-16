@@ -13,7 +13,6 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import {
   Select,
@@ -371,7 +370,7 @@ async function handleSubmit(withBreakdown = false) {
   const created = await backlogStore.createStory({
     title: title.value.trim(),
     description: description.value || undefined,
-    acceptanceCriteria: acceptanceCriteria.value.trim() || undefined,
+    acceptanceCriteria: acceptanceCriteria.value || undefined,
     type: type.value,
     priority: priority.value,
     product: activeProduct.name,
@@ -448,10 +447,9 @@ async function handleSubmit(withBreakdown = false) {
         <!-- Acceptance Criteria -->
         <div class="space-y-1.5">
           <label class="text-sm font-medium text-gray-700">Acceptance Criteria</label>
-          <Textarea
+          <RichTextEditor
             v-model="acceptanceCriteria"
             placeholder="Define the conditions that must be met..."
-            :rows="3"
           />
         </div>
 

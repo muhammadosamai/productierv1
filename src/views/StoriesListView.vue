@@ -1319,7 +1319,7 @@ function formatDate(dateStr: string | null) {
 
                 <!-- Acceptance Criteria -->
                 <div v-else-if="col.field === 'acceptanceCriteria'" class="text-sm text-gray-500 truncate">
-                  {{ story.acceptanceCriteria || '—' }}
+                  {{ richTextPreviewText(story.acceptanceCriteria) || '—' }}
                 </div>
 
                 <!-- Created -->

@@ -10,16 +10,21 @@ export const ALLOWED_ATTACHMENT_EXTENSIONS = new Set([
   '.xlsx',
   '.xls',
   '.png',
+  '.webp',
   '.svg',
   '.jpg',
   '.jpeg',
   '.pdf',
+  '.mp4',
+  '.webm',
+  '.mov',
 ])
 
 /** `file-type` output must match extension (sniffed content). */
 const EXTENSION_TO_DETECTED_MIMES: Record<string, readonly string[]> = {
   '.pdf': ['application/pdf'],
   '.png': ['image/png'],
+  '.webp': ['image/webp'],
   '.jpg': ['image/jpeg'],
   '.jpeg': ['image/jpeg'],
   '.docx': ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
@@ -27,6 +32,10 @@ const EXTENSION_TO_DETECTED_MIMES: Record<string, readonly string[]> = {
   /** Legacy OLE; `file-type` cannot distinguish Word vs Excel — extension is trusted after CFB check. */
   '.doc': ['application/x-cfb'],
   '.xls': ['application/x-cfb'],
+  '.mp4': ['video/mp4'],
+  /** `audio/webm` for audio-only WebM with same extension. */
+  '.webm': ['video/webm', 'audio/webm'],
+  '.mov': ['video/quicktime'],
 }
 
 function attachmentExtension(fileName: string): string {
@@ -50,7 +59,7 @@ export function validateAttachmentFileName(fileName: string): { ok: true } | { o
     return {
       ok: false,
       error:
-        'File type not allowed. Allowed: .doc, .docx, .xlsx, .xls, .png, .svg, .jpg, .jpeg, .pdf',
+        'File type not allowed. Allowed: .doc, .docx, .xlsx, .xls, .png, .webp, .svg, .jpg, .jpeg, .pdf, .mp4, .webm, .mov',
     }
   }
   return { ok: true }

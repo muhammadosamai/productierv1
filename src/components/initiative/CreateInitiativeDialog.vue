@@ -173,8 +173,10 @@ async function handleSubmit() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-[520px] !overflow-visible">
-      <DialogHeader>
+    <DialogContent
+      class="sm:max-w-[520px] flex max-h-[min(92vh,calc(100dvh-2rem))] min-h-0 flex-col gap-4 overflow-hidden p-6"
+    >
+      <DialogHeader class="shrink-0">
         <DialogTitle>Create Initiative</DialogTitle>
         <DialogDescription>Define a new initiative for your product.</DialogDescription>
       </DialogHeader>
@@ -183,7 +185,8 @@ async function handleSubmit() {
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
       </button>
 
-      <form @submit.prevent="handleSubmit" class="space-y-4">
+      <form @submit.prevent="handleSubmit" class="flex min-h-0 flex-1 flex-col gap-0">
+        <div class="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5">
         <!-- Title -->
         <div class="space-y-1.5">
           <label class="text-sm font-medium text-gray-700">Title *</label>
@@ -337,8 +340,9 @@ async function handleSubmit() {
             </div>
           </div>
         </div>
+        </div>
 
-        <DialogFooter>
+        <DialogFooter class="shrink-0 border-t border-gray-100 bg-background pt-4 mt-2">
           <Button type="button" variant="outline" @click="open = false">Cancel</Button>
           <Button
             type="submit"

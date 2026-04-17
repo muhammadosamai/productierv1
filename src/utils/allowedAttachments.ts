@@ -8,18 +8,28 @@ export const ALLOWED_ATTACHMENT_EXTENSIONS = new Set([
   '.xlsx',
   '.xls',
   '.png',
+  '.webp',
   '.svg',
   '.jpg',
   '.jpeg',
   '.pdf',
+  '.mp4',
+  '.webm',
+  '.mov',
 ])
 
 /** `accept` value for `<input type="file">` */
-export const ATTACHMENT_FILE_ACCEPT = '.doc,.docx,.xlsx,.xls,.png,.svg,.jpg,.jpeg,.pdf'
+export const ATTACHMENT_FILE_ACCEPT =
+  '.doc,.docx,.xlsx,.xls,.png,.webp,.svg,.jpg,.jpeg,.pdf,.mp4,.webm,.mov'
 
 /** Short copy for UI / toasts */
 export const ALLOWED_ATTACHMENT_TYPES_HINT =
-  'PDF, Word (.doc, .docx), Excel (.xls, .xlsx), PNG, JPG, JPEG, SVG'
+  'PDF, Word (.doc, .docx), Excel (.xls, .xlsx), PNG, WebP, JPG, JPEG, SVG, MP4, WebM, MOV'
+
+/** For attachment list / preview UI */
+export function isVideoMimeType(mimeType: string): boolean {
+  return mimeType.startsWith('video/') || mimeType === 'audio/webm'
+}
 
 export function attachmentFileExtension(fileName: string): string {
   const base = fileName.replace(/^.*[/\\]/, '')

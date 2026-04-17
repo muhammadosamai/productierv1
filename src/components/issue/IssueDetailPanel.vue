@@ -8,10 +8,11 @@ import {
   Target, History, Search,
   Signal, Type, Tag, User,
   MessageSquare, Send, Trash2,
-  Upload, Download, ImageIcon, FileIcon, Paperclip,
+  Upload, Download, ImageIcon, FileIcon, Paperclip, Video,
   AlertTriangle, Eye, Monitor, Smartphone, Globe, Zap, Database, LayoutDashboard, Lock,
   Sparkles, Lightbulb,
   Archive, RotateCcw, ExternalLink, Pencil, FlaskConical,
+  Plus, Minus,
 } from 'lucide-vue-next'
 import { useIssuesStore } from '@/stores/issues'
 import { useBacklogStore } from '@/stores/backlog'
@@ -29,7 +30,9 @@ import {
   partitionAllowedAttachmentFiles,
   ATTACHMENT_FILE_ACCEPT,
   ALLOWED_ATTACHMENT_TYPES_HINT,
+  isVideoMimeType,
 } from '@/utils/allowedAttachments'
+import { useAttachmentMediaPreviewZoom, MEDIA_PREVIEW_ZOOM_MAX } from '@/utils/useAttachmentMediaPreviewZoom'
 import { toast } from 'vue-sonner'
 import { useCopyLink } from '@/utils/useCopyLink'
 import MentionTextarea from '@/components/comments/MentionTextarea.vue'
@@ -215,6 +218,8 @@ const deletingAttachmentId = ref<string | null>(null)
 const downloadingAttachmentId = ref<string | null>(null)
 /** Blob URLs for image thumbnails (authenticated fetch; avoids broken /uploads on frontend host). */
 const attachmentPreviewUrls = ref<Record<string, string>>({})
+const mediaPreviewOpen = ref(false)
+const selectedMediaId = ref<string | null>(null)
 
 function revokeAllAttachmentPreviewUrls() {
   for (const url of Object.values(attachmentPreviewUrls.value)) {
@@ -227,8 +232,8 @@ function revokeAllAttachmentPreviewUrls() {
 
 async function hydrateAttachmentImagePreviews(items: IssueAttachment[]) {
   revokeAllAttachmentPreviewUrls()
-  const imageAtts = items.filter(a => isImageFile(a.mimeType))
-  if (imageAtts.length === 0) return
+  const mediaAtts = items.filter(a => isImageFile(a.mimeType) || isVideoMimeType(a.mimeType))
+  if (mediaAtts.length === 0) return
 
   if (!authStore.token) {
     attachmentPreviewUrls.value = {}
@@ -236,7 +241,7 @@ async function hydrateAttachmentImagePreviews(items: IssueAttachment[]) {
   }
 
   const pairs = await Promise.all(
-    imageAtts.map(async (att) => {
+    mediaAtts.map(async (att) => {
       try {
         const res = await fetch(resolveApiPath(`/api/issues/attachments/${att.id}/download`), {
           headers: { Authorization: `Bearer ${authStore.token}` },
@@ -261,6 +266,10 @@ async function hydrateAttachmentImagePreviews(items: IssueAttachment[]) {
 
 onBeforeUnmount(() => {
   revokeAllAttachmentPreviewUrls()
+  if (globalThis.window) {
+    globalThis.window.removeEventListener('paste', onPasteFiles)
+    globalThis.window.removeEventListener('keydown', onMediaPreviewKeydown)
+  }
 })
 
 // Comments (loaded from issue or fetched)
@@ -739,6 +748,123 @@ function onFileSelect(e: Event) {
   target.value = ''
 }
 
+function isPreviewableMedia(mimeType: string | null | undefined): boolean {
+  return !!mimeType && (isImageFile(mimeType) || isVideoMimeType(mimeType))
+}
+
+const mediaAttachments = computed(() =>
+  attachments.value.filter(att => isPreviewableMedia(att.mimeType)),
+)
+
+const selectedMediaIndex = computed(() =>
+  mediaAttachments.value.findIndex(att => att.id === selectedMediaId.value),
+)
+
+const selectedMedia = computed(() => {
+  const idx = selectedMediaIndex.value
+  return idx >= 0 ? mediaAttachments.value[idx] ?? null : null
+})
+
+const {
+  zoom: mediaPreviewZoom,
+  panning: mediaPreviewPanning,
+  resetTransform: resetMediaPreviewTransform,
+  zoomIn: mediaPreviewZoomIn,
+  zoomOut: mediaPreviewZoomOut,
+  onWheel: onMediaPreviewWheel,
+  onPanPointerDown: onMediaPreviewPanDown,
+  onPanPointerMove: onMediaPreviewPanMove,
+  onPanPointerUp: onMediaPreviewPanUp,
+  onPanPointerCancel: onMediaPreviewPanCancel,
+  transformStyle: mediaPreviewTransformStyle,
+  zoomPercentLabel: mediaPreviewZoomPercentLabel,
+  showGrabCursor: mediaPreviewShowGrabCursor,
+} = useAttachmentMediaPreviewZoom({
+  mediaPreviewOpen,
+  selectedMediaId,
+  isImage: () => !!(selectedMedia.value && isImageFile(selectedMedia.value.mimeType)),
+})
+
+function openMediaPreview(attachmentId: string) {
+  if (!mediaAttachments.value.some(att => att.id === attachmentId)) return
+  selectedMediaId.value = attachmentId
+  mediaPreviewOpen.value = true
+}
+
+function closeMediaPreview() {
+  mediaPreviewOpen.value = false
+  selectedMediaId.value = null
+}
+
+function showPrevMedia() {
+  if (selectedMediaIndex.value <= 0) return
+  selectedMediaId.value = mediaAttachments.value[selectedMediaIndex.value - 1]!.id
+}
+
+function showNextMedia() {
+  if (selectedMediaIndex.value < 0 || selectedMediaIndex.value >= mediaAttachments.value.length - 1) return
+  selectedMediaId.value = mediaAttachments.value[selectedMediaIndex.value + 1]!.id
+}
+
+function onMediaPreviewKeydown(e: KeyboardEvent) {
+  if (!mediaPreviewOpen.value) return
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    closeMediaPreview()
+  } else if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    showPrevMedia()
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    showNextMedia()
+  } else if (e.key === '+' || e.key === '=') {
+    e.preventDefault()
+    mediaPreviewZoomIn()
+  } else if (e.key === '-' || e.key === '_') {
+    e.preventDefault()
+    mediaPreviewZoomOut()
+  } else if (e.key === '0') {
+    e.preventDefault()
+    resetMediaPreviewTransform()
+  }
+}
+
+watch(mediaAttachments, (items) => {
+  if (!mediaPreviewOpen.value) return
+  if (items.length === 0) {
+    closeMediaPreview()
+    return
+  }
+  if (!selectedMediaId.value || !items.some(att => att.id === selectedMediaId.value)) {
+    selectedMediaId.value = items[0]!.id
+  }
+})
+
+function extractClipboardFiles(e: ClipboardEvent): File[] {
+  const direct = e.clipboardData?.files ? Array.from(e.clipboardData.files) : []
+  if (direct.length > 0) return direct
+  const files: File[] = []
+  for (const item of Array.from(e.clipboardData?.items ?? [])) {
+    if (item.kind !== 'file') continue
+    const f = item.getAsFile()
+    if (f) files.push(f)
+  }
+  return files
+}
+
+function onPasteFiles(e: ClipboardEvent) {
+  if (!props.open || activeTab.value !== 'attachments') return
+  const files = extractClipboardFiles(e)
+  if (files.length === 0) return
+  e.preventDefault()
+  void uploadFiles(files)
+}
+
+if (globalThis.window) {
+  globalThis.window.addEventListener('paste', onPasteFiles)
+  globalThis.window.addEventListener('keydown', onMediaPreviewKeydown)
+}
+
 // ──── Helpers ────
 
 function formatFileSize(bytes: number): string {
@@ -750,7 +876,18 @@ function formatFileSize(bytes: number): string {
 function isImageFile(mimeType: string | null | undefined): boolean {
   return !!mimeType && mimeType.startsWith('image/')
 }
-function fileIcon(mimeType: string) { return mimeType.startsWith('image/') ? ImageIcon : FileIcon }
+function attachmentThumbIcon(mimeType: string) {
+  if (mimeType.startsWith('image/')) return ImageIcon
+  if (isVideoMimeType(mimeType)) return Video
+  return FileIcon
+}
+
+function thumbBgClass(mimeType: string | null | undefined) {
+  if (!mimeType) return 'bg-blue-50'
+  if (mimeType.startsWith('image/')) return 'bg-gray-200'
+  if (isVideoMimeType(mimeType)) return 'bg-violet-50'
+  return 'bg-blue-50'
+}
 
 function formatRelativeTime(dateStr: string) {
   const d = new Date(dateStr)
@@ -2655,7 +2792,7 @@ const groupedActivities = computed(() => {
                       <p class="text-sm font-medium" :class="isDragging ? 'text-[#4857FE]' : 'text-gray-600'">
                         {{ isDragging ? 'Drop files here' : 'Drop files or click to upload' }}
                       </p>
-                      <p class="text-xs text-gray-400 mt-0.5">Images, documents, or any file type</p>
+                      <p class="text-xs text-gray-400 mt-0.5">{{ ALLOWED_ATTACHMENT_TYPES_HINT }}. Press Ctrl+V to paste files.</p>
                     </div>
                   </div>
                 </div>
@@ -2673,7 +2810,8 @@ const groupedActivities = computed(() => {
                     class="bg-gray-50 rounded-lg border border-gray-100 p-3 flex items-center gap-3 group/att hover:bg-gray-100/70 transition-colors"
                   >
                     <div class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 overflow-hidden"
-                      :class="isImageFile(att.mimeType) ? 'bg-gray-200' : 'bg-blue-50'"
+                      :class="[thumbBgClass(att.mimeType), isPreviewableMedia(att.mimeType) ? 'cursor-pointer' : '']"
+                      @click.stop="isPreviewableMedia(att.mimeType) ? openMediaPreview(att.id) : null"
                     >
                       <img
                         v-if="isImageFile(att.mimeType) && attachmentPreviewUrls[att.id]"
@@ -2686,7 +2824,12 @@ const groupedActivities = computed(() => {
                         :size="18"
                         class="text-gray-400"
                       />
-                      <component v-else :is="fileIcon(att.mimeType)" :size="18" class="text-blue-500" />
+                      <Video
+                        v-else-if="isVideoMimeType(att.mimeType)"
+                        :size="18"
+                        class="text-violet-500"
+                      />
+                      <component v-else :is="attachmentThumbIcon(att.mimeType)" :size="18" class="text-blue-500" />
                     </div>
 
                     <div class="flex-1 min-w-0">
@@ -2872,6 +3015,113 @@ const groupedActivities = computed(() => {
         </div>
       </div>
     </Transition>
+
+    <div
+      v-if="mediaPreviewOpen && selectedMedia"
+      class="fixed inset-0 z-[120] flex min-h-0 bg-black/90 backdrop-blur-[1px]"
+      @click.self="closeMediaPreview"
+    >
+      <button
+        type="button"
+        class="absolute top-4 right-4 p-2 rounded-md bg-white/10 hover:bg-white/20 text-white"
+        @click="closeMediaPreview"
+      >
+        <X :size="18" />
+      </button>
+
+      <div class="absolute top-4 left-4 text-white/90 text-xs">
+        <span class="font-medium">{{ selectedMedia.fileName }}</span>
+        <span class="mx-2 text-white/50">·</span>
+        <span>{{ selectedMediaIndex + 1 }} / {{ mediaAttachments.length }}</span>
+      </div>
+
+      <button
+        type="button"
+        class="absolute left-4 top-1/2 -translate-y-1/2 px-3 py-2 rounded-md bg-white/10 hover:bg-white/20 text-white disabled:opacity-30 disabled:cursor-not-allowed text-sm"
+        :disabled="selectedMediaIndex <= 0"
+        @click="showPrevMedia"
+      >
+        Prev
+      </button>
+      <button
+        type="button"
+        class="absolute right-4 top-1/2 -translate-y-1/2 px-3 py-2 rounded-md bg-white/10 hover:bg-white/20 text-white disabled:opacity-30 disabled:cursor-not-allowed text-sm"
+        :disabled="selectedMediaIndex >= mediaAttachments.length - 1"
+        @click="showNextMedia"
+      >
+        Next
+      </button>
+
+      <div
+        class="absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-lg bg-black/50 px-2 py-1.5 text-white backdrop-blur-sm"
+      >
+        <button
+          type="button"
+          class="p-1.5 rounded-md hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+          title="Zoom out (−)"
+          :disabled="mediaPreviewZoom <= 1"
+          @click="mediaPreviewZoomOut"
+        >
+          <Minus :size="18" />
+        </button>
+        <span class="min-w-[3.25rem] text-center text-xs tabular-nums">{{ mediaPreviewZoomPercentLabel }}</span>
+        <button
+          type="button"
+          class="p-1.5 rounded-md hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+          title="Zoom in (+)"
+          :disabled="mediaPreviewZoom >= MEDIA_PREVIEW_ZOOM_MAX"
+          @click="mediaPreviewZoomIn"
+        >
+          <Plus :size="18" />
+        </button>
+        <button
+          v-if="mediaPreviewZoom > 1"
+          type="button"
+          class="p-1.5 rounded-md hover:bg-white/15"
+          title="Reset zoom (0)"
+          @click="resetMediaPreviewTransform"
+        >
+          <RotateCcw :size="16" />
+        </button>
+      </div>
+
+      <div
+        class="flex min-h-0 w-full flex-1 touch-none select-none items-center justify-center overflow-hidden px-16 sm:px-24 py-6"
+        :class="
+          mediaPreviewShowGrabCursor
+            ? mediaPreviewPanning
+              ? 'cursor-grabbing'
+              : 'cursor-grab'
+            : ''
+        "
+        @wheel="onMediaPreviewWheel"
+        @pointerdown="onMediaPreviewPanDown"
+        @pointermove="onMediaPreviewPanMove"
+        @pointerup="onMediaPreviewPanUp"
+        @pointercancel="onMediaPreviewPanCancel"
+      >
+        <div
+          :style="mediaPreviewTransformStyle"
+          class="will-change-transform"
+          @dblclick.stop="resetMediaPreviewTransform"
+        >
+          <img
+            v-if="selectedMedia && isImageFile(selectedMedia.mimeType)"
+            :src="attachmentPreviewUrls[selectedMedia.id]"
+            :alt="selectedMedia.fileName"
+            class="max-h-[85vh] max-w-[92vw] object-contain rounded-md pointer-events-none"
+            draggable="false"
+          />
+          <video
+            v-else-if="selectedMedia"
+            :src="attachmentPreviewUrls[selectedMedia.id]"
+            controls
+            autoplay
+            class="max-h-[85vh] max-w-[92vw] rounded-md bg-black"
+          />
+        </div>
+      </div>
+    </div>
   </Teleport>
 </template>
 

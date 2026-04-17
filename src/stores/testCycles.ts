@@ -19,7 +19,8 @@ export const useTestCyclesStore = defineStore('testCycles', () => {
   async function fetchCycles(product?: string) {
     loading.value = true
     try {
-      const p = product || useProductStore().activeProductName
+      const ps = useProductStore()
+      const p = product || ps.activeProductApiRef || ''
       const res = await fetch(`/api/test-cycles?product=${encodeURIComponent(p)}`, {
         headers: authHeaders(),
       })
@@ -40,7 +41,8 @@ export const useTestCyclesStore = defineStore('testCycles', () => {
 
   async function createCycle(payload: CreateTestCyclePayload): Promise<TestCycle | null> {
     try {
-      const productId = useProductStore().activeProductName
+      const ps = useProductStore()
+      const productId = ps.activeProductApiRef
       const res = await fetch('/api/test-cycles', {
         method: 'POST',
         headers: authHeaders(),

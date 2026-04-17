@@ -17,14 +17,14 @@ const loading = ref(true)
 async function fetchData() {
   loading.value = true
   try {
-    const product = productStore.activeProduct?.name || ''
+    const product = productStore.activeProductApiRef
     const res = await fetch(`/api/metrics/dashboard?product=${encodeURIComponent(product)}&period=${props.period}`)
     data.value = await res.json()
   } catch (e) { console.error('Failed to load overview metrics', e) }
   loading.value = false
 }
 
-watch(() => [props.period, productStore.activeProduct?.name], fetchData, { immediate: true })
+watch(() => [props.period, productStore.activeProductApiRef], fetchData, { immediate: true })
 
 function trendIcon(dir: string) {
   if (dir === 'up') return TrendingUp

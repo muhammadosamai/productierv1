@@ -2,6 +2,7 @@ import { Elysia, t } from 'elysia'
 import { db } from '../db'
 import { activities } from '../db/schema'
 import { eq, desc, and, inArray } from 'drizzle-orm'
+import { resolveProductRef } from '../lib/resolveProductRef'
 
 export const activityRoutes = new Elysia({ prefix: '/api/activities' })
   // GET /api/activities?product=X&entityId=Y&entityIds=a,b,c&entityType=task&limit=50
@@ -14,7 +15,11 @@ export const activityRoutes = new Elysia({ prefix: '/api/activities' })
     const limit = parseInt(query.limit || '50', 10)
 
     const conditions = []
-    if (product) conditions.push(eq(activities.product, product))
+    if (product) {
+      const pr = await resolveProductRef(product)
+      if (!pr.ok) return []
+      conditions.push(eq(activities.productId, pr.product.id))
+    }
     if (userId) conditions.push(eq(activities.userId, userId))
 
     // Support multiple entity IDs (e.g. story + all its child task IDs)
@@ -37,8 +42,27 @@ export const activityRoutes = new Elysia({ prefix: '/api/activities' })
   })
 
   // POST /api/activities
-  .post('/', async ({ body }) => {
-    const [activity] = await db.insert(activities).values(body).returning()
+  .post('/', async ({ body, set }) => {
+    const pr = await resolveProductRef((body as { product: string }).product)
+    if (!pr.ok) {
+      set.status = 400
+      return { error: 'Unknown product' }
+    }
+    const b = body as {
+      userId?: string | null
+      userName: string
+      userAvatar?: string | null
+      action: string
+      entityType: string
+      entityId?: string | null
+      entityTitle: string
+      changes?: { field: string; from: string | null; to: string | null }[] | null
+    }
+    const [activity] = await db.insert(activities).values({
+      ...b,
+      product: pr.product.name,
+      productId: pr.product.id,
+    }).returning()
     return activity
   }, {
     body: t.Object({

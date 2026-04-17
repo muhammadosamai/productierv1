@@ -16,6 +16,8 @@ import { AlertTriangle, Loader2 } from 'lucide-vue-next'
 
 const props = defineProps<{
   productName: string
+  /** Stable API ref (preferred over name for delete) */
+  productId?: string
 }>()
 
 const open = defineModel<boolean>('open', { default: false })
@@ -46,7 +48,8 @@ async function handleDelete() {
   deleting.value = true
   error.value = ''
 
-  const success = await productStore.deleteProduct(props.productName)
+  const ref = props.productId || props.productName
+  const success = await productStore.deleteProduct(ref)
 
   deleting.value = false
 

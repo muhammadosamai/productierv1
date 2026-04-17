@@ -138,7 +138,10 @@ function loadProductForm() {
   }
 }
 
-watch(() => productStore.activeProduct?.name, () => loadProductForm())
+watch(
+  () => [productStore.activeProductId, productStore.activeProductName] as const,
+  () => loadProductForm(),
+)
 watch(activeTab, (tab) => { if (tab === 'product') loadProductForm() })
 
 function triggerProductLogoUpload() {
@@ -164,8 +167,8 @@ function removeProductLogo() {
 
 async function uploadProductLogo(): Promise<string> {
   if (!productLogoFile.value) throw new Error('No file selected')
-  const productName = productStore.activeProductName
-  const qs = productName ? `?product=${encodeURIComponent(productName)}` : ''
+  const productRef = productStore.activeProductApiRef
+  const qs = productRef ? `?product=${encodeURIComponent(productRef)}` : ''
   const formData = new FormData()
   formData.append('file', productLogoFile.value)
   const res = await fetch(`/api/products/upload-logo${qs}`, {
@@ -216,7 +219,12 @@ async function handleProductSave() {
       return
     }
 
-    const result = await productStore.updateProduct(currentName, updates)
+    const id = productStore.activeProduct?.id
+    if (!id) {
+      productError.value = 'No active product'
+      return
+    }
+    const result = await productStore.updateProduct(id, updates)
     if (result.success) {
       productSaved.value = true
       setTimeout(() => productSaved.value = false, 3000)
@@ -796,6 +804,7 @@ const userInitials = () => {
       <DeleteProductDialog
         v-model:open="showDeleteProductDialog"
         :product-name="productStore.activeProductName"
+        :product-id="productStore.activeProduct?.id ?? ''"
       />
     </div>
   </div>

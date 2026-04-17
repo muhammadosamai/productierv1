@@ -73,6 +73,7 @@ async function seed() {
     priority: 'medium',
     status: 'backlog',
     product: seedProduct.name,
+    productId: seedProduct.id,
   }).returning()
 
   const [exportCsv] = await db.insert(stories).values({
@@ -83,6 +84,7 @@ async function seed() {
     priority: 'low',
     status: 'backlog',
     product: seedProduct.name,
+    productId: seedProduct.id,
   }).returning()
 
   const [webhooks] = await db.insert(stories).values({
@@ -93,6 +95,7 @@ async function seed() {
     priority: 'medium',
     status: 'in_progress',
     product: seedProduct.name,
+    productId: seedProduct.id,
   }).returning()
 
   const [i18n] = await db.insert(stories).values({
@@ -103,6 +106,7 @@ async function seed() {
     priority: 'low',
     status: 'backlog',
     product: seedProduct.name,
+    productId: seedProduct.id,
   }).returning()
 
   // Add sample tasks

@@ -13,6 +13,7 @@ import {
   type IssueFormFieldConfig,
 } from '../lib/issueFormConfig'
 import { ensureFormConfigsSchema } from '../lib/ensureFormConfigsSchema'
+import { resolveProductRef } from '../lib/resolveProductRef'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -26,17 +27,29 @@ async function getUserFromHeader(jwtVerify: any, headers: Record<string, string 
   return user || null
 }
 
-async function isProductAdmin(userId: string, product: string): Promise<boolean> {
+async function isProductAdmin(userId: string, productId: string): Promise<boolean> {
   const member = await db.query.productMembers.findFirst({
-    where: and(eq(productMembers.product, product), eq(productMembers.userId, userId)),
+    where: and(eq(productMembers.productId, productId), eq(productMembers.userId, userId)),
   })
   return member?.role === 'admin'
 }
 
 /** Global staff roles or product member admin for this product. */
-async function canModifyFormConfig(user: { id: string; role: string }, product: string): Promise<boolean> {
+async function canModifyFormConfig(user: { id: string; role: string }, productId: string): Promise<boolean> {
   if (['super_admin', 'admin', 'product_admin'].includes(user.role)) return true
-  return isProductAdmin(user.id, product)
+  return isProductAdmin(user.id, productId)
+}
+
+function rejectProductResolve(
+  set: { status?: number | string },
+  r: Exclude<Awaited<ReturnType<typeof resolveProductRef>>, { ok: true }>,
+) {
+  if (r.kind === 'ambiguous') {
+    set.status = 409
+    return { error: 'Multiple products match this name', candidates: r.candidates }
+  }
+  set.status = 404
+  return { error: 'Product not found' }
 }
 
 export const formConfigRoutes = new Elysia({ prefix: '/api/form-configs' })
@@ -45,11 +58,14 @@ export const formConfigRoutes = new Elysia({ prefix: '/api/form-configs' })
     await ensureFormConfigsSchema()
   })
 
-  // GET /api/form-configs/:product/:entityType
-  .get('/:product/:entityType', async ({ params: { product, entityType } }) => {
+  // GET /api/form-configs/:product/:entityType  (:product = id, project_key, or unique name)
+  .get('/:product/:entityType', async ({ params: { product, entityType }, set }) => {
+    const r = await resolveProductRef(decodeURIComponent(product))
+    if (!r.ok) return rejectProductResolve(set, r)
+
     const existing = await db.query.formConfigs.findFirst({
       where: and(
-        eq(formConfigs.product, product),
+        eq(formConfigs.productId, r.product.id),
         eq(formConfigs.entityType, entityType),
       ),
     })
@@ -72,7 +88,10 @@ export const formConfigRoutes = new Elysia({ prefix: '/api/form-configs' })
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
-    if (!(await canModifyFormConfig(user, product))) {
+    const r = await resolveProductRef(decodeURIComponent(product))
+    if (!r.ok) return rejectProductResolve(set, r)
+
+    if (!(await canModifyFormConfig(user, r.product.id))) {
       set.status = 403
       return { error: 'Only product admins or staff can modify form configurations' }
     }
@@ -80,7 +99,7 @@ export const formConfigRoutes = new Elysia({ prefix: '/api/form-configs' })
     // Upsert
     const existing = await db.query.formConfigs.findFirst({
       where: and(
-        eq(formConfigs.product, product),
+        eq(formConfigs.productId, r.product.id),
         eq(formConfigs.entityType, entityType),
       ),
     })
@@ -111,7 +130,7 @@ export const formConfigRoutes = new Elysia({ prefix: '/api/form-configs' })
             cnt: count(),
           })
           .from(issues)
-          .where(and(eq(issues.product, product), eq(issues.archived, false)))
+          .where(and(eq(issues.productId, r.product.id), eq(issues.archived, false)))
           .groupBy(issues.status)
         for (const row of rows) {
           const canon = normalizeIssueStatusToCanonicalId(prevMerged, row.status) ?? row.status
@@ -137,7 +156,8 @@ export const formConfigRoutes = new Elysia({ prefix: '/api/form-configs' })
     }
 
     const [created] = await db.insert(formConfigs).values({
-      product,
+      product: r.product.name,
+      productId: r.product.id,
       entityType,
       config: configToSave,
       updatedByUserId: user.id,

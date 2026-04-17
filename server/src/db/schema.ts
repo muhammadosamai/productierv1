@@ -108,6 +108,7 @@ export const stories = pgTable('backlog_items', {
   priority: storyPriorityEnum('priority').notNull().default('medium'),
   status: storyStatusEnum('status').notNull().default('backlog'),
   product: varchar('product', { length: 255 }).notNull().default('Product'),
+  productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
   initiative: varchar('initiative', { length: 255 }),
   delivery: varchar('delivery', { length: 255 }),
   owner: varchar('owner', { length: 255 }),
@@ -159,6 +160,7 @@ export const issues = pgTable('issues', {
   browser: issueBrowserEnum('browser'),
   operatingSystem: issueOsEnum('operating_system'),
   product: varchar('product', { length: 255 }).notNull(),
+  productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
   storyId: uuid('story_id').references(() => stories.id, { onDelete: 'set null' }),
   taskId: uuid('task_id'),
   testCycleId: uuid('test_cycle_id'),
@@ -271,6 +273,7 @@ export const initiatives = pgTable('initiatives', {
   leaderAvatar: varchar('leader_avatar', { length: 500 }),
   priority: storyPriorityEnum('priority').notNull().default('medium'),
   product: varchar('product', { length: 255 }).notNull().default('Product'),
+  productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 })
@@ -404,6 +407,7 @@ export const userSettings = pgTable('user_settings', {
 export const activities = pgTable('activities', {
   id: uuid('id').primaryKey().defaultRandom(),
   product: varchar('product', { length: 255 }).notNull(),
+  productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
   userId: uuid('user_id').references(() => users.id),
   userName: varchar('user_name', { length: 255 }).notNull(),
   userAvatar: varchar('user_avatar', { length: 500 }),
@@ -417,8 +421,8 @@ export const activities = pgTable('activities', {
 
 export const products = pgTable('products', {
   id: uuid('id').primaryKey().defaultRandom(),
-  name: varchar('name', { length: 255 }).notNull().unique(),
-  projectKey: varchar('project_key', { length: 16 }),
+  name: varchar('name', { length: 255 }).notNull(),
+  projectKey: varchar('project_key', { length: 16 }).unique(),
   logo: varchar('logo', { length: 500 }),
   description: text('description'),
   createdByUserId: uuid('created_by_user_id').notNull().references(() => users.id),
@@ -435,11 +439,12 @@ export const productCounters = pgTable('product_counters', {
 export const productMembers = pgTable('product_members', {
   id: uuid('id').primaryKey().defaultRandom(),
   product: varchar('product', { length: 255 }).notNull(),
+  productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   role: varchar('role', { length: 50 }).notNull().default('member'),
   addedAt: timestamp('added_at').notNull().defaultNow(),
 }, (table) => [
-  unique('product_user_unique').on(table.product, table.userId),
+  unique('product_members_product_id_user_id_unique').on(table.productId, table.userId),
 ])
 
 export const inviteStatusEnum = pgEnum('invite_status', ['pending', 'accepted', 'expired'])
@@ -447,6 +452,7 @@ export const inviteStatusEnum = pgEnum('invite_status', ['pending', 'accepted', 
 export const productInvites = pgTable('product_invites', {
   id: uuid('id').primaryKey().defaultRandom(),
   product: varchar('product', { length: 255 }).notNull(),
+  productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
   email: varchar('email', { length: 255 }).notNull(),
   role: varchar('role', { length: 50 }).notNull().default('member'),
   token: varchar('token', { length: 255 }).notNull().unique(),
@@ -1105,13 +1111,14 @@ export const emailPreferences = pgTable('email_preferences', {
 export const formConfigs = pgTable('form_configs', {
   id: uuid('id').primaryKey().defaultRandom(),
   product: varchar('product', { length: 255 }).notNull(),
+  productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
   entityType: varchar('entity_type', { length: 50 }).notNull(),
   config: json('config').notNull(),
   updatedByUserId: uuid('updated_by_user_id').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (table) => [
-  unique('form_config_product_entity_unique').on(table.product, table.entityType),
+  unique('form_config_product_id_entity_unique').on(table.productId, table.entityType),
 ])
 
 export const customFieldValues = pgTable('custom_field_values', {

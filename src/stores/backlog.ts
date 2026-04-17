@@ -32,8 +32,9 @@ export const useBacklogStore = defineStore('backlog', () => {
     return result
   })
 
-  async function fetchStories(productName?: string) {
-    const product = productName || useProductStore().activeProductName
+  async function fetchStories(productScope?: string) {
+    const ps = useProductStore()
+    const product = productScope || ps.activeProductApiRef || ''
     loading.value = true
     error.value = null
     try {

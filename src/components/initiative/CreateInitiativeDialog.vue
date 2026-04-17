@@ -160,7 +160,7 @@ async function handleSubmit() {
     leader: leader.value.trim() || undefined,
     leaderAvatar: leaderAvatar.value || undefined,
     priority: priority.value,
-    product: activeProduct.name,
+    product: activeProduct.id!,
   })
   submitting.value = false
   submitted.value = true

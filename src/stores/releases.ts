@@ -22,7 +22,8 @@ export const useReleasesStore = defineStore('releases', () => {
   const releaseCount = computed(() => releases.value.length)
 
   async function fetchReleases(productName?: string) {
-    const product = productName || useProductStore().activeProductName
+    const ps = useProductStore()
+    const product = productName || ps.activeProductApiRef || ''
     loading.value = true
     error.value = null
     try {

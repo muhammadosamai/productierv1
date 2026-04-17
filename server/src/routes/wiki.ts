@@ -3,6 +3,7 @@ import { db } from '../db'
 import { assetTypes, assets, assetRelations_table, users } from '../db/schema'
 import { eq, and, ilike, or } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
+import { resolveProductRef } from '../lib/resolveProductRef'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -42,7 +43,12 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
 
   // GET /api/wiki/types?product=X
   .get('/types', async ({ query }) => {
-    const product = query.product
+    let product: string | undefined
+    if (query.product) {
+      const r = await resolveProductRef(query.product)
+      if (!r.ok) return []
+      product = r.product.id
+    }
     const existing = await db.query.assetTypes.findMany({
       where: product ? eq(assetTypes.productId, product) : undefined,
       orderBy: (t, { asc }) => [asc(t.category), asc(t.name)],
@@ -88,7 +94,12 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
 
   // GET /api/wiki/assets?product=X&type=slug&search=q
   .get('/assets', async ({ query }) => {
-    const product = query.product
+    let product: string | undefined
+    if (query.product) {
+      const r = await resolveProductRef(query.product)
+      if (!r.ok) return []
+      product = r.product.id
+    }
     const typeSlug = query.type
     const search = query.search
 
@@ -133,7 +144,12 @@ export const wikiRoutes = new Elysia({ prefix: '/api/wiki' })
 
   // GET /api/wiki/tags?product=X&q=term
   .get('/tags', async ({ query }) => {
-    const product = query.product
+    let product: string | undefined
+    if (query.product) {
+      const r = await resolveProductRef(query.product)
+      if (!r.ok) return []
+      product = r.product.id
+    }
     const q = (query.q || '').trim().toLowerCase()
 
     const rows = await db.query.assets.findMany({

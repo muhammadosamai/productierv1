@@ -14,14 +14,14 @@ const loading = ref(true)
 async function fetchData() {
   loading.value = true
   try {
-    const product = productStore.activeProduct?.name || ''
+    const product = productStore.activeProductApiRef
     const res = await fetch(`/api/metrics/workload?product=${encodeURIComponent(product)}`)
     data.value = await res.json()
   } catch (e) { console.error('Failed to load workload metrics', e) }
   loading.value = false
 }
 
-watch(() => [props.period, productStore.activeProduct?.name], fetchData, { immediate: true })
+watch(() => [props.period, productStore.activeProductApiRef], fetchData, { immediate: true })
 
 const statusKeys = ['in_progress', 'in_review', 'assigned', 'created', 'blocked', 'done']
 </script>

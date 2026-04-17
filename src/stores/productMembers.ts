@@ -4,6 +4,8 @@ import { defineStore } from 'pinia'
 export interface ProductMember {
   id: string
   product: string
+  /** Present when API returns it; use for disambiguation when display names duplicate. */
+  productId?: string
   role: string
   addedAt: string
   userId: string

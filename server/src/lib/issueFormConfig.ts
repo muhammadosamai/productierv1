@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
 import { db } from '../db'
 import { formConfigs } from '../db/schema'
+import { resolveProductRef } from './resolveProductRef'
 import { getDefaultConfig } from './builtInFields'
 import {
   DEFAULT_LEGACY_SLUG_TO_CANONICAL_ID,
@@ -280,10 +281,21 @@ export async function getAllowedIssueStatusesForProduct(product: string): Promis
   }
 }
 
-export async function mergeIssueFormConfigForProduct(product: string): Promise<{ fields: IssueFormFieldConfig[] }> {
+/** Resolve product by id, project key, or (unique) display name, then load issue form config. */
+export async function mergeIssueFormConfigForProduct(productRef: string): Promise<{ fields: IssueFormFieldConfig[] }> {
+  try {
+    const r = await resolveProductRef(productRef.trim())
+    if (!r.ok) return mergeIssueFormConfig(null)
+    return mergeIssueFormConfigForProductId(r.product.id)
+  } catch {
+    return mergeIssueFormConfig(null)
+  }
+}
+
+export async function mergeIssueFormConfigForProductId(productId: string): Promise<{ fields: IssueFormFieldConfig[] }> {
   try {
     const row = await db.query.formConfigs.findFirst({
-      where: and(eq(formConfigs.product, product), eq(formConfigs.entityType, 'issue')),
+      where: and(eq(formConfigs.productId, productId), eq(formConfigs.entityType, 'issue')),
     })
     return mergeIssueFormConfig(row?.config as { fields?: IssueFormFieldConfig[] } | undefined)
   } catch {

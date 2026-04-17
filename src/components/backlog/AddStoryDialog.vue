@@ -379,7 +379,7 @@ async function handleSubmit(withBreakdown = false) {
     acceptanceCriteria: acceptanceCriteria.value || undefined,
     type: type.value,
     priority: priority.value,
-    product: activeProduct.name,
+    product: activeProduct.id!,
     initiative: initiative.value.trim() || undefined,
     delivery: requiredBy.value || undefined,
     owner: owner.value.trim() || undefined,

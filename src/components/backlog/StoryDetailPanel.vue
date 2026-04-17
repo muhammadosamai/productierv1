@@ -89,13 +89,13 @@ const authStore = useAuthStore()
 const formConfigsStore = useFormConfigsStore()
 
 const issueStatusMerged = computed(() => {
-  const p = props.story?.product
+  const p = props.story?.productId || props.story?.product
   if (!p) return mergeIssueFormConfig(undefined)
   return mergeIssueFormConfig(formConfigsStore.getConfig(p, 'issue') ?? undefined)
 })
 
 watch(
-  () => [props.open, props.story?.product] as const,
+  () => [props.open, props.story?.productId || props.story?.product] as const,
   async ([open, product]) => {
     if (open && product) await formConfigsStore.fetchConfig(product, 'issue')
   },

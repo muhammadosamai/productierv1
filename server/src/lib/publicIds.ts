@@ -1,8 +1,7 @@
 import { eq, sql } from 'drizzle-orm'
 import { db } from '../db'
 import { productCounters, products } from '../db/schema'
-
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+import { resolveProductRef } from './resolveProductRef'
 
 function normalizeProjectKeyBase(input: string) {
   const base = input.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 5)
@@ -39,19 +38,9 @@ async function ensureProjectKey(productId: string, productName: string) {
 }
 
 async function resolveProduct(productRef: string) {
-  if (UUID_REGEX.test(productRef)) {
-    const byId = await db.query.products.findFirst({
-      where: eq(products.id, productRef),
-      columns: { id: true, name: true, projectKey: true },
-    })
-    if (byId) return byId
-  }
-
-  const byName = await db.query.products.findFirst({
-    where: eq(products.name, productRef),
-    columns: { id: true, name: true, projectKey: true },
-  })
-  return byName
+  const r = await resolveProductRef(productRef)
+  if (r.ok) return r.product
+  return null
 }
 
 export async function generatePublicIdForProduct(productRef: string): Promise<string | null> {
@@ -79,12 +68,11 @@ export async function generatePublicIdForProduct(productRef: string): Promise<st
     // stories Drizzle model maps to table 'backlog_items'
     safeMaxSuffix(sql`
       select coalesce(max((regexp_match(public_id, '-([0-9]+)$'))[1]::int), 0) as n
-      from backlog_items where product = ${product.name} and public_id is not null
+      from backlog_items where product_id = ${product.id}::uuid and public_id is not null
     `),
-    // issues.product is varchar
     safeMaxSuffix(sql`
       select coalesce(max((regexp_match(public_id, '-([0-9]+)$'))[1]::int), 0) as n
-      from issues where product = ${product.name} and public_id is not null
+      from issues where product_id = ${product.id}::uuid and public_id is not null
     `),
   ])
 

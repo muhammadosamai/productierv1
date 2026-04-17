@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { validateAttachmentFileName, validateAttachmentContent } from '../lib/allowedAttachments'
 import { ensureInitiativeStatusArchivedEnum } from '../lib/ensureInitiativeStatusEnum'
+import { resolveProductRef } from '../lib/resolveProductRef'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -48,11 +49,11 @@ async function userCanAccessInitiativeAttachment(
   if (user.role === 'super_admin') return true
   const ini = await db.query.initiatives.findFirst({
     where: eq(initiatives.id, initiativeId),
-    columns: { product: true },
+    columns: { productId: true },
   })
   if (!ini) return false
   const member = await db.query.productMembers.findFirst({
-    where: and(eq(productMembers.product, ini.product), eq(productMembers.userId, user.id)),
+    where: and(eq(productMembers.productId, ini.productId), eq(productMembers.userId, user.id)),
   })
   return !!member
 }
@@ -66,15 +67,30 @@ export const initiativeRoutes = new Elysia({ prefix: '/api/initiatives' })
   // GET /api/initiatives
   .get('/', async ({ query }) => {
     const product = query.product
+    let w = undefined as ReturnType<typeof eq> | undefined
+    if (product) {
+      const pr = await resolveProductRef(product)
+      if (pr.ok) w = eq(initiatives.productId, pr.product.id)
+    }
     return db.query.initiatives.findMany({
-      where: product ? eq(initiatives.product, product) : undefined,
+      where: w,
       orderBy: (items, { desc }) => [desc(items.createdAt)],
     })
   })
 
   // POST /api/initiatives
   .post('/', async ({ body, jwt, headers }) => {
-    const [initiative] = await db.insert(initiatives).values(body).returning()
+    const productRef = (body as { product?: string }).product || 'Product'
+    const pr = await resolveProductRef(productRef)
+    if (!pr.ok) {
+      throw new Error(pr.kind === 'ambiguous' ? 'Multiple products match' : 'Invalid product')
+    }
+    const { product: _p, ...rest } = body as Record<string, unknown>
+    const [initiative] = await db.insert(initiatives).values({
+      ...rest,
+      product: pr.product.name,
+      productId: pr.product.id,
+    } as typeof initiatives.$inferInsert).returning()
     const user = await getUserFromHeader(jwt.verify, headers)
     logActivity({
       product: initiative!.product,

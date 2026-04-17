@@ -15,6 +15,8 @@ export interface Story {
   priority: StoryPriority
   status: StoryStatus
   product: string
+  /** Product UUID — preferred for API routes when duplicate names exist */
+  productId?: string
   initiative: string | null
   delivery: string | null
   owner: string | null

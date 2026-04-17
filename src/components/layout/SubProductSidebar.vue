@@ -71,13 +71,13 @@ interface TeamUser {
 const teamMembers = ref<TeamUser[]>([])
 
 async function fetchTeamMembers() {
-  const productName = productStore.activeProduct?.name
-  if (!productName) {
+  const productRef = productStore.activeProductApiRef
+  if (!productRef) {
     teamMembers.value = []
     return
   }
   try {
-    const res = await fetch(`/api/products/${encodeURIComponent(productName)}/members`, {
+    const res = await fetch(`/api/products/${encodeURIComponent(productRef)}/members`, {
       headers: { Authorization: `Bearer ${authStore.token}` },
     })
     if (res.ok) {
@@ -497,9 +497,9 @@ onMounted(() => {
   deliveriesStore.fetchDeliveries()
   releasesStore.fetchReleases()
   testCyclesStore.fetchCycles()
-  issuesStore.fetchIssues(productStore.activeProduct?.name)
+  issuesStore.fetchIssues(productStore.activeProductApiRef)
   fetchTeamMembers()
-  favoritesStore.fetchFavorites(productStore.activeProduct?.name || '')
+  favoritesStore.fetchFavorites(productStore.activeProductApiRef)
   document.addEventListener('click', onDocumentClick)
 })
 
@@ -510,9 +510,9 @@ watch(() => productStore.activeIndex, () => {
   deliveriesStore.fetchDeliveries()
   releasesStore.fetchReleases()
   testCyclesStore.fetchCycles()
-  issuesStore.fetchIssues(productStore.activeProduct?.name)
+  issuesStore.fetchIssues(productStore.activeProductApiRef)
   fetchTeamMembers()
-  favoritesStore.fetchFavorites(productStore.activeProduct?.name || '')
+  favoritesStore.fetchFavorites(productStore.activeProductApiRef)
   // Navigate to overview if on a detail page (it may belong to another product)
   if (route.params.id && (route.path.startsWith('/initiatives/') || route.path.startsWith('/deliveries/') || route.path.startsWith('/releases/'))) {
     router.push('/metrics')
@@ -698,7 +698,7 @@ function onTestCycleCreated(id: string) {
 
 function onIssueCreated() {
   activeItem.value = 'Issues'
-  issuesStore.fetchIssues(productStore.activeProduct?.name)
+  issuesStore.fetchIssues(productStore.activeProductApiRef)
   router.push('/issues')
 }
 </script>

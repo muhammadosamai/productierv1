@@ -31,7 +31,7 @@ onMounted(() => {
   store.fetchCycles()
 })
 
-watch(() => productStore.activeProductName, () => {
+watch(() => productStore.activeProductApiRef, () => {
   store.fetchCycles()
 })
 
@@ -311,7 +311,7 @@ function openCount(cycle: TestCycle) {
             >
               <td class="px-5 py-3.5">
                 <div class="flex items-center gap-2.5 min-w-0">
-                  <FavoriteStar entity-type="test_cycle" :entity-id="cycle.id" :product-id="productStore.activeProductName" />
+                  <FavoriteStar entity-type="test_cycle" :entity-id="cycle.id" :product-id="productStore.activeProductApiRef" />
                   <span class="w-1 h-7 rounded-full flex-shrink-0" :class="statusDotColor(cycle.status)"></span>
                   <span class="text-sm font-medium text-gray-900 truncate">
                     <span v-if="parsePrefix(cycle.title).prefix" class="font-semibold" :class="statusTextColor(cycle.status)">{{ parsePrefix(cycle.title).prefix }}</span>
@@ -369,7 +369,7 @@ function openCount(cycle: TestCycle) {
         >
           <div class="flex items-start justify-between gap-3 mb-3">
             <div class="flex items-center gap-2.5 min-w-0">
-              <FavoriteStar entity-type="test_cycle" :entity-id="cycle.id" :product-id="productStore.activeProductName" />
+              <FavoriteStar entity-type="test_cycle" :entity-id="cycle.id" :product-id="productStore.activeProductApiRef" />
               <span class="w-1 h-5 rounded-full flex-shrink-0" :class="statusDotColor(cycle.status)"></span>
               <h3 class="text-sm font-semibold text-gray-900 truncate group-hover:text-[#4857FE] transition-colors">
                 <span v-if="parsePrefix(cycle.title).prefix" :class="statusTextColor(cycle.status)">{{ parsePrefix(cycle.title).prefix }}</span>

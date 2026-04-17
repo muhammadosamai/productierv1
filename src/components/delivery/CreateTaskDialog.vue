@@ -285,7 +285,7 @@ const draftParentTask = computed((): Task | null => {
 })
 
 async function fetchSubtaskTeamMembers() {
-  const name = productStore.activeProduct?.name
+  const name = productStore.activeProductApiRef
   if (!name) {
     subtaskTeamMembers.value = []
     return

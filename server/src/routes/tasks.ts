@@ -1,6 +1,6 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
-import { tasks, taskComments, taskAttachments, taskSubtasks, stories, users, deliveries, taskStatusHistory, products, productMembers } from '../db/schema'
+import { tasks, taskComments, taskAttachments, taskSubtasks, stories, users, deliveries, taskStatusHistory, productMembers } from '../db/schema'
 import { recomputeStoryStatus } from '../lib/storyStatus'
 import { randomUUID } from 'crypto'
 import path from 'path'
@@ -39,11 +39,11 @@ async function userCanAccessTaskAttachment(
   if (!task) return false
   const story = await db.query.stories.findFirst({
     where: eq(stories.id, task.storyId),
-    columns: { product: true },
+    columns: { productId: true },
   })
   if (!story) return false
   const member = await db.query.productMembers.findFirst({
-    where: and(eq(productMembers.product, story.product), eq(productMembers.userId, user.id)),
+    where: and(eq(productMembers.productId, story.productId), eq(productMembers.userId, user.id)),
   })
   return !!member
 }
@@ -283,11 +283,7 @@ export const taskRoutes = new Elysia({ prefix: '/api/tasks' })
     // Auto-transition: if any role is assigned at creation, set status to 'assigned'
     const effectiveStatus = hasAnyRoleAssigned(rest) ? 'assigned' : 'created'
 
-    const product = await db.query.products.findFirst({
-      where: eq(products.name, story.product),
-      columns: { id: true },
-    })
-    const normalizedProductId = product?.id || story.product
+    const normalizedProductId = story.productId
 
     let dueAtForDb: Date | null = dueAt ? new Date(dueAt) : null
     let startForDb: string | null | undefined

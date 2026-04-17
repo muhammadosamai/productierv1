@@ -1,7 +1,8 @@
 import { Elysia, t } from 'elysia'
 import { db } from '../db'
-import { products, productMembers, users, stories, tasks, initiatives, deliveries, releases, servers, testCycles, favorites, assetTypes, assets, featureRequests, consumerFeedbacks, taskStatusHistory, activities } from '../db/schema'
+import { products, productMembers, users, stories, tasks, initiatives, deliveries, releases, servers, testCycles, favorites, assetTypes, assets, featureRequests, consumerFeedbacks, taskStatusHistory, activities, issues, productInvites, formConfigs } from '../db/schema'
 import { eq, and, desc, inArray } from 'drizzle-orm'
+import { resolveProductRef } from '../lib/resolveProductRef'
 import { jwt } from '@elysiajs/jwt'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -20,9 +21,9 @@ async function getUserFromHeader(jwtVerify: any, headers: Record<string, string 
   return user || null
 }
 
-async function isProductAdmin(userId: string, product: string): Promise<boolean> {
+async function isProductAdmin(userId: string, productId: string): Promise<boolean> {
   const member = await db.query.productMembers.findFirst({
-    where: and(eq(productMembers.product, product), eq(productMembers.userId, userId)),
+    where: and(eq(productMembers.productId, productId), eq(productMembers.userId, userId)),
   })
   return member?.role === 'admin'
 }
@@ -36,11 +37,11 @@ function isOwnerOrSuperAdmin(
 
 async function canManageProductBranding(
   user: { id: string; role: string },
-  productName: string,
+  productId: string,
   product: { createdByUserId: string },
 ): Promise<boolean> {
   if (isOwnerOrSuperAdmin(user, product)) return true
-  return isProductAdmin(user.id, productName)
+  return isProductAdmin(user.id, productId)
 }
 
 function normalizeProjectKeyBase(input: string) {
@@ -64,6 +65,18 @@ async function generateUniqueProjectKey(name: string) {
   }
 }
 
+function rejectProductResolve(
+  set: { status?: number | string },
+  r: Exclude<Awaited<ReturnType<typeof resolveProductRef>>, { ok: true }>,
+) {
+  if (r.kind === 'ambiguous') {
+    set.status = 409
+    return { error: 'Multiple products match this name', candidates: r.candidates }
+  }
+  set.status = 404
+  return { error: 'Product not found' }
+}
+
 export const productRoutes = new Elysia({ prefix: '/api/products' })
   .use(jwt({ name: 'jwt', secret: JWT_SECRET }))
 
@@ -74,14 +87,14 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     let roleByProduct: Record<string, string> = {}
     if (user) {
       const membershipRows = await db
-        .select({ product: productMembers.product, role: productMembers.role })
+        .select({ productId: productMembers.productId, role: productMembers.role })
         .from(productMembers)
         .where(eq(productMembers.userId, user.id))
-      roleByProduct = Object.fromEntries(membershipRows.map((r) => [r.product, r.role]))
+      roleByProduct = Object.fromEntries(membershipRows.map((r) => [r.productId, r.role]))
     }
 
-    const attachMyRole = <T extends { name: string }>(list: T[]) =>
-      list.map((p) => ({ ...p, myRole: roleByProduct[p.name] ?? null }))
+    const attachMyRole = <T extends { id: string }>(list: T[]) =>
+      list.map((p) => ({ ...p, myRole: roleByProduct[p.id] ?? null }))
 
     // Unauthenticated or super_admin: return all
     if (!user || user.role === 'super_admin') {
@@ -93,18 +106,18 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
 
     // Return only products the user is a member of
     const memberProducts = await db
-      .select({ product: productMembers.product })
+      .select({ productId: productMembers.productId })
       .from(productMembers)
       .where(eq(productMembers.userId, user.id))
 
-    const productNames = memberProducts.map(m => m.product)
-    if (productNames.length === 0) return []
+    const memberIds = new Set(memberProducts.map((m) => m.productId))
+    if (memberIds.size === 0) return []
 
     const allProducts = await db.query.products.findMany({
       orderBy: (items, { asc }) => [asc(items.name)],
     })
 
-    return attachMyRole(allProducts.filter(p => productNames.includes(p.name)))
+    return attachMyRole(allProducts.filter((p) => memberIds.has(p.id)))
   })
 
   // POST /api/products - Create a new product
@@ -128,6 +141,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       // Auto-add creator as admin member
       await db.insert(productMembers).values({
         product: product!.name,
+        productId: product!.id,
         userId: user.id,
         role: 'admin',
       })
@@ -138,9 +152,10 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
           if (member.userId !== user.id) {
             await db.insert(productMembers).values({
               product: product!.name,
+              productId: product!.id,
               userId: member.userId,
               role: member.role || 'member',
-            }).onConflictDoNothing()
+            }).onConflictDoNothing({ target: [productMembers.productId, productMembers.userId] })
           }
         }
       }
@@ -149,7 +164,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     } catch (e: any) {
       if (e.code === '23505') {
         set.status = 409
-        return { error: 'A product with this name already exists' }
+        return { error: 'Could not create product (duplicate project key or member)' }
       }
       throw e
     }
@@ -165,12 +180,16 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     }),
   })
 
-  // GET /api/products/:name/members
-  .get('/:name/members', async ({ params: { name } }) => {
+  // GET /api/products/:name/members  (:name = id, project_key, or unique display name)
+  .get('/:name/members', async ({ params: { name }, set }) => {
+    const r = await resolveProductRef(decodeURIComponent(name))
+    if (!r.ok) return rejectProductResolve(set, r)
+
     const members = await db
       .select({
         id: productMembers.id,
         product: productMembers.product,
+        productId: productMembers.productId,
         role: productMembers.role,
         addedAt: productMembers.addedAt,
         userId: users.id,
@@ -181,16 +200,20 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       })
       .from(productMembers)
       .innerJoin(users, eq(productMembers.userId, users.id))
-      .where(eq(productMembers.product, name))
+      .where(eq(productMembers.productId, r.product.id))
 
     return members
   })
 
   // POST /api/products/:name/members
   .post('/:name/members', async ({ params: { name }, body, set }) => {
+    const r = await resolveProductRef(decodeURIComponent(name))
+    if (!r.ok) return rejectProductResolve(set, r)
+
     try {
       const [member] = await db.insert(productMembers).values({
-        product: name,
+        product: r.product.name,
+        productId: r.product.id,
         userId: body.userId,
         role: body.role || 'member',
       }).returning()
@@ -229,7 +252,10 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       return { error: 'Unauthorized' }
     }
 
-    const canManage = user.role === 'super_admin' || await isProductAdmin(user.id, name)
+    const r = await resolveProductRef(decodeURIComponent(name))
+    if (!r.ok) return rejectProductResolve(set, r)
+
+    const canManage = user.role === 'super_admin' || await isProductAdmin(user.id, r.product.id)
     if (!canManage) {
       set.status = 403
       return { error: 'Only product admins can change member roles' }
@@ -247,7 +273,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     }
 
     const existing = await db.query.productMembers.findFirst({
-      where: and(eq(productMembers.product, name), eq(productMembers.userId, userId)),
+      where: and(eq(productMembers.productId, r.product.id), eq(productMembers.userId, userId)),
     })
     if (!existing) {
       set.status = 404
@@ -260,6 +286,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       return {
         id: existing.id,
         product: existing.product,
+        productId: existing.productId,
         role: existing.role,
         addedAt: existing.addedAt,
         userId,
@@ -274,7 +301,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       const admins = await db
         .select({ id: productMembers.id })
         .from(productMembers)
-        .where(and(eq(productMembers.product, name), eq(productMembers.role, 'admin')))
+        .where(and(eq(productMembers.productId, r.product.id), eq(productMembers.role, 'admin')))
       if (admins.length <= 1) {
         set.status = 400
         return { error: 'Cannot remove the last product admin' }
@@ -284,7 +311,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     const [updated] = await db
       .update(productMembers)
       .set({ role })
-      .where(and(eq(productMembers.product, name), eq(productMembers.userId, userId)))
+      .where(and(eq(productMembers.productId, r.product.id), eq(productMembers.userId, userId)))
       .returning()
 
     if (targetUser?.email) {
@@ -292,7 +319,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       void sendRoleChangeEmail({
         email: targetUser.email,
         userName: targetUser.name || 'there',
-        productName: name,
+        productName: r.product.name,
         previousRole,
         newRole: role,
         changedByName: user.name || 'An administrator',
@@ -302,6 +329,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     return {
       id: updated!.id,
       product: updated!.product,
+      productId: updated!.productId,
       role: updated!.role,
       addedAt: updated!.addedAt,
       userId,
@@ -318,9 +346,12 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
 
   // DELETE /api/products/:name/members/:userId
   .delete('/:name/members/:userId', async ({ params: { name, userId }, set }) => {
+    const r = await resolveProductRef(decodeURIComponent(name))
+    if (!r.ok) return rejectProductResolve(set, r)
+
     const [deleted] = await db.delete(productMembers)
       .where(and(
-        eq(productMembers.product, name),
+        eq(productMembers.productId, r.product.id),
         eq(productMembers.userId, userId),
       ))
       .returning()
@@ -345,14 +376,21 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
 
     const productName = query.product?.trim()
     if (productName) {
+      const resolved = await resolveProductRef(productName)
+      if (!resolved.ok) {
+        set.status = resolved.kind === 'ambiguous' ? 409 : 404
+        return resolved.kind === 'ambiguous'
+          ? { error: 'Multiple products match', candidates: resolved.candidates }
+          : { error: 'Product not found' }
+      }
       const scopedProduct = await db.query.products.findFirst({
-        where: eq(products.name, productName),
+        where: eq(products.id, resolved.product.id),
       })
       if (!scopedProduct) {
         set.status = 404
         return { error: 'Product not found' }
       }
-      const allowed = await canManageProductBranding(user, productName, scopedProduct)
+      const allowed = await canManageProductBranding(user, scopedProduct.id, scopedProduct)
       if (!allowed) {
         set.status = 403
         return { error: 'Only the product owner, a product admin, or super admin can upload a logo for this product' }
@@ -392,8 +430,11 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       return { error: 'Unauthorized' }
     }
 
+    const r = await resolveProductRef(decodeURIComponent(name))
+    if (!r.ok) return rejectProductResolve(set, r)
+
     const product = await db.query.products.findFirst({
-      where: eq(products.name, name),
+      where: eq(products.id, r.product.id),
     })
     if (!product) {
       set.status = 404
@@ -401,7 +442,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     }
 
     const ownerOrSuper = isOwnerOrSuperAdmin(user, product)
-    const productAdmin = await isProductAdmin(user.id, name)
+    const productAdmin = await isProductAdmin(user.id, product.id)
 
     if (!ownerOrSuper && !productAdmin) {
       set.status = 403
@@ -409,7 +450,7 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     }
 
     if (!ownerOrSuper && productAdmin) {
-      if (body.name !== undefined && body.name !== name) {
+      if (body.name !== undefined && body.name !== product.name) {
         set.status = 403
         return { error: 'Only the product owner or super admin can rename this product' }
       }
@@ -430,24 +471,28 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     }
 
     try {
-      // If name is changing, update all references across tables
-      if (updates.name && updates.name !== name) {
-        await db.update(productMembers).set({ product: updates.name }).where(eq(productMembers.product, name))
-        await db.update(stories).set({ product: updates.name }).where(eq(stories.product, name))
-        await db.update(initiatives).set({ product: updates.name }).where(eq(initiatives.product, name))
-        await db.update(activities).set({ product: updates.name }).where(eq(activities.product, name))
+      // If name is changing, update denormalized product varchar rows for this product_id
+      if (updates.name && updates.name !== product.name) {
+        const pid = product.id
+        await db.update(productMembers).set({ product: updates.name }).where(eq(productMembers.productId, pid))
+        await db.update(stories).set({ product: updates.name }).where(eq(stories.productId, pid))
+        await db.update(initiatives).set({ product: updates.name }).where(eq(initiatives.productId, pid))
+        await db.update(activities).set({ product: updates.name }).where(eq(activities.productId, pid))
+        await db.update(issues).set({ product: updates.name }).where(eq(issues.productId, pid))
+        await db.update(productInvites).set({ product: updates.name }).where(eq(productInvites.productId, pid))
+        await db.update(formConfigs).set({ product: updates.name }).where(eq(formConfigs.productId, pid))
       }
 
       const [updated] = await db.update(products)
         .set(updates)
-        .where(eq(products.name, name))
+        .where(eq(products.id, product.id))
         .returning()
 
       return updated
     } catch (e: any) {
       if (e.code === '23505') {
         set.status = 409
-        return { error: 'A product with this name already exists' }
+        return { error: 'Update conflict (duplicate project key or constraint)' }
       }
       throw e
     }
@@ -467,9 +512,11 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       return { error: 'Unauthorized' }
     }
 
-    // Find the product
+    const r = await resolveProductRef(decodeURIComponent(name))
+    if (!r.ok) return rejectProductResolve(set, r)
+
     const product = await db.query.products.findFirst({
-      where: eq(products.name, name),
+      where: eq(products.id, r.product.id),
     })
     if (!product) {
       set.status = 404
@@ -482,10 +529,9 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
       return { error: 'Only the product owner or super admin can delete this product' }
     }
 
-    const productScope = [name, product.id]
+    const productScope = [product.id]
 
-    // Delete all related data (no FK constraints, must clean up manually)
-    // Tables with `productId` field (varchar matching product name)
+    // Delete all related data (no FK constraints on many tables, must clean up manually)
     await db.delete(taskStatusHistory).where(inArray(taskStatusHistory.productId, productScope))
     await db.delete(tasks).where(inArray(tasks.productId, productScope))
     await db.delete(testCycles).where(inArray(testCycles.productId, productScope))
@@ -498,14 +544,15 @@ export const productRoutes = new Elysia({ prefix: '/api/products' })
     await db.delete(servers).where(inArray(servers.productId, productScope))
     await db.delete(favorites).where(inArray(favorites.productId, productScope))
 
-    // Tables with `product` field (varchar matching product name)
-    await db.delete(stories).where(eq(stories.product, name))
-    await db.delete(initiatives).where(eq(initiatives.product, name))
-    await db.delete(activities).where(eq(activities.product, name))
-    await db.delete(productMembers).where(eq(productMembers.product, name))
+    await db.delete(issues).where(eq(issues.productId, product.id))
+    await db.delete(stories).where(eq(stories.productId, product.id))
+    await db.delete(initiatives).where(eq(initiatives.productId, product.id))
+    await db.delete(activities).where(eq(activities.productId, product.id))
+    await db.delete(productInvites).where(eq(productInvites.productId, product.id))
+    await db.delete(formConfigs).where(eq(formConfigs.productId, product.id))
+    await db.delete(productMembers).where(eq(productMembers.productId, product.id))
 
-    // Finally delete the product itself
-    await db.delete(products).where(eq(products.name, name))
+    await db.delete(products).where(eq(products.id, product.id))
 
     return { success: true }
   })

@@ -106,6 +106,13 @@
       "when": 2000000000005,
       "tag": "0014_issue_type_feature_enhancement",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 2000000000006,
+      "tag": "0016_duplicate_product_names",
+      "breakpoints": true
     }
   ]
 }

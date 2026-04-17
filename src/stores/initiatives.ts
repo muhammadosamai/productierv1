@@ -12,8 +12,9 @@ export const useInitiativesStore = defineStore('initiatives', () => {
 
   const initiativeCount = computed(() => initiatives.value.length)
 
-  async function fetchInitiatives(productName?: string) {
-    const product = productName || useProductStore().activeProductName
+  async function fetchInitiatives(productScope?: string) {
+    const ps = useProductStore()
+    const product = productScope || ps.activeProductApiRef || ''
     loading.value = true
     error.value = null
     try {

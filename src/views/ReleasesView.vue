@@ -328,7 +328,7 @@ const columns = [
               <!-- Title with status dot -->
               <td class="px-5 py-3.5">
                 <div class="flex items-center gap-2">
-                  <FavoriteStar entity-type="release" :entity-id="release.id" :product-id="productStore.activeProductName" />
+                  <FavoriteStar entity-type="release" :entity-id="release.id" :product-id="productStore.activeProductApiRef" />
                   <span class="w-2 h-2 rounded-full flex-shrink-0" :class="statusDotColor(release.status)"></span>
                   <span class="text-sm font-medium text-gray-900">{{ release.title }}</span>
                 </div>
@@ -415,7 +415,7 @@ const columns = [
           <!-- Header: title + status badge -->
           <div class="flex items-start justify-between gap-3 mb-3">
             <div class="flex items-center gap-2 min-w-0">
-              <FavoriteStar entity-type="release" :entity-id="release.id" :product-id="productStore.activeProductName" />
+              <FavoriteStar entity-type="release" :entity-id="release.id" :product-id="productStore.activeProductApiRef" />
               <span class="w-2 h-2 rounded-full flex-shrink-0" :class="statusDotColor(release.status)"></span>
               <h3 class="text-sm font-semibold text-gray-900 truncate group-hover:text-[#4857FE] transition-colors">{{ release.title }}</h3>
             </div>

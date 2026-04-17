@@ -32,12 +32,12 @@ onMounted(() => {
   loadData()
 })
 
-watch(() => productStore.activeProductName, () => {
+watch(() => productStore.activeProductApiRef, () => {
   loadData()
 })
 
 function loadData() {
-  const product = productStore.activeProductName
+  const product = productStore.activeProductApiRef
   backlogStore.fetchStories(product)
   initiativesStore.fetchInitiatives()
   activitiesStore.fetchActivities(product)
@@ -212,7 +212,7 @@ function onMemberSearchInput() {
 }
 
 async function addMember(user: { id: string; name: string }) {
-  const pname = productStore.activeProductName
+  const pname = productStore.activeProductApiRef
   if (!pname) return
   await membersStore.addMember(pname, user.id)
   memberSearch.value = ''
@@ -221,7 +221,7 @@ async function addMember(user: { id: string; name: string }) {
 }
 
 async function removeMember(userId: string) {
-  const pname = productStore.activeProductName
+  const pname = productStore.activeProductApiRef
   if (!pname) return
   await membersStore.removeMember(pname, userId)
 }

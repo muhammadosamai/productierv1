@@ -5,6 +5,7 @@ import { eq, and } from 'drizzle-orm'
 import { jwt } from '@elysiajs/jwt'
 import { randomBytes } from 'node:crypto'
 import { sendInviteEmail, getAppUrl } from '../services/email'
+import { resolveProductRef } from '../lib/resolveProductRef'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -18,10 +19,10 @@ async function getUserFromHeader(jwtVerify: any, headers: Record<string, string 
   return user || null
 }
 
-async function isProductAdmin(userId: string, product: string): Promise<boolean> {
+async function isProductAdmin(userId: string, productId: string): Promise<boolean> {
   const member = await db.query.productMembers.findFirst({
     where: and(
-      eq(productMembers.product, product),
+      eq(productMembers.productId, productId),
       eq(productMembers.userId, userId),
     ),
   })
@@ -39,8 +40,16 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
       return { error: 'Unauthorized' }
     }
 
+    const pr = await resolveProductRef(body.product.trim())
+    if (!pr.ok) {
+      set.status = pr.kind === 'ambiguous' ? 409 : 400
+      return { error: pr.kind === 'ambiguous' ? 'Multiple products match this name' : 'Unknown product' }
+    }
+    const productName = pr.product.name
+    const productId = pr.product.id
+
     // Check if user is admin of the product (or super_admin)
-    if (user.role !== 'super_admin' && !(await isProductAdmin(user.id, body.product))) {
+    if (user.role !== 'super_admin' && !(await isProductAdmin(user.id, productId))) {
       set.status = 403
       return { error: 'Only admins can invite members' }
     }
@@ -56,7 +65,7 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
       // Check if already a member
       const existingMember = await db.query.productMembers.findFirst({
         where: and(
-          eq(productMembers.product, body.product),
+          eq(productMembers.productId, productId),
           eq(productMembers.userId, existingUser.id),
         ),
       })
@@ -68,7 +77,8 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
 
       // Add directly to product members
       await db.insert(productMembers).values({
-        product: body.product,
+        product: productName,
+        productId,
         userId: existingUser.id,
         role: body.role || 'member',
       })
@@ -81,7 +91,7 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
           email: existingUser.email,
           avatar: existingUser.avatar,
         },
-        product: body.product,
+        product: productName,
         role: body.role || 'member',
       }
     }
@@ -90,7 +100,7 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
     const existingInvite = await db.query.productInvites.findFirst({
       where: and(
         eq(productInvites.email, email),
-        eq(productInvites.product, body.product),
+        eq(productInvites.productId, productId),
         eq(productInvites.status, 'pending'),
       ),
     })
@@ -104,7 +114,8 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
     const token = randomBytes(32).toString('hex')
 
     const [invite] = await db.insert(productInvites).values({
-      product: body.product,
+      product: productName,
+      productId,
       email,
       role: body.role || 'member',
       token,
@@ -113,7 +124,7 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
 
     sendInviteEmail({
       email,
-      productName: body.product,
+      productName,
       inviterName: user.name,
       role: body.role || 'member',
       token,
@@ -146,7 +157,13 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
       return { error: 'Unauthorized' }
     }
 
-    if (user.role !== 'super_admin' && !(await isProductAdmin(user.id, name))) {
+    const pr = await resolveProductRef(decodeURIComponent(name))
+    if (!pr.ok) {
+      set.status = pr.kind === 'ambiguous' ? 409 : 404
+      return { error: pr.kind === 'ambiguous' ? 'Multiple products match' : 'Product not found' }
+    }
+
+    if (user.role !== 'super_admin' && !(await isProductAdmin(user.id, pr.product.id))) {
       set.status = 403
       return { error: 'Only admins can view invites' }
     }
@@ -161,7 +178,7 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
     })
       .from(productInvites)
       .where(and(
-        eq(productInvites.product, name),
+        eq(productInvites.productId, pr.product.id),
         eq(productInvites.status, 'pending'),
       ))
 
@@ -185,7 +202,7 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
       return { error: 'Invite not found' }
     }
 
-    if (user.role !== 'super_admin' && !(await isProductAdmin(user.id, invite.product))) {
+    if (user.role !== 'super_admin' && !(await isProductAdmin(user.id, invite.productId))) {
       set.status = 403
       return { error: 'Only admins can revoke invites' }
     }
@@ -238,9 +255,10 @@ export const inviteRoutes = new Elysia({ prefix: '/api/invites' })
     if (existingUser) {
       await db.insert(productMembers).values({
         product: invite.product,
+        productId: invite.productId,
         userId: existingUser.id,
         role: invite.role,
-      }).onConflictDoNothing()
+      }).onConflictDoNothing({ target: [productMembers.productId, productMembers.userId] })
 
       await db.update(productInvites)
         .set({ status: 'accepted' })

@@ -6,6 +6,7 @@ import { jwt } from '@elysiajs/jwt'
 import { logActivity, computeChanges } from '../lib/logActivity'
 import { sendNotificationIfEnabled } from '../services/notificationEmails'
 import { serializeParentTaskRow } from '../lib/taskDates'
+import { resolveProductRef } from '../lib/resolveProductRef'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -126,22 +127,35 @@ export const deliveryRoutes = new Elysia({ prefix: '/api/deliveries' })
   })
 
   // POST /api/deliveries
-  .post('/', async ({ body, jwt: jwtInstance, headers }) => {
+  .post('/', async ({ body, jwt: jwtInstance, headers, set }) => {
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) return { error: 'Unauthorized' }
 
     const { initiativeIds, ...deliveryData } = body
 
+    if (!deliveryData.productId?.trim()) {
+      set.status = 400
+      return { error: 'productId is required' }
+    }
+    const pr = await resolveProductRef(deliveryData.productId.trim())
+    if (!pr.ok) {
+      set.status = 400
+      return { error: 'Unknown product' }
+    }
+    const scopedProductId = pr.product.id
+
     // Auto-prepend #N counter to the title
-    const productId = deliveryData.productId || ''
-    const [countResult] = await db.select({ total: count() }).from(deliveries).where(eq(deliveries.productId, productId))
+    const [countResult] = await db.select({ total: count() }).from(deliveries).where(eq(deliveries.productId, scopedProductId))
     const nextNumber = (countResult?.total || 0) + 1
     const numberedTitle = `#${nextNumber} ${deliveryData.title}`
 
     const [delivery] = await db.insert(deliveries).values({
-      ...deliveryData,
       title: numberedTitle,
+      description: deliveryData.description ?? null,
+      startDate: deliveryData.startDate ?? null,
+      endDate: deliveryData.endDate ?? null,
       status: deliveryData.status ?? 'initialized',
+      productId: scopedProductId,
       createdByUserId: user.id,
     }).returning()
 
@@ -156,7 +170,8 @@ export const deliveryRoutes = new Elysia({ prefix: '/api/deliveries' })
     }
 
     logActivity({
-      product: delivery!.productId,
+      product: pr.product.name,
+      productId: pr.product.id,
       userName: user.name,
       userAvatar: user.avatar,
       userId: user.id,
@@ -196,7 +211,8 @@ export const deliveryRoutes = new Elysia({ prefix: '/api/deliveries' })
     const changes = computeChanges(old, deliveryData, ['title', 'status', 'description', 'startDate', 'endDate'])
     if (changes.length > 0) {
       logActivity({
-        product: updated!.productId,
+        product: '',
+        productId: updated!.productId,
         userName: user?.name || 'System',
         userAvatar: user?.avatar,
         userId: user?.id,

@@ -1,8 +1,13 @@
+import { eq } from 'drizzle-orm'
 import { db } from '../db'
-import { activities } from '../db/schema'
+import { activities, products } from '../db/schema'
+import { resolveProductRef } from './resolveProductRef'
 
 interface LogActivityParams {
+  /** Display name; used with productId or resolved when productId omitted */
   product: string
+  /** Prefer passing stable product UUID when known (avoids ambiguous name) */
+  productId?: string
   userName: string
   userAvatar?: string | null
   userId?: string | null
@@ -15,8 +20,27 @@ interface LogActivityParams {
 
 export async function logActivity(params: LogActivityParams) {
   try {
+    let productId = params.productId
+    let productName = params.product
+    if (productId) {
+      const row = await db.query.products.findFirst({
+        where: eq(products.id, productId),
+        columns: { name: true },
+      })
+      if (row) productName = row.name
+    } else {
+      const r = await resolveProductRef(params.product)
+      if (!r.ok) {
+        console.warn('[logActivity] could not resolve product:', params.product)
+        return
+      }
+      productId = r.product.id
+      productName = r.product.name
+    }
+
     await db.insert(activities).values({
-      product: params.product,
+      product: productName,
+      productId,
       userName: params.userName,
       userAvatar: params.userAvatar || null,
       userId: params.userId || null,

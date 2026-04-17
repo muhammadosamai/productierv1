@@ -67,6 +67,7 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
       if (invite) {
         await db.insert(productMembers).values({
           product: invite.product,
+          productId: invite.productId,
           userId: user!.id,
           role: invite.role,
         }).onConflictDoNothing()
@@ -87,6 +88,7 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
     for (const invite of pendingInvites) {
       await db.insert(productMembers).values({
         product: invite.product,
+        productId: invite.productId,
         userId: user!.id,
         role: invite.role,
       }).onConflictDoNothing()

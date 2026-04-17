@@ -5,6 +5,7 @@ import { issueStatusSearchDbValues } from '../lib/issueStatusId'
 import { db } from '../db'
 import { assets, initiatives, issues, productMembers, products, stories, tasks, users } from '../db/schema'
 import { ISSUE_TYPES } from '../../../shared/issueTypes'
+import { resolveProductRef } from '../lib/resolveProductRef'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'productier-secret-key-change-in-production'
 
@@ -99,31 +100,46 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
     const requestedProduct = query.product?.trim()
     const limit = Math.max(1, Math.min(Number(query.limit || 5), 20))
 
-    let allowedProducts: string[] = []
+    let allowedProductIds: string[] = []
     if (user.role === 'super_admin') {
       if (requestedProduct) {
-        allowedProducts = [requestedProduct]
+        const pr = await resolveProductRef(requestedProduct)
+        if (!pr.ok) {
+          return {
+            query: q,
+            groups: { stories: [], tasks: [], issues: [], initiatives: [], wikiAssets: [] },
+            filters: parseFilters(q),
+          }
+        }
+        allowedProductIds = [pr.product.id]
       } else {
-        const allProducts = await db.query.productMembers.findMany({
-          columns: { product: true },
-        })
-        allowedProducts = [...new Set(allProducts.map(p => p.product))]
+        const allP = await db.query.products.findMany({ columns: { id: true } })
+        allowedProductIds = allP.map((p) => p.id)
       }
     } else {
       const memberships = await db
-        .select({ product: productMembers.product })
+        .select({ productId: productMembers.productId })
         .from(productMembers)
         .where(eq(productMembers.userId, user.id))
 
-      const memberProducts = memberships.map(m => m.product)
-      if (requestedProduct && !memberProducts.includes(requestedProduct)) {
-        set.status = 403
-        return { error: 'Forbidden for requested product scope' }
+      const memberIds = new Set(memberships.map((m) => m.productId))
+      if (requestedProduct) {
+        const pr = await resolveProductRef(requestedProduct)
+        if (!pr.ok) {
+          set.status = 403
+          return { error: 'Forbidden for requested product scope' }
+        }
+        if (!memberIds.has(pr.product.id)) {
+          set.status = 403
+          return { error: 'Forbidden for requested product scope' }
+        }
+        allowedProductIds = [pr.product.id]
+      } else {
+        allowedProductIds = [...memberIds]
       }
-      allowedProducts = requestedProduct ? [requestedProduct] : memberProducts
     }
 
-    if (allowedProducts.length === 0) {
+    if (allowedProductIds.length === 0) {
       return {
         query: q,
         groups: {
@@ -136,18 +152,11 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
       }
     }
 
-    // Resolve product names to product IDs for entities that store product_id
     const productRows = await db.query.products.findMany({
-      where: allowedProducts.length > 0 ? inArray(products.name, allowedProducts) : undefined,
+      where: inArray(products.id, allowedProductIds),
       columns: { id: true, name: true },
     })
-    const allowedProductIds = productRows.map(p => p.id)
-    const productIdToName = new Map(productRows.map(p => [p.id, p.name]))
-    // If allowedProducts already contains ids (rare), include them
-    for (const p of allowedProducts) {
-      if (/^[0-9a-fA-F-]{36}$/.test(p) && !allowedProductIds.includes(p)) allowedProductIds.push(p)
-    }
-    const productScopeForIdColumns = [...new Set([...allowedProducts, ...allowedProductIds])]
+    const productIdToName = new Map(productRows.map((p) => [p.id, p.name]))
 
     const filters = parseFilters(q)
     const textPattern = filters.text ? `%${filters.text}%` : null
@@ -179,7 +188,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
     // Same gate for type: token — entities without that type return []
     const typeAppliesToStory      = !filters.type || storyTypes.includes(filters.type)
     const typeAppliesToTask       = !filters.type || taskTypes.includes(filters.type)
-    const typeAppliesToIssue      = !filters.type || issueTypes.includes(filters.type)
+    const typeAppliesToIssue      = !filters.type || issueTypes.includes(filters.type as (typeof ISSUE_TYPES)[number])
     // Initiatives and wiki have no type field — exclude them if type: was specified
     const typeAppliesToInitiative = !filters.type
     const typeAppliesToWiki       = !filters.type
@@ -190,7 +199,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
     const entityAppliesToInitiative = statusAppliesToInitiative && typeAppliesToInitiative
     const entityAppliesToWiki       = statusAppliesToWiki       && typeAppliesToWiki
 
-    const storyConditions: any[] = [inArray(stories.product, allowedProducts)]
+    const storyConditions: any[] = [inArray(stories.productId, allowedProductIds)]
     if (textPattern) {
       storyConditions.push(
         or(
@@ -203,7 +212,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
     if (filters.type) storyConditions.push(eq(stories.type, filters.type as any))
     if (filters.assigneeMe) storyConditions.push(eq(stories.owner, user.name))
 
-    const taskConditions: any[] = [inArray(tasks.productId, productScopeForIdColumns)]
+    const taskConditions: any[] = [inArray(tasks.productId, allowedProductIds)]
     if (textPattern) {
       taskConditions.push(
         or(
@@ -223,7 +232,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
       )
     }
 
-    const issueConditions: any[] = [inArray(issues.product, allowedProducts), eq(issues.archived, false)]
+    const issueConditions: any[] = [inArray(issues.productId, allowedProductIds), eq(issues.archived, false)]
     if (textPattern) {
       issueConditions.push(
         or(
@@ -240,7 +249,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
     if (filters.type) issueConditions.push(eq(issues.type, filters.type as any))
     if (filters.assigneeMe) issueConditions.push(eq(issues.assignedToUserId, user.id))
 
-    const initiativeConditions: any[] = [inArray(initiatives.product, allowedProducts)]
+    const initiativeConditions: any[] = [inArray(initiatives.productId, allowedProductIds)]
     if (textPattern) {
       initiativeConditions.push(
         or(
@@ -252,7 +261,7 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
     if (filters.status) initiativeConditions.push(eq(initiatives.status, filters.status as any))
     if (filters.assigneeMe) initiativeConditions.push(eq(initiatives.leader, user.name))
 
-    const wikiConditions: any[] = [inArray(assets.productId, productScopeForIdColumns)]
+    const wikiConditions: any[] = [inArray(assets.productId, allowedProductIds)]
     if (textPattern) {
       wikiConditions.push(
         or(

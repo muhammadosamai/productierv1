@@ -9,6 +9,7 @@ import { sendNotificationIfEnabled } from '../services/notificationEmails'
 import { sanitizeCommentHtml } from '../lib/sanitizeCommentHtml'
 import { previewWithEllipsis } from '../lib/richTextPreview'
 import { serializeParentTaskRow } from '../lib/taskDates'
+import { resolveProductRef } from '../lib/resolveProductRef'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
@@ -63,12 +64,12 @@ async function getUserFromHeader(jwtVerify: any, headers: Record<string, string 
 
 async function userCanAccessStoryProduct(
   user: { id: string; role: string } | null,
-  storyProduct: string,
+  storyProductId: string,
 ): Promise<boolean> {
   if (!user) return false
   if (user.role === 'super_admin') return true
   const member = await db.query.productMembers.findFirst({
-    where: and(eq(productMembers.product, storyProduct), eq(productMembers.userId, user.id)),
+    where: and(eq(productMembers.productId, storyProductId), eq(productMembers.userId, user.id)),
   })
   return !!member
 }
@@ -79,8 +80,13 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
   // GET /api/stories
   .get('/', async ({ query }) => {
     const product = query.product
+    let productWhere = undefined as ReturnType<typeof eq> | undefined
+    if (product) {
+      const pr = await resolveProductRef(product)
+      if (pr.ok) productWhere = eq(stories.productId, pr.product.id)
+    }
     const storyRows = await db.query.stories.findMany({
-      where: product ? eq(stories.product, product) : undefined,
+      where: productWhere,
       orderBy: (s, { desc }) => [desc(s.createdAt)],
       with: {
         tasks: {
@@ -118,12 +124,18 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
   // POST /api/stories
   .post('/', async ({ body, jwt, headers }) => {
     await bootstrapStorySchema()
-    const product = body.product || 'Product'
+    const productRef = body.product || 'Product'
+    const pr = await resolveProductRef(productRef)
+    if (!pr.ok) {
+      throw new Error(pr.kind === 'ambiguous' ? 'Multiple products match this name' : 'Invalid product')
+    }
+    const { product: _omitProduct, ...rest } = body as Record<string, unknown>
 
     const [story] = await db.insert(stories).values({
-      ...body,
-      product,
-    }).returning()
+      ...rest,
+      product: pr.product.name,
+      productId: pr.product.id,
+    } as typeof stories.$inferInsert).returning()
 
     if (!story) {
       throw new Error('Failed to create story')
@@ -392,9 +404,9 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
 
     const storyRow = await db.query.stories.findFirst({
       where: eq(stories.id, id),
-      columns: { product: true },
+      columns: { product: true, productId: true },
     })
-    if (!storyRow || !(await userCanAccessStoryProduct(user, storyRow.product))) {
+    if (!storyRow || !(await userCanAccessStoryProduct(user, storyRow.productId))) {
       set.status = 404
       return { error: 'Story not found' }
     }
@@ -463,9 +475,9 @@ export const storyRoutes = new Elysia({ prefix: '/api/stories' })
     }
     const storyForAccess = await db.query.stories.findFirst({
       where: eq(stories.id, existing.storyId),
-      columns: { product: true },
+      columns: { product: true, productId: true },
     })
-    if (!storyForAccess || !(await userCanAccessStoryProduct(user, storyForAccess.product))) {
+    if (!storyForAccess || !(await userCanAccessStoryProduct(user, storyForAccess.productId))) {
       set.status = 404
       return { error: 'Attachment not found' }
     }

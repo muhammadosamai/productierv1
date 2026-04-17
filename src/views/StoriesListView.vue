@@ -171,7 +171,7 @@ onMounted(async () => {
   }
 })
 
-watch(() => productStore.activeProductName, () => {
+watch(() => productStore.activeProductApiRef, () => {
   backlogStore.fetchStories()
   fetchTeamMembers()
 })
@@ -568,7 +568,7 @@ const storyActivitiesLoading = ref(false)
 async function fetchStoryActivities() {
   storyActivitiesLoading.value = true
   try {
-    const p = productStore.activeProductName
+    const p = productStore.activeProductApiRef
     const res = await fetch(`/api/activities?product=${encodeURIComponent(p)}&entityType=story&limit=50`)
     if (res.ok) {
       storyActivities.value = await res.json()
@@ -1117,7 +1117,7 @@ function formatDate(dateStr: string | null) {
                   @click="startEditing(story.id, 'title', story.title, $event)"
                 >
                   <template v-if="isEditing(story.id, 'title')">
-                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProductName" />
+                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProductApiRef" />
                     <component :is="typeIcon(story.type)" :size="16" class="shrink-0" :class="{
                       'text-blue-500': story.type === 'feature',
                       'text-red-500': story.type === 'bug',
@@ -1138,7 +1138,7 @@ function formatDate(dateStr: string | null) {
                     />
                   </template>
                   <template v-else>
-                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProductName" />
+                    <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProductApiRef" />
                     <component :is="typeIcon(story.type)" :size="16" class="shrink-0" :class="{
                       'text-blue-500': story.type === 'feature',
                       'text-red-500': story.type === 'bug',
@@ -1371,7 +1371,7 @@ function formatDate(dateStr: string | null) {
               <!-- Row 1: Type icon + status badge -->
               <div class="flex items-center justify-between mb-3.5">
                 <div class="flex items-center gap-2">
-                  <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProductName" />
+                  <FavoriteStar entity-type="story" :entity-id="story.id" :product-id="productStore.activeProductApiRef" />
                   <div class="w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center">
                     <component :is="typeIcon(story.type)" :size="18" class="text-gray-400" />
                   </div>

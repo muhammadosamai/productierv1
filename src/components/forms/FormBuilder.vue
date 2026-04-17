@@ -41,7 +41,7 @@ const fieldCount = computed(() => fields.value.length)
 
 async function loadConfig() {
   loading.value = true
-  const product = productStore.activeProduct?.name
+  const product = productStore.activeProductApiRef
   if (!product) {
     const defaults = getDefaultConfig(props.entityType)
     fields.value = defaults.fields.map(f => ({ ...f }))
@@ -65,7 +65,7 @@ async function loadConfig() {
 }
 
 async function handleSave() {
-  const product = productStore.activeProduct?.name
+  const product = productStore.activeProductApiRef
   if (!product) return
 
   saving.value = true

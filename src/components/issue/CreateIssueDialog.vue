@@ -65,7 +65,7 @@ const formConfigsStore = useFormConfigsStore()
 const testCyclesStore = useTestCyclesStore()
 
 const mergedIssueForm = computed(() => {
-  const p = productStore.activeProduct?.name
+  const p = productStore.activeProductApiRef
   const raw = p ? formConfigsStore.getConfig(p, 'issue') : null
   return mergeIssueFormConfig(raw ?? undefined)
 })
@@ -155,7 +155,7 @@ const submitting = ref(false)
 const error = ref('')
 
 async function loadModuleSuggestions() {
-  const p = productStore.activeProduct?.name
+  const p = productStore.activeProductApiRef
   if (!p) return
   moduleSuggestionsLoading.value = true
   try {
@@ -168,7 +168,7 @@ async function loadModuleSuggestions() {
 
 watch(open, async isOpen => {
   if (!isOpen) return
-  const p = productStore.activeProduct?.name
+  const p = productStore.activeProductApiRef
   if (p && authStore.token) {
     await Promise.all([
       formConfigsStore.fetchConfig(p, 'issue'),
@@ -252,7 +252,7 @@ async function searchLinks(q: string) {
   if (!q.trim()) { linkResults.value = []; return }
   linkSearchLoading.value = true
   try {
-    const product = productStore.activeProduct?.name
+    const product = productStore.activeProductApiRef
     const [storiesRes, tasksRes] = await Promise.all([
       fetch(`/api/stories?product=${encodeURIComponent(product || '')}`),
       fetch(`/api/tasks?product=${encodeURIComponent(product || '')}`),
@@ -472,7 +472,7 @@ async function handleSubmit() {
     environment: environment.value || null,
     browser: browser.value || null,
     operatingSystem: operatingSystem.value || null,
-    product: productStore.activeProduct?.name,
+    product: productStore.activeProductId,
     storyId: linkedStoryId.value,
     taskId: linkedTaskId.value,
     ...(linkedTestCycleId.value ? { testCycleId: linkedTestCycleId.value } : {}),

@@ -15,15 +15,30 @@ export interface Product {
 }
 
 const STORAGE_KEY = 'productier_product_order'
-const ACTIVE_PRODUCT_KEY = 'productier_active_product'
+const ACTIVE_PRODUCT_ID_KEY = 'productier_active_product_id'
+/** Legacy: stored display name only — migrated once to id */
+const LEGACY_ACTIVE_KEY = 'productier_active_product'
 
 function saveOrder(products: Product[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(products.map(p => p.name)))
+  const ids = products.map((p) => p.id).filter(Boolean) as string[]
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(ids))
 }
 
 export const useProductStore = defineStore('products', () => {
   const products = ref<Product[]>([])
-  const activeProductName = ref(localStorage.getItem(ACTIVE_PRODUCT_KEY) || '')
+  const activeProductId = ref(localStorage.getItem(ACTIVE_PRODUCT_ID_KEY) || '')
+
+  function migrateLegacyActive(fetched: Product[]) {
+    if (activeProductId.value) return
+    const legacy = localStorage.getItem(LEGACY_ACTIVE_KEY)
+    if (!legacy) return
+    const matches = fetched.filter((p) => p.name === legacy)
+    if (matches.length === 1 && matches[0]!.id) {
+      activeProductId.value = matches[0]!.id
+      localStorage.setItem(ACTIVE_PRODUCT_ID_KEY, activeProductId.value)
+    }
+    localStorage.removeItem(LEGACY_ACTIVE_KEY)
+  }
 
   // Fetch products from database (filtered by membership on backend)
   async function fetchProducts() {
@@ -40,7 +55,7 @@ export const useProductStore = defineStore('products', () => {
 
       const dbProducts: any[] = await res.json()
 
-      const fetched: Product[] = dbProducts.map(p => ({
+      const fetched: Product[] = dbProducts.map((p) => ({
         id: p.id,
         name: p.name,
         logo: p.logo || '',
@@ -51,18 +66,21 @@ export const useProductStore = defineStore('products', () => {
         myRole: p.myRole ?? null,
       }))
 
-      // Apply saved order if available
+      migrateLegacyActive(fetched)
+
+      // Apply saved order if available (ids preferred; names for legacy order files)
       const savedOrder = localStorage.getItem(STORAGE_KEY)
       if (savedOrder) {
         try {
-          const savedNames: string[] = JSON.parse(savedOrder)
+          const savedKeys: string[] = JSON.parse(savedOrder)
           const ordered: Product[] = []
-          for (const name of savedNames) {
-            const product = fetched.find(p => p.name === name)
+          for (const key of savedKeys) {
+            const product =
+              fetched.find((p) => p.id === key) || fetched.find((p) => p.name === key)
             if (product) ordered.push(product)
           }
           for (const product of fetched) {
-            if (!ordered.find(p => p.name === product.name)) {
+            if (!ordered.find((p) => p.id === product.id)) {
               ordered.push(product)
             }
           }
@@ -76,12 +94,15 @@ export const useProductStore = defineStore('products', () => {
 
       // Ensure active product is still valid
       if (products.value.length > 0) {
-        if (!products.value.some(p => p.name === activeProductName.value)) {
-          activeProductName.value = products.value[0]!.name
-          localStorage.setItem(ACTIVE_PRODUCT_KEY, activeProductName.value)
+        if (!activeProductId.value || !products.value.some((p) => p.id === activeProductId.value)) {
+          activeProductId.value = products.value[0]!.id || ''
+          if (activeProductId.value) {
+            localStorage.setItem(ACTIVE_PRODUCT_ID_KEY, activeProductId.value)
+          }
         }
       } else {
-        activeProductName.value = ''
+        activeProductId.value = ''
+        localStorage.removeItem(ACTIVE_PRODUCT_ID_KEY)
       }
     } catch {
       // Keep current state on error
@@ -92,26 +113,43 @@ export const useProductStore = defineStore('products', () => {
   fetchProducts()
 
   // Persist order whenever products array changes
-  watch(products, (newProducts) => {
-    saveOrder(newProducts)
-  }, { deep: true })
-
-  const activeIndex = computed(() =>
-    products.value.findIndex(p => p.name === activeProductName.value)
+  watch(
+    products,
+    (newProducts) => {
+      saveOrder(newProducts)
+    },
+    { deep: true },
   )
 
-  const activeProduct = computed(() =>
-    products.value.find(p => p.name === activeProductName.value) || products.value[0]
+  const activeIndex = computed(() =>
+    products.value.findIndex((p) => p.id === activeProductId.value),
+  )
+
+  const activeProduct = computed(
+    () =>
+      products.value.find((p) => p.id === activeProductId.value) || products.value[0],
+  )
+
+  /** Display name of the active product (empty if none). */
+  const activeProductName = computed(() => activeProduct.value?.name ?? '')
+
+  /** Use for API paths and `?product=` — prefers stable id so duplicate display names resolve correctly. */
+  const activeProductApiRef = computed(
+    () => activeProductId.value || activeProduct.value?.name || '',
   )
 
   function selectProduct(index: number) {
-    activeProductName.value = products.value[index]!.name
-    localStorage.setItem(ACTIVE_PRODUCT_KEY, activeProductName.value)
+    const p = products.value[index]
+    if (!p?.id) return
+    activeProductId.value = p.id
+    localStorage.setItem(ACTIVE_PRODUCT_ID_KEY, p.id)
   }
 
-  /** Select by exact product name; returns false if not found. */
+  /** Select by exact product name; returns false if not found or ambiguous. */
   function selectProductByName(name: string): boolean {
-    const idx = products.value.findIndex(p => p.name === name)
+    const matches = products.value.filter((p) => p.name === name)
+    if (matches.length !== 1 || !matches[0]!.id) return false
+    const idx = products.value.findIndex((p) => p.id === matches[0]!.id)
     if (idx === -1) return false
     selectProduct(idx)
     return true
@@ -147,8 +185,10 @@ export const useProductStore = defineStore('products', () => {
         myRole: 'admin',
       }
       products.value.push(newProduct)
-      activeProductName.value = newProduct.name
-      localStorage.setItem(ACTIVE_PRODUCT_KEY, activeProductName.value)
+      if (newProduct.id) {
+        activeProductId.value = newProduct.id
+        localStorage.setItem(ACTIVE_PRODUCT_ID_KEY, newProduct.id)
+      }
       return newProduct
     } catch {
       return null
@@ -156,12 +196,12 @@ export const useProductStore = defineStore('products', () => {
   }
 
   async function updateProduct(
-    currentName: string,
+    productRef: string,
     data: { name?: string; description?: string | null; logo?: string | null },
   ): Promise<{ success: true } | { success: false; error: string }> {
     const authStore = useAuthStore()
     try {
-      const res = await fetch(`/api/products/${encodeURIComponent(currentName)}`, {
+      const res = await fetch(`/api/products/${encodeURIComponent(productRef)}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -175,7 +215,7 @@ export const useProductStore = defineStore('products', () => {
       }
 
       const updated = await res.json()
-      const idx = products.value.findIndex(p => p.name === currentName)
+      const idx = products.value.findIndex((p) => p.id === updated.id)
       if (idx !== -1) {
         const prev = products.value[idx]!
         products.value[idx] = {
@@ -186,20 +226,16 @@ export const useProductStore = defineStore('products', () => {
           myRole: prev.myRole ?? null,
         }
       }
-      if (activeProductName.value === currentName && updated.name !== currentName) {
-        activeProductName.value = updated.name
-        localStorage.setItem(ACTIVE_PRODUCT_KEY, updated.name)
-      }
       return { success: true }
     } catch {
       return { success: false, error: 'Network error. Please try again.' }
     }
   }
 
-  async function deleteProduct(productName: string): Promise<boolean> {
+  async function deleteProduct(productRef: string): Promise<boolean> {
     const authStore = useAuthStore()
     try {
-      const res = await fetch(`/api/products/${encodeURIComponent(productName)}`, {
+      const res = await fetch(`/api/products/${encodeURIComponent(productRef)}`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${authStore.token}`,
@@ -207,10 +243,16 @@ export const useProductStore = defineStore('products', () => {
       })
       if (!res.ok) return false
 
-      products.value = products.value.filter(p => p.name !== productName)
-      if (activeProductName.value === productName && products.value.length > 0) {
-        activeProductName.value = products.value[0]!.name
-        localStorage.setItem(ACTIVE_PRODUCT_KEY, activeProductName.value)
+      const deleted = products.value.find(
+        (p) => p.id === productRef || p.name === productRef,
+      )
+      products.value = products.value.filter((p) => p.id !== deleted?.id)
+
+      if (activeProductId.value === deleted?.id && products.value.length > 0) {
+        activeProductId.value = products.value[0]!.id || ''
+        if (activeProductId.value) {
+          localStorage.setItem(ACTIVE_PRODUCT_ID_KEY, activeProductId.value)
+        }
       }
       return true
     } catch {
@@ -230,6 +272,8 @@ export const useProductStore = defineStore('products', () => {
     activeIndex,
     activeProduct,
     activeProductName,
+    activeProductApiRef,
+    activeProductId,
     selectProduct,
     selectProductByName,
     createProduct,

@@ -58,7 +58,7 @@ const showArchived = ref(false)
 
 const canIncludeArchived = computed(() => {
   const u = authStore.user
-  const p = productStore.activeProduct?.name
+  const p = productStore.activeProductApiRef
   if (!u || !p) return false
   if (u.role === 'super_admin') return true
   return productMembersStore.members.some(m => m.userId === u.id && m.role === 'admin')
@@ -71,7 +71,7 @@ function issueListFetchOpts() {
 }
 
 async function loadIssuesForProduct() {
-  const p = productStore.activeProduct?.name
+  const p = productStore.activeProductApiRef
   if (p && authStore.token) await productMembersStore.fetchMembers(p)
   if (p) await formConfigsStore.fetchConfig(p, 'issue')
   await issuesStore.fetchIssues(p || '', undefined, issueListFetchOpts())
@@ -95,7 +95,7 @@ const editValue = ref('')
 const inlineAssigneeSearch = ref('')
 
 const issueStatusFormMerged = computed(() => {
-  const p = productStore.activeProduct?.name
+  const p = productStore.activeProductApiRef
   const cfg = p ? formConfigsStore.getConfig(p, 'issue') : null
   return mergeIssueFormConfig(cfg ?? undefined)
 })
@@ -103,7 +103,7 @@ const issueStatusFormMerged = computed(() => {
 const issueStatusCatalog = computed(() => getIssueStatusCatalogFromMerged(issueStatusFormMerged.value))
 
 const issueStatusFormConfigRaw = computed(() => {
-  const p = productStore.activeProduct?.name
+  const p = productStore.activeProductApiRef
   if (!p) return null
   return formConfigsStore.getConfig(p, 'issue')
 })
@@ -223,7 +223,7 @@ onMounted(async () => {
   }
 })
 
-watch(() => productStore.activeProduct?.name, () => {
+watch(() => productStore.activeProductApiRef, () => {
   showArchived.value = false
   activeTab.value = 'all'
   resetAllColumnValueFilters()
@@ -232,7 +232,7 @@ watch(() => productStore.activeProduct?.name, () => {
 })
 
 watch(showArchived, async () => {
-  await issuesStore.fetchIssues(productStore.activeProduct?.name || '', undefined, issueListFetchOpts())
+  await issuesStore.fetchIssues(productStore.activeProductApiRef, undefined, issueListFetchOpts())
 })
 
 // Watch for issue query param changes
@@ -949,7 +949,7 @@ const issueActivitiesLoading = ref(false)
 async function fetchIssueActivities() {
   issueActivitiesLoading.value = true
   try {
-    const p = productStore.activeProduct?.name || ''
+    const p = productStore.activeProductApiRef
     const res = await fetch(`/api/activities?product=${encodeURIComponent(p)}&entityType=issue&limit=50`)
     if (res.ok) {
       issueActivities.value = await res.json()
@@ -2019,7 +2019,7 @@ function formatDate(dateStr: string | null) {
                   @click="startEditing(issue.id, 'title', issue.title, $event)"
                 >
                   <template v-if="isEditing(issue.id, 'title')">
-                    <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProduct?.name || ''" />
+                    <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProductApiRef" />
                     <Bug :size="16" class="shrink-0 text-red-500" />
                     <input
                       v-model="editValue"
@@ -2031,7 +2031,7 @@ function formatDate(dateStr: string | null) {
                     />
                   </template>
                   <template v-else>
-                    <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProduct?.name || ''" />
+                    <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProductApiRef" />
                     <Bug :size="16" class="shrink-0 text-red-500" />
                     <span
                       class="text-sm font-medium truncate"
@@ -2311,7 +2311,7 @@ function formatDate(dateStr: string | null) {
               <!-- Row 1: Bug icon + type badge + severity badge -->
               <div class="flex items-center justify-between mb-3.5">
                 <div class="flex items-center gap-2">
-                  <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProduct?.name || ''" />
+                  <FavoriteStar entity-type="issue" :entity-id="issue.id" :product-id="productStore.activeProductApiRef" />
                   <div class="w-9 h-9 rounded-lg bg-red-50 border border-red-100 flex items-center justify-center">
                     <Bug :size="18" class="text-red-500" />
                   </div>

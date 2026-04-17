@@ -13,9 +13,11 @@ import { previewWithEllipsis } from '../lib/richTextPreview'
 import {
   getAllowedIssueStatusStoredValues,
   mergeIssueFormConfigForProduct,
+  mergeIssueFormConfigForProductId,
   normalizeIssueStatusToCanonicalId,
   pickDefaultIssueStatus,
 } from '../lib/issueFormConfig'
+import { resolveProductRef } from '../lib/resolveProductRef'
 import { ensureFormConfigsSchema } from '../lib/ensureFormConfigsSchema'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
@@ -29,31 +31,31 @@ function optionalUuid(value: string | null | undefined) {
   return UUID_REGEX.test(value) ? value : null
 }
 
-async function isProductAdmin(userId: string, product: string): Promise<boolean> {
+async function isProductAdmin(userId: string, productId: string): Promise<boolean> {
   const member = await db.query.productMembers.findFirst({
-    where: and(eq(productMembers.product, product), eq(productMembers.userId, userId)),
+    where: and(eq(productMembers.productId, productId), eq(productMembers.userId, userId)),
   })
   return member?.role === 'admin'
 }
 
 /** Product member admin or super_admin — same bar as invites. */
-async function canManageIssueArchive(user: { id: string; role: string } | null, product: string): Promise<boolean> {
+async function canManageIssueArchive(user: { id: string; role: string } | null, productId: string): Promise<boolean> {
   if (!user) return false
   if (user.role === 'super_admin') return true
-  return isProductAdmin(user.id, product)
+  return isProductAdmin(user.id, productId)
 }
 
 /** Resolves issue row or null if missing / archived without admin access. */
 async function issueRowForAccess(
   id: string,
   user: { id: string; role: string } | null,
-): Promise<{ id: string; product: string; archived: boolean } | null> {
+): Promise<{ id: string; product: string; productId: string; archived: boolean } | null> {
   const row = await db.query.issues.findFirst({
     where: eq(issues.id, id),
-    columns: { id: true, product: true, archived: true },
+    columns: { id: true, product: true, productId: true, archived: true },
   })
   if (!row) return null
-  if (row.archived && !(await canManageIssueArchive(user, row.product))) return null
+  if (row.archived && !(await canManageIssueArchive(user, row.productId))) return null
   return row
 }
 
@@ -65,13 +67,13 @@ async function userCanAccessIssueAttachments(
   if (!user) return false
   const row = await db.query.issues.findFirst({
     where: eq(issues.id, issueId),
-    columns: { id: true, product: true, archived: true },
+    columns: { id: true, product: true, productId: true, archived: true },
   })
   if (!row) return false
-  if (row.archived && !(await canManageIssueArchive(user, row.product))) return false
+  if (row.archived && !(await canManageIssueArchive(user, row.productId))) return false
   if (user.role === 'super_admin') return true
   const member = await db.query.productMembers.findFirst({
-    where: and(eq(productMembers.product, row.product), eq(productMembers.userId, user.id)),
+    where: and(eq(productMembers.productId, row.productId), eq(productMembers.userId, user.id)),
   })
   return !!member
 }
@@ -365,17 +367,26 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const productFilter = query.product?.trim()
     const wantsArchived = String(query.includeArchived ?? '') === 'true'
 
+    let resolvedProductId: string | null = null
+    if (productFilter) {
+      const pr = await resolveProductRef(productFilter)
+      if (!pr.ok) {
+        return []
+      }
+      resolvedProductId = pr.product.id
+    }
+
     let includeArchived = false
     if (wantsArchived && user) {
       if (user.role === 'super_admin') {
         includeArchived = true
-      } else if (productFilter && (await isProductAdmin(user.id, productFilter))) {
+      } else if (resolvedProductId && (await isProductAdmin(user.id, resolvedProductId))) {
         includeArchived = true
       }
     }
 
     const conditions = []
-    if (productFilter) conditions.push(eq(issues.product, productFilter))
+    if (resolvedProductId) conditions.push(eq(issues.productId, resolvedProductId))
     if (query.testCycleId) conditions.push(eq(issues.testCycleId, query.testCycleId))
     if (!includeArchived) conditions.push(eq(issues.archived, false))
 
@@ -397,8 +408,15 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const user = await getUserFromHeader(jwtInstance.verify, headers)
     if (!user) { set.status = 401; return { error: 'Unauthorized' } }
 
-    const product = body.product || 'Product'
-    const merged = await mergeIssueFormConfigForProduct(product)
+    const productRef = body.product || 'Product'
+    const pr = await resolveProductRef(productRef)
+    if (!pr.ok) {
+      set.status = 400
+      return { error: pr.kind === 'ambiguous' ? 'Multiple products match this name' : 'Unknown product' }
+    }
+    const product = pr.product.name
+    const productId = pr.product.id
+    const merged = await mergeIssueFormConfigForProductId(productId)
     const allowedList = getAllowedIssueStatusStoredValues(merged)
     const allowedSet = new Set(allowedList)
 
@@ -449,7 +467,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const [inserted] = await db.insert(issues).values({
       title: body.title,
       description: body.description,
-      type: body.type || 'bug',
+      type: (body.type || 'bug') as (typeof issues.$inferInsert)['type'],
       module: body.module,
       stepsToReproduce: body.stepsToReproduce,
       expectedBehavior: body.expectedBehavior,
@@ -465,6 +483,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       browser: body.browser,
       operatingSystem: body.operatingSystem,
       product,
+      productId,
       storyId,
       taskId,
       testCycleId,
@@ -532,12 +551,17 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       set.status = 400
       return { error: 'product query parameter is required' }
     }
+    const pr = await resolveProductRef(product)
+    if (!pr.ok) {
+      set.status = pr.kind === 'ambiguous' ? 409 : 404
+      return { error: pr.kind === 'ambiguous' ? 'Multiple products match' : 'Product not found' }
+    }
     const rows = await db
       .select({ module: issues.module })
       .from(issues)
       .where(
         and(
-          eq(issues.product, product),
+          eq(issues.productId, pr.product.id),
           eq(issues.archived, false),
           isNotNull(issues.module),
           ne(sql`trim(${issues.module})`, ''),
@@ -564,7 +588,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     if (!issue) { set.status = 404; return { error: 'Issue not found' } }
     if (issue.archived) {
       const user = await getUserFromHeader(jwtInstance.verify, headers)
-      if (!(await canManageIssueArchive(user, issue.product))) {
+      if (!(await canManageIssueArchive(user, issue.productId))) {
         set.status = 404
         return { error: 'Issue not found' }
       }
@@ -580,7 +604,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
     const existing = await db.query.issues.findFirst({ where: eq(issues.id, id) })
     if (!existing) { set.status = 404; return { error: 'Issue not found' } }
 
-    const canArchive = await canManageIssueArchive(user, existing.product)
+    const canArchive = await canManageIssueArchive(user, existing.productId)
 
     if (existing.archived && !canArchive) {
       set.status = 403
@@ -592,7 +616,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       return { error: 'Only product admins can change archive status' }
     }
 
-    const merged = await mergeIssueFormConfigForProduct(existing.product)
+    const merged = await mergeIssueFormConfigForProductId(existing.productId)
     const allowedList = getAllowedIssueStatusStoredValues(merged)
 
     if (body.status !== undefined && body.status !== null) {
@@ -621,7 +645,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
       }
       if (user.role !== 'super_admin') {
         const mem = await db.query.productMembers.findFirst({
-          where: and(eq(productMembers.product, existing.product), eq(productMembers.userId, rid)),
+          where: and(eq(productMembers.productId, existing.productId), eq(productMembers.userId, rid)),
         })
         if (!mem) {
           set.status = 400
@@ -746,7 +770,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
 
     const existingDel = await db.query.issues.findFirst({ where: eq(issues.id, id) })
     if (!existingDel) { set.status = 404; return { error: 'Issue not found' } }
-    if (existingDel.archived && !(await canManageIssueArchive(user, existingDel.product))) {
+    if (existingDel.archived && !(await canManageIssueArchive(user, existingDel.productId))) {
       set.status = 403
       return { error: 'Only product admins can delete archived issues' }
     }
@@ -756,6 +780,7 @@ export const issueRoutes = new Elysia({ prefix: '/api/issues' })
 
     logActivity({
       product: deleted.product,
+      productId: deleted.productId,
       userName: user.name,
       userAvatar: user.avatar,
       userId: user.id,

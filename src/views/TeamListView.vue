@@ -59,13 +59,13 @@ function closeDetailPanel() {
 async function fetchTeamMembers() {
   loading.value = true
   try {
-    const productName = productStore.activeProduct?.name
-    if (!productName) {
+    const productRef = productStore.activeProductApiRef
+    if (!productRef) {
       teamMembers.value = []
       return
     }
 
-    const res = await fetch(`/api/products/${encodeURIComponent(productName)}/members`, {
+    const res = await fetch(`/api/products/${encodeURIComponent(productRef)}/members`, {
       headers: { Authorization: `Bearer ${authStore.token}` },
     })
     if (res.ok) {
@@ -81,7 +81,7 @@ async function fetchTeamMembers() {
     }
 
     // Also fetch pending invites
-    const inviteRes = await fetch(`/api/invites/product/${encodeURIComponent(productName)}`, {
+    const inviteRes = await fetch(`/api/invites/product/${encodeURIComponent(productRef)}`, {
       headers: { Authorization: `Bearer ${authStore.token}` },
     })
     if (inviteRes.ok) {
@@ -134,7 +134,7 @@ watch(() => route.query.member, (memberId) => {
   }
 })
 
-watch(() => productStore.activeProduct?.name, () => {
+watch(() => productStore.activeProductApiRef, () => {
   fetchTeamMembers()
 })
 
@@ -232,13 +232,13 @@ function canChangeRoleFor(member: TeamUser): boolean {
 
 async function onMemberRoleChange(member: TeamUser, newRole: string) {
   if (member.role === newRole) return
-  const productName = productStore.activeProduct?.name
-  if (!productName) return
+  const productRef = productStore.activeProductApiRef
+  if (!productRef) return
   roleUpdateError.value = ''
   roleUpdatingId.value = member.id
   try {
     const res = await fetch(
-      `/api/products/${encodeURIComponent(productName)}/members/${encodeURIComponent(member.id)}`,
+      `/api/products/${encodeURIComponent(productRef)}/members/${encodeURIComponent(member.id)}`,
       {
         method: 'PATCH',
         headers: {

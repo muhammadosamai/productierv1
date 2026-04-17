@@ -86,7 +86,7 @@ async function handleSubmit() {
     status: status.value,
     startDate: startDate.value || undefined,
     endDate: endDate.value || undefined,
-    productId: activeProduct.name,
+    productId: productStore.activeProductApiRef,
     initiativeIds: selectedInitiativeIds.value.length > 0 ? selectedInitiativeIds.value : undefined,
   })
   submitting.value = false

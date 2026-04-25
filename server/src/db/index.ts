@@ -3,7 +3,7 @@ import postgres from 'postgres'
 import * as schema from './schema'
 
 const connectionString = process.env.DATABASE_URL
-  ?? 'postgresql://sarimalavi@localhost:5432/productier'
+  ?? 'postgresql://productier:productier@localhost:5432/productier'
 
 const client = postgres(connectionString)
 export const db = drizzle(client, { schema })

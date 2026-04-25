@@ -1,6 +1,53 @@
-# productierv1
+## Productier
 
-This template should help get you started developing with Vue 3 in Vite.
+Vue 3 + Vite frontend with an Elysia (Bun) backend and PostgreSQL (Drizzle ORM).
+
+### Local development (recommended)
+
+Prereqs:
+- Node \(>= 22\)
+- Bun \(>= 1.3\)
+- PostgreSQL \(local install\) **or** Docker Desktop
+
+Start frontend + backend:
+
+```sh
+npm ci
+cd server && bun install
+cd .. && npm run dev:all
+```
+
+URLs:
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:3001` \(health: `http://localhost:3001/api/health`\)
+
+### Database setup
+
+Set `DATABASE_URL` and `JWT_SECRET`:
+- Copy `.env.example` to `.env` (repo root) and edit as needed
+- Optionally copy `server/.env.example` to `server/.env` for server-only runs
+
+Then run:
+
+```sh
+cd server
+bun run db:push
+bun run db:seed
+```
+
+### Run with Docker (frontend + backend + postgres)
+
+Prereq: Docker Desktop.
+
+```sh
+copy .env.example .env
+docker compose up --build
+```
+
+This exposes:
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:3001`
+- Postgres: `localhost:5432` \(user/pass/db: `productier`/`productier`/`productier`\)
 
 ## Recommended IDE Setup
 

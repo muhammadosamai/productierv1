@@ -42,3 +42,8 @@ __screenshots__/
 server/node_modules
 server/.env
 server/drizzle/
+
+# Env (never commit secrets)
+.env
+.env.*
+!.env.example

@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: productier
+      POSTGRES_PASSWORD: productier
+      POSTGRES_DB: productier
+    volumes:
+      - productier_pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  backend:
+    build:
+      context: ./server
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    env_file:
+      - ./.env
+    environment:
+      # Fallback if .env isn't present
+      DATABASE_URL: postgresql://productier:productier@postgres:5432/productier
+      JWT_SECRET: change-me-in-prod
+    ports:
+      - "3001:3001"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      # Vite dev server inside container needs polling on Windows hosts sometimes;
+      # keeping this minimal to avoid breaking local npm runs.
+      NODE_ENV: development
+    ports:
+      - "5173:5173"
+
+volumes:
+  productier_pgdata:
+

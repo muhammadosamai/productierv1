@@ -6,9 +6,9 @@ services:
     container_name: productier-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: sarimalavi
+      POSTGRES_USER: productier
+      POSTGRES_PASSWORD: productier
       POSTGRES_DB: productier
-      POSTGRES_HOST_AUTH_METHOD: trust   # no password, matches your .env
     volumes:
       - productier_pgdata:/var/lib/postgresql/data
 
@@ -19,7 +19,7 @@ services:
     depends_on:
       - postgres
     environment:
-      DATABASE_URL: postgresql://sarimalavi@postgres:5432/productier
+      DATABASE_URL: postgresql://productier:productier@postgres:5432/productier
     ports:
       - "3002:3001"
 
